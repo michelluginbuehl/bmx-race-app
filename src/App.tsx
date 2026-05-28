@@ -58,9 +58,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.7.4";
+const APP_VERSION = "v1.7.5";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Teilnehmer-Erfassung und Bearbeitungs-Scroll verbessert";
+const APP_CHANGE_NOTE = "Bearbeitungsnavigation ohne Scroll-Effekt angepasst";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -544,7 +544,7 @@ export default function App() {
     if (!editingRider || viewMode !== "participants") return;
     window.setTimeout(() => {
       participantFormRef.current?.scrollIntoView({
-        behavior: "smooth",
+        behavior: "auto",
         block: "start",
       });
     }, 60);
@@ -3719,7 +3719,7 @@ export default function App() {
               if (savedRiderId) {
                 window.setTimeout(() => {
                   participantRowRefs.current[savedRiderId]?.scrollIntoView({
-                    behavior: "smooth",
+                    behavior: "auto",
                     block: "center",
                   });
                 }, 120);
