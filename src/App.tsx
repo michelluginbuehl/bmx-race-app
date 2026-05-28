@@ -67,9 +67,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.8.1";
+const APP_VERSION = "v1.8.3";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Startseite, Einzelrennen-Logik und Haupt-Teilnehmerdatenbank vereinfacht";
+const APP_CHANGE_NOTE = "Alte Renndaten geschützt und Teilnehmer-Detailansicht ergänzt";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -82,6 +82,7 @@ export default function App() {
 
   const [allRiders, setAllRiders] = useState<any[]>([]);
   const [masterParticipants, setMasterParticipants] = useState<any[]>([]);
+  const [selectedMasterParticipant, setSelectedMasterParticipant] = useState<any | null>(null);
   const [riders, setRiders] = useState<any[]>([]);
   const [heats, setHeats] = useState<any>({});
   const [results, setResults] = useState<any>({});
@@ -401,6 +402,75 @@ export default function App() {
 
   const getEventDisplayName = (event: ManagedEvent) => `${event.name || (event.type === "single" ? "Einzel Rennen" : "Rennserie")} · ${event.year}`;
 
+  const resetCurrentEventState = () => {
+    setSelectedRace("Race 1");
+    setAllRiders([]);
+    setRiders([]);
+    setHeats({});
+    setResults({});
+    setFinals({});
+    setFinalResults({});
+    setEditingRider(null);
+    setOverallManualOrder({});
+    setGeneratedOverallByCategory({});
+    setFinalManualOrder({});
+    setCruiserMergeTarget("");
+    setRaceClosed(false);
+    setSelectedRiderInfo(null);
+    setRaceNavigationOpen(false);
+    setChangeLog([]);
+    setOverallLocked(false);
+    setOverallCreatedAt("");
+    setBackupHistory([]);
+    setLastSaveAt("");
+    setHomeEventSeries("");
+    setEventSeries("");
+    setEventLocation("");
+    setEventDate("");
+    setLoadedRace(null);
+  };
+
+  const writeInitialEventValue = (eventId: string, key: string, value: any) => {
+    const storageKey = scopedKeyForEvent(eventId, key);
+    localStorage.setItem(
+      storageKey,
+      typeof value === "string" ? value : JSON.stringify(value),
+    );
+  };
+
+  const initializeManagedEventStorage = (event: ManagedEvent) => {
+    const raceCount = event.type === "single" ? 1 : 4;
+    const countingRaces = event.type === "single" ? 1 : 3;
+
+    writeInitialEventValue(event.id, "bmx_selected_race", "Race 1");
+    writeInitialEventValue(event.id, "bmx_home_event_series", event.name.trim());
+    writeInitialEventValue(event.id, "bmx_participant_event_year", String(event.year || new Date().getFullYear()));
+    writeInitialEventValue(event.id, "bmx_series_race_count", raceCount);
+    writeInitialEventValue(event.id, "bmx_overall_counting_races", countingRaces);
+    writeInitialEventValue(event.id, "bmx_series_locked", false);
+    writeInitialEventValue(event.id, "bmx_overall_manual_order", {});
+    writeInitialEventValue(event.id, "bmx_generated_overall", {});
+    writeInitialEventValue(event.id, "bmx_overall_locked", false);
+    writeInitialEventValue(event.id, "bmx_overall_created_at", "");
+    writeInitialEventValue(event.id, "bmx_change_log", []);
+    writeInitialEventValue(event.id, "bmx_backup_history", []);
+    writeInitialEventValue(event.id, "bmx_last_save_at", "");
+
+    RACES.forEach((race) => {
+      const racePrefix = `bmx_${race.toLowerCase().replace(/\s+/g, "_")}`;
+      writeInitialEventValue(event.id, `${racePrefix}_event_series`, "");
+      writeInitialEventValue(event.id, `${racePrefix}_event_location`, "");
+      writeInitialEventValue(event.id, `${racePrefix}_event_date`, "");
+      writeInitialEventValue(event.id, `${racePrefix}_heats`, {});
+      writeInitialEventValue(event.id, `${racePrefix}_results`, {});
+      writeInitialEventValue(event.id, `${racePrefix}_finals`, {});
+      writeInitialEventValue(event.id, `${racePrefix}_final_results`, {});
+      writeInitialEventValue(event.id, `${racePrefix}_final_manual_order`, {});
+      writeInitialEventValue(event.id, `${racePrefix}_cruiser_merge_target`, "");
+      writeInitialEventValue(event.id, `${racePrefix}_race_closed`, false);
+    });
+  };
+
   const createManagedEvent = (type?: "series" | "single") => {
     let selectedType = type;
     if (!selectedType) {
@@ -417,11 +487,9 @@ export default function App() {
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
     const nextEvent: ManagedEvent = { id, type: selectedType, name: name.trim(), year, createdAt, updatedAt: createdAt };
+    initializeManagedEventStorage(nextEvent);
     const nextEvents = [...managedEvents, nextEvent];
     saveManagedEvents(nextEvents);
-    localStorage.setItem(scopedKeyForEvent(id, "bmx_home_event_series"), JSON.stringify(name.trim()));
-    localStorage.setItem(scopedKeyForEvent(id, "bmx_series_race_count"), JSON.stringify(selectedType === "single" ? 1 : 4));
-    localStorage.setItem(scopedKeyForEvent(id, "bmx_overall_counting_races"), JSON.stringify(selectedType === "single" ? 1 : 3));
     openManagedEvent(nextEvent);
   };
 
@@ -437,10 +505,11 @@ export default function App() {
   };
 
   const openManagedEvent = (event: ManagedEvent) => {
+    setInitialLoaded(false);
+    resetCurrentEventState();
     setCurrentEventId(event.id);
     setAppShellView("manager");
     setViewMode("dashboard");
-    setInitialLoaded(false);
   };
 
   const getEventGroupedByYear = () => {
@@ -492,6 +561,8 @@ export default function App() {
       const event = eventMap.get(rider.eventId || "legacy");
       group.events.push({
         eventId: rider.eventId || "legacy",
+        riderId: rider.id,
+        raw: rider,
         name: event?.name || (rider.eventId === "legacy" || !rider.eventId ? "Bestehende Rennserie" : "Unbekanntes Rennen"),
         year: event?.year || "",
         type: event?.type || "series",
@@ -499,6 +570,94 @@ export default function App() {
       });
     });
     return Array.from(groups.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  };
+
+
+  const readScopedEventValue = <T,>(eventId: string, key: string, fallback: T): T => {
+    try {
+      const storageKey = scopedKeyForEvent(eventId || "legacy", key);
+      const value = localStorage.getItem(storageKey);
+      if (value === null) return fallback;
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const getManagedEventRaceCount = (eventId: string, type?: string) => {
+    if (type === "single") return 1;
+    const stored = readScopedEventValue<number>(eventId || "legacy", "bmx_series_race_count", 4);
+    return Math.max(1, Math.min(10, Number(stored) || 4));
+  };
+
+  const getStoredRaceDataForEvent = (eventId: string, race: RaceName, key: string, fallback: any) => {
+    return readScopedEventValue<any>(
+      eventId || "legacy",
+      `bmx_${race.toLowerCase().replace(/\s+/g, "_")}_${key}`,
+      fallback,
+    );
+  };
+
+  const findRaceResultForParticipant = (entry: any, race: RaceName) => {
+    const stored = getStoredRaceDataForEvent(entry.eventId || "legacy", race, "final_results", {});
+    const rows: any[] = [];
+    Object.keys(stored || {}).forEach((category) => {
+      const categoryRows = Array.isArray(stored[category]) ? stored[category] : [];
+      categoryRows.forEach((row: any, index: number) => rows.push({ ...row, category, fallbackRank: index + 1 }));
+    });
+
+    const riderId = String(entry.riderId || entry.raw?.id || "");
+    const name = String(entry.raw?.name || "").trim().toLowerCase();
+    const birthYear = String(entry.raw?.birthYear || entry.raw?.jahrgang || "");
+    const gender = String(entry.raw?.gender || entry.raw?.geschlecht || "");
+
+    return rows.find((row) => {
+      const rowId = String(row.id ?? row.riderId ?? "");
+      if (riderId && rowId && rowId === riderId) return true;
+      const rowName = String(row.name || "").trim().toLowerCase();
+      const rowBirthYear = String(row.birthYear || row.jahrgang || "");
+      const rowGender = String(row.gender || row.geschlecht || "");
+      return !!name && rowName === name && (!birthYear || rowBirthYear === birthYear) && (!gender || rowGender === gender);
+    });
+  };
+
+  const findOverallResultForParticipant = (entry: any) => {
+    const stored = readScopedEventValue<Record<string, any[]>>(entry.eventId || "legacy", "bmx_generated_overall", {});
+    const riderId = String(entry.riderId || entry.raw?.id || "");
+    const name = String(entry.raw?.name || "").trim().toLowerCase();
+
+    for (const category of Object.keys(stored || {})) {
+      const rows = Array.isArray(stored[category]) ? stored[category] : [];
+      const foundIndex = rows.findIndex((row: any) => {
+        const rowId = String(row.id ?? row.riderId ?? "");
+        if (riderId && rowId && rowId === riderId) return true;
+        return !!name && String(row.name || "").trim().toLowerCase() === name;
+      });
+      if (foundIndex >= 0) {
+        const row = rows[foundIndex];
+        return { category, rank: foundIndex + 1, total: row.total, raceCount: row.raceCount };
+      }
+    }
+    return null;
+  };
+
+  const getMasterParticipantEventDetails = (participant: any) => {
+    return (participant?.events || []).map((entry: any) => {
+      const raceCount = getManagedEventRaceCount(entry.eventId || "legacy", entry.type);
+      const races = RACES.slice(0, raceCount).map((race) => {
+        const flag = raceKeyMap[race];
+        const assigned = !!entry.raw?.[flag];
+        const result = findRaceResultForParticipant(entry, race);
+        return {
+          race,
+          assigned,
+          rank: result ? (result.rank || result.position || result.place || result.fallbackRank) : null,
+          status: result ? (result.status || "OK") : "",
+          category: result ? (result.originalCategory || result.category || entry.raw?.category || "") : (entry.raw?.category || ""),
+        };
+      });
+      return { ...entry, raceCount, races, overall: findOverallResultForParticipant(entry) };
+    });
   };
 
 
@@ -766,9 +925,16 @@ export default function App() {
       const savedSeriesRaceCount = await loadAppData<number>("bmx_series_race_count", 4);
       const savedOverallCountingRaces = await loadAppData<number>("bmx_overall_counting_races", 3);
       const savedGlobalEventLogo = await loadAppData<string>("bmx_event_logo", "");
-      setHomeEventSeries(savedHomeEventSeries || "");
-      setSeriesRaceCount(Math.max(1, Math.min(10, Number(savedSeriesRaceCount) || 4)));
-      setOverallCountingRaces(Math.max(1, Math.min(10, Number(savedOverallCountingRaces) || 3)));
+      const eventForLoad = managedEvents.find((event) => event.id === currentEventId) || null;
+      const normalizedRaceCount = eventForLoad?.type === "single"
+        ? 1
+        : Math.max(1, Math.min(10, Number(savedSeriesRaceCount) || 4));
+      const normalizedCountingRaces = eventForLoad?.type === "single"
+        ? 1
+        : Math.max(1, Math.min(normalizedRaceCount, Number(savedOverallCountingRaces) || 3));
+      setHomeEventSeries(savedHomeEventSeries || eventForLoad?.name || "");
+      setSeriesRaceCount(normalizedRaceCount);
+      setOverallCountingRaces(normalizedCountingRaces);
       setEventLogo(savedGlobalEventLogo || "");
       setBackupHistory(Array.isArray(savedBackupHistory) ? savedBackupHistory : []);
       setLastSaveAt(savedLastSaveAt || "");
@@ -784,7 +950,7 @@ export default function App() {
     };
 
     loadInitialData();
-  }, [appShellView, currentEventId]);
+  }, [appShellView, currentEventId, managedEvents]);
 
   useEffect(() => {
     if (!initialLoaded) return;
@@ -1295,15 +1461,44 @@ export default function App() {
     setSelectedRiderInfo(findRiderStartInfo(rider));
 
   const ensureRaceInformationComplete = () => {
+    let nextSeries = homeEventSeries.trim();
+    let nextLocation = eventLocation.trim();
+    let nextDate = eventDate.trim();
+
     const missing = [
-      !homeEventSeries.trim() ? "Rennserie" : "",
-      !eventLocation.trim() ? "Rennort" : "",
-      !eventDate.trim() ? "Datum" : "",
+      !nextSeries ? "Rennserie" : "",
+      !nextLocation ? "Rennort" : "",
+      !nextDate ? "Datum" : "",
     ].filter(Boolean);
     if (!missing.length) return true;
 
-    window.alert(`Für ${selectedRace} fehlen noch folgende Renninformationen: ${missing.join(", ")}. Bitte im Feld Renninformationen ergänzen.`);
-    return false;
+    window.alert(`Für ${selectedRace} fehlen noch folgende Renninformationen: ${missing.join(", ")}. Diese Daten werden jetzt abgefragt.`);
+
+    if (!nextSeries) {
+      nextSeries = window.prompt("Rennserie / Rennname eingeben", getCurrentEvent()?.name || "")?.trim() || "";
+      if (nextSeries) setHomeEventSeries(nextSeries);
+    }
+    if (!nextLocation) {
+      nextLocation = window.prompt("Rennort eingeben", eventLocation || "")?.trim() || "";
+      if (nextLocation) setEventLocation(nextLocation);
+    }
+    if (!nextDate) {
+      nextDate = window.prompt("Datum eingeben (YYYY-MM-DD)", eventDate || new Date().toISOString().slice(0, 10))?.trim() || "";
+      if (nextDate) setEventDate(nextDate);
+    }
+
+    const stillMissing = [
+      !nextSeries ? "Rennserie" : "",
+      !nextLocation ? "Rennort" : "",
+      !nextDate ? "Datum" : "",
+    ].filter(Boolean);
+
+    if (stillMissing.length > 0) {
+      window.alert(`Vorläufe können noch nicht erstellt werden. Es fehlt: ${stillMissing.join(", ")}.`);
+      return false;
+    }
+
+    return true;
   };
 
   const createHeats = () => {
@@ -3530,7 +3725,12 @@ export default function App() {
                 </thead>
                 <tbody>
                   {groups.map((participant: any, index: number) => (
-                    <tr key={`${participant.name}-${participant.birthYear}-${participant.gender}-${index}`} style={{ borderBottom: "1px solid #e5ebf1" }}>
+                    <tr
+                      key={`${participant.name}-${participant.birthYear}-${participant.gender}-${index}`}
+                      onClick={() => setSelectedMasterParticipant(participant)}
+                      title="Teilnehmerdetails anzeigen"
+                      style={{ borderBottom: "1px solid #e5ebf1", cursor: "pointer" }}
+                    >
                       <td style={tableCellStyle}><strong>{participant.name}</strong>{participant.cruiser ? " · Cruiser" : ""}</td>
                       <td style={tableCellStyle}>#{participant.plate || "-"}</td>
                       <td style={tableCellStyle}>{participant.birthYear || "-"} | {participant.gender || "-"}</td>
@@ -3542,12 +3742,91 @@ export default function App() {
                               <strong>{entry.name}</strong>{entry.year ? ` · ${entry.year}` : ""} · {entry.type === "single" ? "Einzelrennen" : "Rennserie"} · {entry.races}
                             </div>
                           ))}
+                          <span style={{ color: colors.blueBtn, fontWeight: 800, fontSize: 12 }}>Details/Rangierungen anzeigen</span>
                         </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {selectedMasterParticipant && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(15, 23, 42, 0.48)",
+                zIndex: 1000,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 20,
+              }}
+              onClick={() => setSelectedMasterParticipant(null)}
+            >
+              <div
+                style={{
+                  ...basePanelStyle,
+                  width: "min(980px, 96vw)",
+                  maxHeight: "88vh",
+                  overflowY: "auto",
+                  boxShadow: "0 24px 80px rgba(15, 23, 42, 0.28)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
+                  <div>
+                    <h2 style={{ margin: 0, color: colors.title }}>{selectedMasterParticipant.name}</h2>
+                    <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4 }}>
+                      #{selectedMasterParticipant.plate || "-"} · {selectedMasterParticipant.birthYear || "-"} | {selectedMasterParticipant.gender || "-"} · {selectedMasterParticipant.club || "-"}
+                      {selectedMasterParticipant.cruiser ? " · Cruiser" : ""}
+                    </div>
+                  </div>
+                  <button onClick={() => setSelectedMasterParticipant(null)} style={smallGhostButtonStyle}>Schliessen</button>
+                </div>
+
+                <div style={{ display: "grid", gap: 14 }}>
+                  {getMasterParticipantEventDetails(selectedMasterParticipant).map((entry: any, entryIndex: number) => (
+                    <div key={`${entry.eventId}-${entryIndex}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: "#fbfdff" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10 }}>
+                        <div>
+                          <strong style={{ color: colors.title, fontSize: 16 }}>{entry.name}</strong>
+                          <span style={{ color: colors.muted }}> · {entry.year || "-"} · {entry.type === "single" ? "Einzelrennen" : "Rennserie"}</span>
+                        </div>
+                        {entry.overall ? (
+                          <span style={getStatusBadgeStyle("Resultate erfasst")}>Gesamtwertung: Rang {entry.overall.rank} · {entry.overall.total} Punkte</span>
+                        ) : entry.type === "series" ? (
+                          <span style={getStatusBadgeStyle("Offen")}>Keine Gesamtwertung</span>
+                        ) : null}
+                      </div>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ background: "#eef3f8" }}>
+                            <th style={tableHeaderStyle}>Race</th>
+                            <th style={tableHeaderStyle}>Anmeldung</th>
+                            <th style={tableHeaderStyle}>Kategorie</th>
+                            <th style={tableHeaderStyle}>Rangierung</th>
+                            <th style={tableHeaderStyle}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {entry.races.map((raceEntry: any) => (
+                            <tr key={`${entry.eventId}-${raceEntry.race}`} style={{ borderBottom: "1px solid #e5ebf1" }}>
+                              <td style={tableCellStyle}><strong>{raceEntry.race}</strong></td>
+                              <td style={tableCellStyle}>{raceEntry.assigned ? "angemeldet" : "-"}</td>
+                              <td style={tableCellStyle}>{raceEntry.category || "-"}</td>
+                              <td style={tableCellStyle}>{raceEntry.rank ? `Rang ${raceEntry.rank}` : "noch kein Resultat"}</td>
+                              <td style={tableCellStyle}>{raceEntry.status || "-"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
           {versionFooter}
@@ -3654,25 +3933,35 @@ export default function App() {
 
         <div style={{ ...basePanelStyle, marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
-            <h2 style={{ margin: 0, color: colors.title }}>Serien-Einstellungen</h2>
+            <h2 style={{ margin: 0, color: colors.title }}>{isSingleEvent ? "Rennen-Einstellungen" : "Serien-Einstellungen"}</h2>
             <span style={getStatusBadgeStyle(seriesLocked ? "Abgeschlossen" : "Offen")}>
-              {seriesLocked ? "Serie abgeschlossen" : "Serie offen"}
+              {isSingleEvent ? (seriesLocked ? "Rennen abgeschlossen" : "Rennen offen") : (seriesLocked ? "Serie abgeschlossen" : "Serie offen")}
             </span>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(160px, 1fr))", gap: 12, alignItems: "end" }}>
-            <div>
-              <label style={labelStyle}>Anzahl Rennen in Serie</label>
-              <input
-                type="number"
-                min={getMinimumSeriesRaceCount()}
-                max={10}
-                disabled={seriesLocked}
-                value={seriesRaceCount}
-                onChange={(e) => updateSeriesRaceCount(Number(e.target.value))}
-                style={{ ...inputStyle, height: 42, opacity: seriesLocked ? 0.6 : 1 }}
-              />
+          {isSingleEvent ? (
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ ...basePanelStyle, padding: "10px 12px", marginBottom: 0, background: "#f8fafc", minWidth: 220 }}>
+                <div style={{ color: colors.muted, fontSize: 12, fontWeight: 900 }}>Rennformat</div>
+                <div style={{ color: colors.title, fontSize: 16, fontWeight: 900 }}>Einzelrennen · 1 Race</div>
+              </div>
+              <button onClick={toggleSeriesLocked} style={seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle}>
+                {seriesLocked ? "Rennen öffnen" : "Rennen abschliessen"}
+              </button>
             </div>
-            {!isSingleEvent && (
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(160px, 1fr))", gap: 12, alignItems: "end" }}>
+              <div>
+                <label style={labelStyle}>Anzahl Rennen in Serie</label>
+                <input
+                  type="number"
+                  min={getMinimumSeriesRaceCount()}
+                  max={10}
+                  disabled={seriesLocked}
+                  value={seriesRaceCount}
+                  onChange={(e) => updateSeriesRaceCount(Number(e.target.value))}
+                  style={{ ...inputStyle, height: 42, opacity: seriesLocked ? 0.6 : 1 }}
+                />
+              </div>
               <div>
                 <label style={labelStyle}>Anzahl Rennen für Gesamtwertung</label>
                 <input
@@ -3685,13 +3974,13 @@ export default function App() {
                   style={{ ...inputStyle, height: 42, opacity: seriesLocked ? 0.6 : 1 }}
                 />
               </div>
-            )}
-            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-              <button onClick={toggleSeriesLocked} style={seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle}>
-                {seriesLocked ? "Serie öffnen" : "Serie abschliessen"}
-              </button>
+              <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                <button onClick={toggleSeriesLocked} style={seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle}>
+                  {seriesLocked ? "Serie öffnen" : "Serie abschliessen"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
           <div style={{ marginTop: 10, fontSize: 13, color: colors.muted, fontWeight: 800, lineHeight: 1.35 }}>
             {isSingleEvent ? "Einzelrennen · ein Race · keine Gesamtwertung" : `${getSeriesRulesText()} · Für die Gesamtwertung zählen nur abgeschlossene Rennen.`}
             {!isSingleEvent && <><br />Streichresultate erscheinen in Klammern / durchgestrichen und entscheiden bei Punktegleichheit.</>}
