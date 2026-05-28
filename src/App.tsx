@@ -67,9 +67,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.8.4";
+const APP_VERSION = "v1.8.5";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Haupt-Teilnehmerdatenbank und sauberes Hinzufügen zu Rennen ergänzt";
+const APP_CHANGE_NOTE = "Globales Backup, Startseiten-Import/Export und Race-Navigation verbessert";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -2203,14 +2203,28 @@ export default function App() {
         marginBottom: 18,
       }}
     >
-      <div>
+      <button
+        type="button"
+        onClick={() => {
+          setAppShellView("events");
+          setViewMode("dashboard");
+        }}
+        title="Zur Startseite"
+        style={{
+          border: "none",
+          background: "transparent",
+          padding: 0,
+          textAlign: "left",
+          cursor: "pointer",
+        }}
+      >
         <h1 style={{ color: colors.title, margin: 0, letterSpacing: "-0.02em" }}>
           🏁 {APP_NAME}
         </h1>
         <div style={{ color: colors.muted, fontWeight: 800, marginTop: 4 }}>
           {APP_VERSION}
         </div>
-      </div>
+      </button>
     </div>
   );
 
@@ -3410,18 +3424,18 @@ export default function App() {
 
   const exportBackup = async (reason = "Manuelles Backup") => {
     try {
-      const ridersBackup = (await db.table("riders").toArray()).filter(belongsToCurrentEvent);
-      const allAppDataBackup = await db.table("appData").toArray();
-      const appDataBackup = currentEventId && currentEventId !== "legacy"
-        ? allAppDataBackup.filter((row: any) => String(row.key || "").startsWith(`bmx_event_${currentEventId}_`))
-        : allAppDataBackup.filter((row: any) => !String(row.key || "").startsWith("bmx_event_"));
+      const ridersBackup = await db.table("riders").toArray();
+      const appDataBackup = await db.table("appData").toArray();
+      const eventsBackup = getRawManagedEvents();
 
       const backup = {
         app: APP_NAME,
-        version: 2,
+        version: 3,
+        scope: "full-file",
         exportedAt: new Date().toISOString(),
         reason,
         lastSaveAt,
+        managedEvents: eventsBackup,
         riders: ridersBackup,
         appData: appDataBackup,
       };
@@ -3439,7 +3453,7 @@ export default function App() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      const backupEntry = { fileName, iso: new Date().toISOString(), riderCount: ridersBackup.length, reason };
+      const backupEntry = { fileName, iso: new Date().toISOString(), riderCount: ridersBackup.length, eventCount: eventsBackup.length, reason };
       const nextBackupHistory = [backupEntry, ...backupHistory].slice(0, 12);
       setBackupHistory(nextBackupHistory);
       await saveBoth("bmx_backup_history", nextBackupHistory);
@@ -3451,6 +3465,11 @@ export default function App() {
         `Backup-Export fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`,
       );
     }
+  };
+
+  const saveAndExportFullBackup = async () => {
+    await saveCurrentState();
+    await exportBackup("Speichern / komplettes Datei-Backup");
   };
 
   const importBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -3493,7 +3512,7 @@ export default function App() {
         ? new Date(backup.exportedAt).toLocaleString("de-CH")
         : "unbekannt";
       const ok = window.confirm(
-        `Backup importieren?\n\nDatei: ${file.name}\nErstellt: ${exportedAt}\nTeilnehmer: ${backup.riders.length}\nGespeicherte App-Daten: ${backup.appData.length}\n\nAchtung: Die aktuellen lokalen Daten auf diesem iPad werden überschrieben.`,
+        `Komplettes Backup importieren?\n\nDatei: ${file.name}\nErstellt: ${exportedAt}\nRennen/Rennserien: ${(backup.managedEvents || []).length}\nTeilnehmer: ${backup.riders.length}\nGespeicherte App-Daten: ${backup.appData.length}\n\nAchtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig überschrieben.`,
       );
 
       if (!ok) {
@@ -3501,39 +3520,26 @@ export default function App() {
         return;
       }
 
-      await exportBackup("Sicherheitsbackup vor Backup-Import");
+      await exportBackup("Sicherheitsbackup vor komplettem Backup-Import");
 
       await db.transaction(
         "rw",
         db.table("riders"),
         db.table("appData"),
         async () => {
-          const existingRiders = await db.table("riders").toArray();
-          const currentIds = existingRiders.filter(belongsToCurrentEvent).map((r: any) => r.id);
-          if (currentIds.length > 0) await db.table("riders").bulkDelete(currentIds);
-          const existingAppData = await db.table("appData").toArray();
-          const appDataIds = existingAppData
-            .filter((row: any) => currentEventId && currentEventId !== "legacy"
-              ? String(row.key || "").startsWith(`bmx_event_${currentEventId}_`)
-              : !String(row.key || "").startsWith("bmx_event_"))
-            .map((row: any) => row.key);
-          if (appDataIds.length > 0) await db.table("appData").bulkDelete(appDataIds);
-          if (backup.riders.length > 0)
-            await db.table("riders").bulkPut(backup.riders.map((r: any) => ({ ...r, eventId: currentEventId || "legacy" })));
-          if (backup.appData.length > 0)
-            await db.table("appData").bulkPut(backup.appData);
+          await db.table("riders").clear();
+          await db.table("appData").clear();
+          if (backup.riders.length > 0) await db.table("riders").bulkPut(backup.riders);
+          if (backup.appData.length > 0) await db.table("appData").bulkPut(backup.appData);
         },
       );
 
-      if (currentEventId && currentEventId !== "legacy") {
-        Object.keys(localStorage).forEach((key) => {
-          if (key.startsWith(`bmx_event_${currentEventId}_`)) localStorage.removeItem(key);
-        });
-      } else {
-        Object.keys(localStorage).forEach((key) => {
-          if (!key.startsWith("bmx_event_") && key !== EVENT_LIST_KEY) localStorage.removeItem(key);
-        });
-      }
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith("bmx_")) localStorage.removeItem(key);
+      });
+
+      const eventsToRestore = Array.isArray(backup.managedEvents) ? backup.managedEvents : getRawManagedEvents();
+      localStorage.setItem(EVENT_LIST_KEY, JSON.stringify(eventsToRestore));
       for (const row of backup.appData) {
         localStorage.setItem(
           row.key,
@@ -3715,6 +3721,35 @@ export default function App() {
             <button onClick={() => setAppShellView("masterParticipants")} style={secondaryButtonStyle}>Teilnehmer</button>
             <button onClick={() => setAppShellView("history")} style={{ ...smallGhostButtonStyle, marginLeft: "auto" }}>History / Speicher & Import</button>
           </div>
+        </div>
+
+        <div style={{ ...basePanelStyle, marginBottom: 16 }}>
+          <h2 style={{ marginTop: 0, color: colors.title }}>Import / Export</h2>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+            <button onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>
+              Speichern
+            </button>
+            <button onClick={() => exportBackup("Manuelles komplettes Backup")} style={compactPrimaryButtonStyle}>
+              Backup erstellen
+            </button>
+            <label style={{ ...compactHomeButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              Backup importieren
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={importBackup}
+                style={{ display: "none" }}
+              />
+            </label>
+          </div>
+          <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+            Speichern und Backup umfassen immer die komplette Datei mit allen Rennen, Rennserien, Teilnehmern, Resultaten und Einstellungen.
+          </div>
+          {backupMessage && (
+            <div style={{ marginTop: 10, color: colors.muted }}>
+              {backupMessage}
+            </div>
+          )}
         </div>
         <div style={{ ...basePanelStyle }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Erstellte Rennen / Rennserien</h2>
@@ -4149,47 +4184,6 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ ...basePanelStyle, marginBottom: 14 }}>
-          <h2 style={{ marginTop: 0, color: colors.title }}>Import / Export</h2>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <button onClick={downloadExcelTemplate} style={compactHomeButtonStyle}>
-              Excel-Vorlage herunterladen
-            </button>
-            <button onClick={saveCurrentState} style={compactSaveButtonStyle}>
-              Speichern
-            </button>
-            <button onClick={() => exportBackup("Manuelles Backup")} style={compactPrimaryButtonStyle}>
-              Backup erstellen
-            </button>
-            <label style={{ ...compactHomeButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Backup importieren
-              <input
-                type="file"
-                accept="application/json,.json"
-                onChange={importBackup}
-                style={{ display: "none" }}
-              />
-            </label>
-          </div>
-          {backupMessage && (
-            <div style={{ marginTop: 10, color: colors.muted }}>
-              {backupMessage}
-            </div>
-          )}
-          {backupHistory.length > 0 && (
-            <div style={{ marginTop: 14, borderTop: "1px solid #eef2f6", paddingTop: 12 }}>
-              <strong>Backup-Historie</strong>
-              <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
-                {backupHistory.slice(0, 5).map((entry: any, index: number) => (
-                  <div key={`${entry.fileName}-${index}`} style={{ color: colors.muted }}>
-                    {formatDateTime(entry.iso)} · {entry.fileName}{entry.reason ? ` · ${entry.reason}` : ""} · {entry.riderCount ?? "?"} Teilnehmer
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
         {warningsPanel}
 
         <div style={{ ...basePanelStyle }}>
@@ -4477,65 +4471,66 @@ export default function App() {
 
         {warningsPanel}
 
+        <div style={{ ...basePanelStyle, marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <label style={{ ...labelStyle, margin: 0, minWidth: 180 }}>Rennjahr für Kategorien</label>
+            <input
+              type="number"
+              min="2000"
+              max="2100"
+              value={participantEventYear}
+              onChange={(e) => setParticipantEventYear(e.target.value)}
+              style={{ ...inputStyle, width: 160 }}
+            />
+          </div>
+        </div>
+
         <div ref={participantFormRef} style={{ ...basePanelStyle, marginBottom: 20 }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Teilnehmer hinzufügen</h2>
           <p style={{ color: colors.muted, marginTop: -4 }}>
             Teilnehmer werden aus der Haupt-Teilnehmerdatenbank in dieses Rennen / diese Rennserie übernommen. Die Race-Häkchen setzt du danach unten in der Liste.
           </p>
-          <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14, alignItems: "start" }}>
-            <div>
-              <label style={labelStyle}>Rennjahr für Kategorien</label>
-              <input
-                type="number"
-                min="2000"
-                max="2100"
-                value={participantEventYear}
-                onChange={(e) => setParticipantEventYear(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Teilnehmer hinzufügen</label>
-              <input
-                value={eventParticipantSearch}
-                onChange={(e) => setEventParticipantSearch(e.target.value)}
-                placeholder="Name, Startnummer oder Verein eingeben ..."
-                style={inputStyle}
-              />
-              <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflow: "hidden", background: "#fff" }}>
-                {getMasterParticipantSuggestions().length === 0 ? (
-                  <div style={{ padding: 10, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden.</div>
-                ) : (
-                  getMasterParticipantSuggestions().map((participant: any) => (
-                    <button
-                      key={participant.key}
-                      type="button"
-                      onClick={() => addMasterParticipantToCurrentEvent(participant)}
-                      style={{
-                        width: "100%",
-                        display: "grid",
-                        gridTemplateColumns: "90px 1fr 130px 1fr auto",
-                        gap: 10,
-                        alignItems: "center",
-                        padding: "9px 10px",
-                        border: "none",
-                        borderBottom: `1px solid ${colors.cardBorder}`,
-                        background: "#fff",
-                        color: colors.text,
-                        cursor: "pointer",
-                        textAlign: "left",
-                        fontSize: 13,
-                      }}
-                    >
-                      <strong>#{participant.plate || "-"}</strong>
-                      <span style={{ fontWeight: 800 }}>{participant.name}</span>
-                      <span>{participant.birthYear || "-"} | {participant.gender || "-"}</span>
-                      <span style={{ color: colors.muted }}>{participant.club || "-"}</span>
-                      <span style={{ color: colors.blueBtn, fontWeight: 900 }}>hinzufügen</span>
-                    </button>
-                  ))
-                )}
-              </div>
+          <div>
+            <label style={labelStyle}>Teilnehmer hinzufügen</label>
+            <input
+              value={eventParticipantSearch}
+              onChange={(e) => setEventParticipantSearch(e.target.value)}
+              placeholder="Name, Startnummer oder Verein eingeben ..."
+              style={inputStyle}
+            />
+            <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflowY: "auto", overflowX: "hidden", background: "#fff", maxHeight: 260 }}>
+              {getMasterParticipantSuggestions().length === 0 ? (
+                <div style={{ padding: 10, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden.</div>
+              ) : (
+                getMasterParticipantSuggestions().map((participant: any) => (
+                  <button
+                    key={participant.key}
+                    type="button"
+                    onClick={() => addMasterParticipantToCurrentEvent(participant)}
+                    style={{
+                      width: "100%",
+                      display: "grid",
+                      gridTemplateColumns: "90px 1fr 130px 1fr auto",
+                      gap: 10,
+                      alignItems: "center",
+                      padding: "9px 10px",
+                      border: "none",
+                      borderBottom: `1px solid ${colors.cardBorder}`,
+                      background: "#fff",
+                      color: colors.text,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 13,
+                    }}
+                  >
+                    <strong>#{participant.plate || "-"}</strong>
+                    <span style={{ fontWeight: 800 }}>{participant.name}</span>
+                    <span>{participant.birthYear || "-"} | {participant.gender || "-"}</span>
+                    <span style={{ color: colors.muted }}>{participant.club || "-"}</span>
+                    <span style={{ color: colors.blueBtn, fontWeight: 900 }}>hinzufügen</span>
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -4862,7 +4857,7 @@ export default function App() {
             <button onClick={exportFinalsPdf} style={compactPrimaryButtonStyle}>
               Resultate PDF
             </button>
-            <button onClick={saveCurrentState} style={compactSaveButtonStyle}>
+            <button onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>
               Speichern
             </button>
             <button
