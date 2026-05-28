@@ -67,9 +67,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.8.3";
+const APP_VERSION = "v1.8.4";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Alte Renndaten geschützt und Teilnehmer-Detailansicht ergänzt";
+const APP_CHANGE_NOTE = "Haupt-Teilnehmerdatenbank und sauberes Hinzufügen zu Rennen ergänzt";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -109,6 +109,7 @@ export default function App() {
   const [selectedRiderInfo, setSelectedRiderInfo] = useState<any | null>(null);
   const [raceNavigationOpen, setRaceNavigationOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [eventParticipantSearch, setEventParticipantSearch] = useState("");
   const [participantQuickFilter, setParticipantQuickFilter] = useState<
     "all" | "missing" | "duplicates" | "cruiser"
   >("all");
@@ -541,13 +542,12 @@ export default function App() {
     const eventMap = new Map<string, ManagedEvent>(managedEvents.map((event) => [event.id, event]));
     const groups = new Map<string, any>();
     masterParticipants.forEach((rider: any) => {
-      const key = [
-        String(rider.name || "").trim().toLowerCase().replace(/\s+/g, " "),
-        rider.birthYear || rider.jahrgang || "",
-        rider.gender || rider.geschlecht || "",
-      ].join("|||");
+      const key = getMasterParticipantKey(rider);
       if (!groups.has(key)) {
         groups.set(key, {
+          key,
+          raw: rider,
+          masterId: rider.eventId === "master" ? rider.id : rider.masterId || rider.id,
           name: rider.name || "",
           plate: rider.plate || "",
           birthYear: rider.birthYear || rider.jahrgang || "",
@@ -558,6 +558,17 @@ export default function App() {
         });
       }
       const group = groups.get(key);
+      if (rider.eventId === "master") {
+        group.raw = rider;
+        group.masterId = rider.id;
+        group.name = rider.name || group.name;
+        group.plate = rider.plate || group.plate;
+        group.birthYear = rider.birthYear || rider.jahrgang || group.birthYear;
+        group.gender = rider.gender || rider.geschlecht || group.gender;
+        group.club = rider.club || group.club;
+        group.cruiser = !!(rider.cruiser || rider.isCruiser);
+        return;
+      }
       const event = eventMap.get(rider.eventId || "legacy");
       group.events.push({
         eventId: rider.eventId || "legacy",
@@ -570,6 +581,68 @@ export default function App() {
       });
     });
     return Array.from(groups.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  };
+
+  const getMasterParticipantKey = (rider: any) => [
+    String(rider.name || "").trim().toLowerCase().replace(/\s+/g, " "),
+    rider.birthYear || rider.jahrgang || "",
+    rider.gender || rider.geschlecht || "",
+  ].join("|||");
+
+  const getMasterParticipantSearchText = (participant: any) => [
+    participant.name,
+    participant.plate,
+    participant.club,
+    participant.birthYear,
+    participant.gender,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  const getMasterParticipantSuggestions = () => {
+    const query = eventParticipantSearch.trim().toLowerCase();
+    const groups = getMasterParticipantGroups();
+    if (!query) return groups.slice(0, 20);
+    const parts = query.split(/\s+/).filter(Boolean);
+    return groups
+      .filter((participant: any) => {
+        const text = getMasterParticipantSearchText(participant);
+        return parts.every((part) => text.includes(part)) || text.includes(query);
+      })
+      .slice(0, 20);
+  };
+
+  const addMasterParticipantToCurrentEvent = async (participant: any) => {
+    if (!currentEventId) {
+      window.alert("Bitte zuerst ein Rennen oder eine Rennserie öffnen.");
+      return;
+    }
+    const current = (await db.table("riders").toArray()).map(normalizeRider).filter(belongsToCurrentEvent);
+    const key = getMasterParticipantKey(participant.raw || participant);
+    const alreadyExists = current.some((rider: any) => getMasterParticipantKey(rider) === key);
+    if (alreadyExists) {
+      window.alert("Dieser Teilnehmer ist in diesem Rennen / dieser Rennserie bereits vorhanden.");
+      return;
+    }
+    const source = participant.raw || participant;
+    const newId = crypto.randomUUID();
+    await db.table("riders").add({
+      id: newId,
+      masterId: participant.masterId || source.masterId || source.id || "",
+      name: source.name || participant.name || "",
+      plate: source.plate || participant.plate || "",
+      birthYear: Number(source.birthYear || source.jahrgang || participant.birthYear) || undefined,
+      jahrgang: Number(source.birthYear || source.jahrgang || participant.birthYear) || undefined,
+      gender: source.gender || source.geschlecht || participant.gender || "",
+      geschlecht: source.gender || source.geschlecht || participant.gender || "",
+      club: source.club || participant.club || "",
+      cruiser: !!(source.cruiser || source.isCruiser || participant.cruiser),
+      isCruiser: !!(source.cruiser || source.isCruiser || participant.cruiser),
+      eventId: currentEventId || "legacy",
+      ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false])),
+    });
+    setEventParticipantSearch("");
+    await loadAllRiders();
+    await loadRaceRiders();
+    addChangeLog(`Teilnehmer aus Hauptdatenbank hinzugefügt: ${source.name || participant.name}`);
   };
 
 
@@ -1017,6 +1090,12 @@ export default function App() {
       loadMasterParticipants();
     }
   }, [appShellView, managedEvents]);
+
+  useEffect(() => {
+    if (appShellView === "manager" && viewMode === "participants") {
+      loadMasterParticipants();
+    }
+  }, [appShellView, viewMode, currentEventId]);
 
 
   useEffect(() => {
@@ -3707,8 +3786,18 @@ export default function App() {
         <div style={{ ...basePanelStyle }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Teilnehmer-Hauptdatenbank</h2>
           <p style={{ color: colors.muted, marginTop: -4 }}>
-            Hier werden alle Teilnehmer angezeigt, die in einer Rennserie oder einem Rennen erfasst oder importiert wurden.
+            Teilnehmer werden zentral hier erfasst oder importiert. In einem Rennen / einer Rennserie werden sie danach aus dieser Liste hinzugefügt.
           </p>
+          <div style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
+            <RiderForm
+              onChange={async () => {
+                await loadMasterParticipants();
+              }}
+              eventYear={String(new Date().getFullYear())}
+              currentEventId="master"
+              masterMode
+            />
+          </div>
           {groups.length === 0 ? (
             <div style={{ color: colors.muted }}>Noch keine Teilnehmer vorhanden.</div>
           ) : (
@@ -4389,38 +4478,66 @@ export default function App() {
         {warningsPanel}
 
         <div ref={participantFormRef} style={{ ...basePanelStyle, marginBottom: 20 }}>
-          <div style={{ maxWidth: 240, marginBottom: 14 }}>
-            <label style={labelStyle}>Rennjahr für Kategorien</label>
-            <input
-              type="number"
-              min="2000"
-              max="2100"
-              value={participantEventYear}
-              onChange={(e) => setParticipantEventYear(e.target.value)}
-              style={inputStyle}
-            />
+          <h2 style={{ marginTop: 0, color: colors.title }}>Teilnehmer hinzufügen</h2>
+          <p style={{ color: colors.muted, marginTop: -4 }}>
+            Teilnehmer werden aus der Haupt-Teilnehmerdatenbank in dieses Rennen / diese Rennserie übernommen. Die Race-Häkchen setzt du danach unten in der Liste.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14, alignItems: "start" }}>
+            <div>
+              <label style={labelStyle}>Rennjahr für Kategorien</label>
+              <input
+                type="number"
+                min="2000"
+                max="2100"
+                value={participantEventYear}
+                onChange={(e) => setParticipantEventYear(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Teilnehmer hinzufügen</label>
+              <input
+                value={eventParticipantSearch}
+                onChange={(e) => setEventParticipantSearch(e.target.value)}
+                placeholder="Name, Startnummer oder Verein eingeben ..."
+                style={inputStyle}
+              />
+              <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+                {getMasterParticipantSuggestions().length === 0 ? (
+                  <div style={{ padding: 10, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden.</div>
+                ) : (
+                  getMasterParticipantSuggestions().map((participant: any) => (
+                    <button
+                      key={participant.key}
+                      type="button"
+                      onClick={() => addMasterParticipantToCurrentEvent(participant)}
+                      style={{
+                        width: "100%",
+                        display: "grid",
+                        gridTemplateColumns: "90px 1fr 130px 1fr auto",
+                        gap: 10,
+                        alignItems: "center",
+                        padding: "9px 10px",
+                        border: "none",
+                        borderBottom: `1px solid ${colors.cardBorder}`,
+                        background: "#fff",
+                        color: colors.text,
+                        cursor: "pointer",
+                        textAlign: "left",
+                        fontSize: 13,
+                      }}
+                    >
+                      <strong>#{participant.plate || "-"}</strong>
+                      <span style={{ fontWeight: 800 }}>{participant.name}</span>
+                      <span>{participant.birthYear || "-"} | {participant.gender || "-"}</span>
+                      <span style={{ color: colors.muted }}>{participant.club || "-"}</span>
+                      <span style={{ color: colors.blueBtn, fontWeight: 900 }}>hinzufügen</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
-          <RiderForm
-            onChange={async () => {
-              const savedRiderId = editingRider?.id ? String(editingRider.id) : "";
-              setEditingRider(null);
-              await loadAllRiders();
-              await loadRaceRiders();
-              if (savedRiderId) {
-                window.setTimeout(() => {
-                  participantRowRefs.current[savedRiderId]?.scrollIntoView({
-                    behavior: "auto",
-                    block: "center",
-                  });
-                }, 120);
-              }
-            }}
-            editingRider={editingRider}
-            onCancelEdit={() => setEditingRider(null)}
-            existingCategories={sortCategories(Object.keys(groupedAll))}
-            eventYear={participantEventYear}
-            currentEventId={currentEventId}
-          />
         </div>
 
         <div style={{ marginBottom: 16 }}>
