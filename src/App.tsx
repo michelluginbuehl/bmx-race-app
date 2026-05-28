@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.5";
+const APP_VERSION = "v1.9.6";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Erstellen, Löschen und Gesamtwertungsberechnung verbessert";
+const APP_CHANGE_NOTE = "Manuelle Resultaterstellung und Gesamtwertungsbuttons verbessert";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -117,6 +117,8 @@ export default function App() {
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [eventParticipantSearch, setEventParticipantSearch] = useState("");
   const [selectedMasterParticipantKeys, setSelectedMasterParticipantKeys] = useState<string[]>([]);
+  const [manualResultsMode, setManualResultsMode] = useState(false);
+  const [manualResultOrder, setManualResultOrder] = useState<Record<string, string[]>>({});
   const [eventTileCounts, setEventTileCounts] = useState<Record<string, { total: number; races: Record<string, number> }>>({});
   const [participantQuickFilter, setParticipantQuickFilter] = useState<
     "all" | "missing" | "duplicates" | "cruiser"
@@ -1829,6 +1831,110 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     return true;
   };
 
+
+  const startManualResultsMode = () => {
+    if (!ensureRaceInformationComplete()) return;
+    if (raceClosed) {
+      alert("Dieses Race ist abgeschlossen. Für Änderungen Race zuerst wieder öffnen.");
+      return;
+    }
+    if (Object.keys(heats || {}).length > 0 || Object.keys(finals || {}).length > 0 || Object.keys(finalResults || {}).length > 0) {
+      if (!window.confirm("Manuelle Resultaterstellung starten? Bestehende Vorläufe, Finals und Resultate dieses Race werden überschrieben.")) return;
+    }
+    setManualResultsMode(true);
+    setManualResultOrder({});
+    addChangeLog(`${selectedRace}: manuelle Resultaterstellung gestartet`);
+  };
+
+  const toggleManualResultRider = (category: string, rider: any) => {
+    const riderId = String(rider?.id ?? rider?.riderId ?? "");
+    if (!riderId) return;
+    setManualResultOrder((prev) => {
+      const current = prev[category] || [];
+      const exists = current.includes(riderId);
+      return {
+        ...prev,
+        [category]: exists ? current.filter((id) => id !== riderId) : [...current, riderId],
+      };
+    });
+  };
+
+  const clearManualResultCategory = (category: string) => {
+    setManualResultOrder((prev) => ({ ...prev, [category]: [] }));
+  };
+
+  const createManualResults = () => {
+    if (raceClosed) {
+      alert("Dieses Race ist abgeschlossen. Für Änderungen Race zuerst wieder öffnen.");
+      return;
+    }
+
+    const categories = originalRaceCategories();
+    const missing = categories
+      .map((cat) => {
+        const total = (groupedRace[cat] || []).length;
+        const selected = (manualResultOrder[cat] || []).length;
+        return selected < total ? `${cat}: ${selected}/${total}` : "";
+      })
+      .filter(Boolean);
+
+    if (missing.length > 0) {
+      const proceed = window.confirm(
+        `Nicht alle Teilnehmer wurden für die manuelle Resultatliste ausgewählt.\n\n${missing.join("\n")}\n\nResultate trotzdem erstellen? Nicht ausgewählte Teilnehmer erscheinen nicht in der Resultatliste.`,
+      );
+      if (!proceed) return;
+    }
+
+    const nextFinals: Record<string, Record<string, any[]>> = {};
+    const nextFinalResults: Record<string, any[]> = {};
+    const nextManualOrder: Record<string, string[]> = {};
+
+    categories.forEach((cat) => {
+      const selectedIds = manualResultOrder[cat] || [];
+      if (selectedIds.length === 0) return;
+      const riderMap = new Map<string, any>((groupedRace[cat] || []).map((r: any) => [String(r.id), r]));
+      const rows = selectedIds
+        .map((id, index) => {
+          const rider = riderMap.get(id);
+          if (!rider) return null;
+          return {
+            ...rider,
+            riderId: String(rider.id),
+            rank: index + 1,
+            points: index + 1,
+            startPos: index + 1,
+            status: "",
+            originalCategory: rider.category,
+          };
+        })
+        .filter(Boolean) as any[];
+
+      const finalCategory = getEffectiveFinalCategory(cat);
+      if (!nextFinals[finalCategory]) nextFinals[finalCategory] = { "A-Final": [] };
+      nextFinals[finalCategory]["A-Final"].push(...rows);
+      nextFinalResults[`${finalCategory}_A-Final`] = [
+        ...(nextFinalResults[`${finalCategory}_A-Final`] || []),
+        ...rows,
+      ];
+      nextManualOrder[cat] = rows.map((row) => String(row.riderId));
+    });
+
+    if (Object.keys(nextFinalResults).length === 0) {
+      window.alert("Bitte zuerst mindestens einen Teilnehmer für die manuelle Resultatliste auswählen.");
+      return;
+    }
+
+    setHeats({});
+    setResults({});
+    setFinals(nextFinals);
+    setFinalResults(nextFinalResults);
+    setFinalManualOrder(nextManualOrder);
+    setManualResultsMode(false);
+    setManualResultOrder({});
+    addChangeLog(`${selectedRace}: Resultate manuell erstellt`);
+    setTimeout(() => scrollToSection("resultate"), 0);
+  };
+
   const createHeats = () => {
     if (!ensureRaceInformationComplete()) return;
     if (raceClosed) {
@@ -1859,6 +1965,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     setFinals({});
     setFinalResults({});
     setFinalManualOrder({});
+    setManualResultsMode(false);
+    setManualResultOrder({});
     addChangeLog(`${selectedRace}: Vorläufe erstellt`);
   };
 
@@ -1876,6 +1984,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     setFinals({});
     setFinalResults({});
     setFinalManualOrder({});
+    setManualResultsMode(false);
+    setManualResultOrder({});
     addChangeLog(`${selectedRace}: zurückgesetzt`);
   };
 
@@ -2017,6 +2127,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     setFinals(all);
     setFinalResults({});
     setFinalManualOrder({});
+    setManualResultsMode(false);
+    setManualResultOrder({});
     addChangeLog(`${selectedRace}: Finals erstellt`);
   };
 
@@ -4704,29 +4816,29 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         <div style={{ ...basePanelStyle, marginBottom: 20 }}>
           <div
             style={{
-              display: "flex",
-              gap: 6,
-              flexWrap: "nowrap",
-              alignItems: "center",
+              display: "grid",
+              gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+              gap: 8,
+              alignItems: "stretch",
             }}
           >
             <button
               onClick={() => setViewMode("dashboard")}
-              style={secondaryButtonStyle}
+              style={{ ...secondaryButtonStyle, minHeight: 48, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "10px 8px" }}
             >
               Home
             </button>
-            <button style={activeRaceButtonStyle}>Gesamtwertung</button>
-            <button onClick={createOverallRanking} disabled={overallLocked} style={overallLocked ? disabledButtonStyle : mainButtonStyle}>
+            <button style={{ ...activeRaceButtonStyle, minHeight: 48, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "10px 8px" }}>Gesamtwertung</button>
+            <button onClick={createOverallRanking} disabled={overallLocked} style={overallLocked ? { ...disabledButtonStyle, minHeight: 48, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "10px 8px" } : { ...mainButtonStyle, minHeight: 48, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "10px 8px" }}>
               Gesamtwertung erstellen
             </button>
-            <button onClick={toggleOverallLocked} style={overallLocked ? dangerButtonStyle : secondaryButtonStyle}>
+            <button onClick={toggleOverallLocked} style={overallLocked ? { ...dangerButtonStyle, minHeight: 48, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "10px 8px" } : { ...secondaryButtonStyle, minHeight: 48, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "10px 8px" }}>
               {overallLocked ? "Gesamtwertung freigeben" : "Gesamtwertung sperren"}
             </button>
-            <button onClick={exportOverallPdf} style={mainButtonStyle}>
+            <button onClick={exportOverallPdf} style={{ ...mainButtonStyle, minHeight: 48, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "10px 8px" }}>
               Gesamtwertung PDF
             </button>
-            <button onClick={exportOverallExcel} style={secondaryButtonStyle}>
+            <button onClick={exportOverallExcel} style={{ ...secondaryButtonStyle, minHeight: 48, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "10px 8px" }}>
               Gesamtwertung Excel
             </button>
           </div>
@@ -5002,6 +5114,74 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             </div>
           </div>
         </div>
+
+        {manualResultsMode && (
+          <div style={{ ...basePanelStyle, marginBottom: 20, borderColor: colors.blueBtn, background: "#f8fbff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+              <div>
+                <h2 style={{ margin: 0, color: colors.title }}>Resultate manuell erstellen</h2>
+                <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4 }}>
+                  Teilnehmer pro Kategorie in der Zielreihenfolge anklicken. Die Klick-Reihenfolge wird als Rangliste übernommen.
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" onClick={createManualResults} style={compactPrimaryButtonStyle}>Resultatliste erstellen</button>
+                <button type="button" onClick={() => { setManualResultsMode(false); setManualResultOrder({}); }} style={compactHomeButtonStyle}>Abbrechen</button>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+              {sortCategories(Object.keys(groupedRace)).map((cat) => {
+                const selectedIds = manualResultOrder[cat] || [];
+                return (
+                  <div key={`manual-${cat}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 12, padding: 12, background: "#fff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <strong style={{ color: colors.title }}>{cat}</strong>
+                      <span style={{ color: colors.muted, fontSize: 12, fontWeight: 800 }}>{selectedIds.length}/{(groupedRace[cat] || []).length}</span>
+                    </div>
+                    <div style={{ display: "grid", gap: 6, maxHeight: 240, overflowY: "auto", paddingRight: 4 }}>
+                      {(groupedRace[cat] || []).map((r: any) => {
+                        const riderId = String(r.id);
+                        const selectedIndex = selectedIds.indexOf(riderId);
+                        const selected = selectedIndex >= 0;
+                        return (
+                          <button
+                            key={`manual-${cat}-${riderId}`}
+                            type="button"
+                            onClick={() => toggleManualResultRider(cat, r)}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "34px 70px minmax(0, 1fr) 78px",
+                              gap: 8,
+                              alignItems: "center",
+                              textAlign: "left",
+                              border: `1px solid ${selected ? colors.blueBtn : colors.cardBorder}`,
+                              background: selected ? "#eaf2ff" : "#fff",
+                              color: colors.text,
+                              borderRadius: 8,
+                              padding: "8px 9px",
+                              cursor: "pointer",
+                              fontWeight: selected ? 900 : 700,
+                            }}
+                          >
+                            <span>{selected ? `${selectedIndex + 1}.` : ""}</span>
+                            <span>#{r.plate || "-"}</span>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                            <span style={{ color: colors.muted, fontSize: 12 }}>{getRiderMetaLabel(r)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedIds.length > 0 && (
+                      <button type="button" onClick={() => clearManualResultCategory(cat)} style={{ ...smallGhostButtonStyle, marginTop: 8 }}>
+                        Auswahl löschen
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div style={{ marginBottom: 16 }}>
           <button onClick={deleteAllRiders} style={dangerButtonStyle}>
@@ -5285,6 +5465,14 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
               }
             >
               Vorläufe erstellen
+            </button>
+            <button
+              onClick={startManualResultsMode}
+              disabled={raceClosed}
+              style={raceClosed ? compactDisabledButtonStyle : compactPrimaryButtonStyle}
+              title="Resultatliste direkt manuell aus Teilnehmern erstellen"
+            >
+              Resultate manuell erstellen
             </button>
             <button onClick={exportHeatsStartPdf} style={compactHomeButtonStyle}>
               Vorläufe PDF
