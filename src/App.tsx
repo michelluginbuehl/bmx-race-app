@@ -19,6 +19,8 @@ type ManagedEvent = {
   year: number;
   createdAt: string;
   updatedAt?: string;
+  archived?: boolean;
+  archivedAt?: string;
 };
 
 const BMX_AGE_CATEGORIES = [
@@ -67,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.8.8";
+const APP_VERSION = "v1.9.1";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Bearbeitungsnavigation, Startkacheln und Rennkopf verbessert";
+const APP_CHANGE_NOTE = "Papierkorb, Archiv, Suche und Mehrfachauswahl ergänzt";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -110,7 +112,10 @@ export default function App() {
   const [selectedRiderInfo, setSelectedRiderInfo] = useState<any | null>(null);
   const [raceNavigationOpen, setRaceNavigationOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [eventSearch, setEventSearch] = useState("");
+  const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [eventParticipantSearch, setEventParticipantSearch] = useState("");
+  const [selectedMasterParticipantKeys, setSelectedMasterParticipantKeys] = useState<string[]>([]);
   const [participantQuickFilter, setParticipantQuickFilter] = useState<
     "all" | "missing" | "duplicates" | "cruiser"
   >("all");
@@ -386,7 +391,7 @@ export default function App() {
   };
 
   const saveManagedEvents = (events: ManagedEvent[]) => {
-    const sorted = [...events].sort((a, b) => (b.year || 0) - (a.year || 0) || String(b.createdAt).localeCompare(String(a.createdAt)));
+    const sorted = [...events].sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || (b.year || 0) - (a.year || 0) || String(b.createdAt).localeCompare(String(a.createdAt)));
     localStorage.setItem(EVENT_LIST_KEY, JSON.stringify(sorted));
     setManagedEvents(sorted);
   };
@@ -506,17 +511,35 @@ export default function App() {
     if (currentEventId === event.id) setHomeEventSeries(nextName.trim());
   };
 
-  const openManagedEvent = (event: ManagedEvent) => {
-    setInitialLoaded(false);
-    resetCurrentEventState();
-    setCurrentEventId(event.id);
-    setAppShellView("manager");
-    setViewMode("dashboard");
+  const toggleManagedEventArchive = (event: ManagedEvent, archived: boolean) => {
+    const message = archived
+      ? `${event.name} archivieren? Das Rennen bleibt erhalten und wird auf der Startseite eingeklappt.`
+      : `${event.name} wieder aktiv anzeigen?`;
+    if (!window.confirm(message)) return;
+    const nextEvents = managedEvents.map((item) =>
+      item.id === event.id
+        ? { ...item, archived, archivedAt: archived ? new Date().toISOString() : "", updatedAt: new Date().toISOString() }
+        : item,
+    );
+    saveManagedEvents(nextEvents);
   };
 
-  const getEventGroupedByYear = () => {
+  const getFilteredManagedEvents = (archived: boolean) => {
+    const query = eventSearch.trim().toLowerCase();
+    return managedEvents.filter((event) => {
+      if (!!event.archived !== archived) return false;
+      if (!query) return true;
+      return [event.name, event.year, event.type === "single" ? "Einzelrennen" : "Rennserie"]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+  };
+
+  const getEventGroupedByYearFrom = (events: ManagedEvent[]) => {
     const groups: Record<string, ManagedEvent[]> = {};
-    managedEvents.forEach((event) => {
+    events.forEach((event) => {
       const year = String(event.year || new Date(event.createdAt).getFullYear() || new Date().getFullYear());
       if (!groups[year]) groups[year] = [];
       groups[year].push(event);
@@ -525,6 +548,18 @@ export default function App() {
       .sort((a, b) => Number(b) - Number(a))
       .map((year) => ({ year, events: groups[year].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))) }));
   };
+
+  const openManagedEvent = (event: ManagedEvent) => {
+    setInitialLoaded(false);
+    resetCurrentEventState();
+    setCurrentEventId(event.id);
+    setAppShellView("manager");
+    setViewMode("dashboard");
+  };
+
+  const getEventGroupedByYear = () => getEventGroupedByYearFrom(getFilteredManagedEvents(false));
+
+  const getArchivedEventGroupedByYear = () => getEventGroupedByYearFrom(getFilteredManagedEvents(true));
 
   const getEventHistoryEntries = () => {
     return managedEvents.map((event) => {
@@ -542,7 +577,7 @@ export default function App() {
   const getMasterParticipantGroups = () => {
     const eventMap = new Map<string, ManagedEvent>(managedEvents.map((event) => [event.id, event]));
     const groups = new Map<string, any>();
-    masterParticipants.forEach((rider: any) => {
+    masterParticipants.filter((rider: any) => !rider.deletedAt).forEach((rider: any) => {
       const key = getMasterParticipantKey(rider);
       if (!groups.has(key)) {
         groups.set(key, {
@@ -582,6 +617,105 @@ export default function App() {
       });
     });
     return Array.from(groups.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  };
+
+
+  const getManagedEventParticipantCount = (eventId: string) => {
+    const unique = new Set<string>();
+    masterParticipants
+      .filter((rider: any) => !rider.deletedAt && rider.eventId === eventId)
+      .forEach((rider: any) => unique.add(getMasterParticipantKey(rider)));
+    return unique.size;
+  };
+
+  const deleteMasterParticipantGroup = async (participant: any) => {
+    const name = participant?.name || "diesen Teilnehmer";
+    const eventCount = Array.isArray(participant?.events) ? participant.events.length : 0;
+    const message = eventCount > 0
+      ? `${name} in den Papierkorb verschieben? Der Teilnehmer wird aus der Hauptdatenbank und aus ${eventCount} Rennen/Rennserien ausgeblendet und kann wiederhergestellt werden.`
+      : `${name} in den Papierkorb verschieben? Der Teilnehmer kann wiederhergestellt werden.`;
+    if (!window.confirm(message)) return;
+
+    await exportBackup("Sicherheitsbackup vor Teilnehmer-Papierkorb");
+    const all = (await db.table("riders").toArray()).map(normalizeRider);
+    const key = getMasterParticipantKey(participant.raw || participant);
+    const masterId = String(participant.masterId || participant.raw?.masterId || participant.raw?.id || "");
+    const idsToTrash = all
+      .filter((rider: any) => {
+        if (rider.deletedAt) return false;
+        const riderId = String(rider.id || "");
+        const riderMasterId = String(rider.masterId || "");
+        return getMasterParticipantKey(rider) === key || (!!masterId && (riderId === masterId || riderMasterId === masterId));
+      })
+      .map((rider: any) => rider.id)
+      .filter(Boolean);
+
+    if (idsToTrash.length === 0) return;
+    const deletedAt = new Date().toISOString();
+    for (const id of idsToTrash) {
+      await db.table("riders").update(id, { deletedAt });
+    }
+    setSelectedMasterParticipant(null);
+    setEditingRider(null);
+    setLastEditedMasterParticipantId("");
+    await loadMasterParticipants();
+    await loadAllRiders();
+    await loadRaceRiders();
+    setBackupMessage(`Teilnehmer in Papierkorb verschoben: ${name}`);
+  };
+
+  const getDeletedMasterParticipantGroups = () => {
+    const groups = new Map<string, any>();
+    masterParticipants.filter((rider: any) => !!rider.deletedAt).forEach((rider: any) => {
+      const key = getMasterParticipantKey(rider);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          raw: rider,
+          masterId: rider.eventId === "master" ? rider.id : rider.masterId || rider.id,
+          name: rider.name || "",
+          plate: rider.plate || "",
+          birthYear: rider.birthYear || rider.jahrgang || "",
+          gender: rider.gender || rider.geschlecht || "",
+          club: rider.club || "",
+          deletedAt: rider.deletedAt,
+          count: 0,
+        });
+      }
+      groups.get(key).count += 1;
+    });
+    return Array.from(groups.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  };
+
+  const restoreMasterParticipantGroup = async (participant: any) => {
+    const all = (await db.table("riders").toArray()).map(normalizeRider);
+    const key = getMasterParticipantKey(participant.raw || participant);
+    const masterId = String(participant.masterId || participant.raw?.masterId || participant.raw?.id || "");
+    const idsToRestore = all
+      .filter((rider: any) => {
+        const riderId = String(rider.id || "");
+        const riderMasterId = String(rider.masterId || "");
+        return rider.deletedAt && (getMasterParticipantKey(rider) === key || (!!masterId && (riderId === masterId || riderMasterId === masterId)));
+      })
+      .map((rider: any) => rider.id)
+      .filter(Boolean);
+    for (const id of idsToRestore) {
+      await db.table("riders").update(id, { deletedAt: "" });
+    }
+    await loadMasterParticipants();
+    await loadAllRiders();
+    await loadRaceRiders();
+    setBackupMessage(`Teilnehmer wiederhergestellt: ${participant.name}`);
+  };
+
+  const permanentlyDeleteMasterParticipantGroup = async (participant: any) => {
+    if (!window.confirm(`${participant.name} endgültig aus dem Papierkorb löschen?`)) return;
+    await exportBackup("Sicherheitsbackup vor endgültigem Teilnehmer-Löschen");
+    const all = (await db.table("riders").toArray()).map(normalizeRider);
+    const key = getMasterParticipantKey(participant.raw || participant);
+    const idsToDelete = all.filter((rider: any) => rider.deletedAt && getMasterParticipantKey(rider) === key).map((rider: any) => rider.id).filter(Boolean);
+    if (idsToDelete.length) await db.table("riders").bulkDelete(idsToDelete);
+    await loadMasterParticipants();
   };
 
   const getMasterParticipantKey = (rider: any) => [
@@ -638,10 +772,29 @@ export default function App() {
       eventId: currentEventId || "legacy",
       ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false])),
     });
-    setEventParticipantSearch("");
     await loadAllRiders();
     await loadRaceRiders();
     addChangeLog(`Teilnehmer aus Hauptdatenbank hinzugefügt: ${source.name || participant.name}`);
+  };
+
+
+  const toggleMasterParticipantSelection = (key: string) => {
+    setSelectedMasterParticipantKeys((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key],
+    );
+  };
+
+  const addSelectedMasterParticipantsToCurrentEvent = async () => {
+    const suggestions = getMasterParticipantSuggestions();
+    const selected = suggestions.filter((participant: any) => selectedMasterParticipantKeys.includes(participant.key));
+    if (selected.length === 0) {
+      window.alert("Bitte zuerst Teilnehmer auswählen.");
+      return;
+    }
+    for (const participant of selected) {
+      await addMasterParticipantToCurrentEvent(participant);
+    }
+    setSelectedMasterParticipantKeys([]);
   };
 
 
@@ -915,13 +1068,13 @@ export default function App() {
   };
 
   const loadAllRiders = async () => {
-    const all = (await db.table("riders").toArray()).map(normalizeRider).filter(belongsToCurrentEvent);
+    const all = (await db.table("riders").toArray()).map(normalizeRider).filter((r: any) => !r.deletedAt).filter(belongsToCurrentEvent);
 
     setAllRiders(sortRidersByCategoryAndName(all));
   };
 
   const loadRaceRiders = async () => {
-    const all = (await db.table("riders").toArray()).map(normalizeRider).filter(belongsToCurrentEvent);
+    const all = (await db.table("riders").toArray()).map(normalizeRider).filter((r: any) => !r.deletedAt).filter(belongsToCurrentEvent);
     const flag = raceKeyMap[selectedRace];
 
     const filtered = all.filter((r: any) => !!r[flag]);
@@ -1085,7 +1238,7 @@ export default function App() {
   }, [seriesTemplates, initialLoaded]);
 
   useEffect(() => {
-    if (appShellView === "masterParticipants") {
+    if (appShellView === "masterParticipants" || appShellView === "events") {
       loadMasterParticipants();
     }
   }, [appShellView, managedEvents]);
@@ -1235,12 +1388,14 @@ export default function App() {
   }, [changeLog, initialLoaded]);
 
   const deleteRider = async (id: string) => {
-    if (!window.confirm("Teilnehmer wirklich löschen?")) return;
-    await db.table("riders").delete(id);
+    if (!window.confirm("Teilnehmer in den Papierkorb verschieben?")) return;
+    await exportBackup("Sicherheitsbackup vor Teilnehmer-Papierkorb");
+    await db.table("riders").update(id, { deletedAt: new Date().toISOString() });
     if (editingRider?.id === id) setEditingRider(null);
+    await loadMasterParticipants();
     await loadAllRiders();
     await loadRaceRiders();
-    addChangeLog("Teilnehmer gelöscht");
+    addChangeLog("Teilnehmer in Papierkorb verschoben");
   };
 
   const deleteAllRiders = async () => {
@@ -1253,7 +1408,7 @@ export default function App() {
     await exportBackup("Sicherheitsbackup vor Teilnehmer-Löschung");
     const allBeforeDelete = await db.table("riders").toArray();
     const currentIds = allBeforeDelete.filter(belongsToCurrentEvent).map((r: any) => r.id);
-    if (currentIds.length > 0) await db.table("riders").bulkDelete(currentIds);
+    for (const id of currentIds) await db.table("riders").update(id, { deletedAt: new Date().toISOString() });
     setEditingRider(null);
     setAllRiders([]);
     setRiders([]);
@@ -1263,13 +1418,13 @@ export default function App() {
     setFinalResults({});
     setOverallManualOrder({});
     setGeneratedOverallByCategory({});
-    addChangeLog("Alle Teilnehmer gelöscht");
+    addChangeLog("Alle Teilnehmer in Papierkorb verschoben");
   };
 
   const deleteAllRaceAssignments = async () => {
     if (!window.confirm(`${selectedRace}: Race-Zuordnungen wirklich löschen?`))
       return;
-    const all = (await db.table("riders").toArray()).filter(belongsToCurrentEvent);
+    const all = (await db.table("riders").toArray()).map(normalizeRider).filter((r: any) => !r.deletedAt).filter(belongsToCurrentEvent);
     const flag = raceKeyMap[selectedRace];
 
     for (const rider of all) {
@@ -1895,7 +2050,7 @@ export default function App() {
     border: `1px solid ${colors.cardBorder}`,
     borderRadius: 16,
     background: colors.cardBg,
-    padding: 16,
+    padding: 18,
     boxShadow: "0 8px 24px rgba(31,42,55,0.06)",
   };
 
@@ -3709,6 +3864,8 @@ export default function App() {
 
 
   if (appShellView === "events") {
+    const activeGroupedEvents = getEventGroupedByYear();
+    const archivedGroupedEvents = getArchivedEventGroupedByYear();
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1120, margin: "0 auto" }}>
         {renderAppHeader()}
@@ -3718,6 +3875,15 @@ export default function App() {
             <button onClick={() => createManagedEvent()} style={mainButtonStyle}>Rennen / Rennserie erstellen</button>
             <button onClick={() => setAppShellView("masterParticipants")} style={secondaryButtonStyle}>Teilnehmer</button>
             <button onClick={() => setAppShellView("history")} style={{ ...smallGhostButtonStyle, marginLeft: "auto" }}>History / Speicher & Import</button>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <label style={labelStyle}>Rennen/Rennserie suchen</label>
+            <input
+              value={eventSearch}
+              onChange={(e) => setEventSearch(e.target.value)}
+              placeholder="Nach Name oder Jahr suchen ..."
+              style={inputStyle}
+            />
           </div>
         </div>
 
@@ -3751,17 +3917,17 @@ export default function App() {
         </div>
         <div style={{ ...basePanelStyle }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Erstellte Rennen / Rennserien</h2>
-          {managedEvents.length === 0 ? (
-            <div style={{ color: colors.muted }}>Noch keine Rennen oder Rennserien erstellt.</div>
+          {activeGroupedEvents.length === 0 ? (
+            <div style={{ color: colors.muted }}>{eventSearch.trim() ? "Keine passenden aktiven Rennen/Rennserien gefunden." : "Noch keine aktiven Rennen oder Rennserien erstellt."}</div>
           ) : (
             <div style={{ display: "grid", gap: 16 }}>
-              {getEventGroupedByYear().map((group) => (
+              {activeGroupedEvents.map((group) => (
                 <div key={group.year}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "6px 0 10px" }}>
                     <strong style={{ color: colors.title, fontSize: 18 }}>{group.year}</strong>
                     <div style={{ height: 1, background: colors.cardBorder, flex: 1 }} />
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 18 }}>
                     {group.events.map((event) => (
                       <div
                         key={event.id}
@@ -3773,7 +3939,7 @@ export default function App() {
                           ...compactHomeButtonStyle,
                           width: "100%",
                           aspectRatio: "1 / 1",
-                          minHeight: 170,
+                          minHeight: 260,
                           textAlign: "left",
                           display: "grid",
                           gridTemplateRows: "1fr auto auto",
@@ -3781,26 +3947,80 @@ export default function App() {
                           gap: 10,
                           cursor: "pointer",
                           boxSizing: "border-box",
-                          padding: 14,
+                          padding: 18,
                           justifyItems: "stretch",
+                          overflow: "hidden",
                         }}
                       >
-                        <span style={{ alignSelf: "start" }}>
-                          <span style={{ fontSize: 17, fontWeight: 900, lineHeight: 1.2 }}>{event.name}</span><br />
-                          <span style={{ color: colors.muted, fontSize: 13, lineHeight: 1.35 }}>{event.type === "single" ? "Einzelrennen" : "Rennserie"} · erstellt {formatDateTime(event.createdAt)}</span>
+                        <span style={{ alignSelf: "start", minWidth: 0 }}>
+                          <span
+                            style={{
+                              fontSize: 16,
+                              fontWeight: 900,
+                              lineHeight: 1.16,
+                              display: "block",
+                              overflowWrap: "anywhere",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {event.name}
+                          </span>
                         </span>
                         <span style={{ ...getStatusBadgeStyle(event.type === "single" ? "Einzelrennen" : "Rennserie"), justifySelf: "start" }}>{event.type === "single" ? "Einzel" : "Serie"}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); renameManagedEvent(event); }}
-                          style={smallGhostButtonStyle}
-                        >
-                          Name bearbeiten
-                        </button>
+                        <span style={{ color: colors.title, fontWeight: 900, fontSize: 14 }}>
+                          Teilnehmer: {getManagedEventParticipantCount(event.id)}
+                        </span>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignItems: "stretch" }}>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); renameManagedEvent(event); }}
+                            style={{ ...smallGhostButtonStyle, width: "100%", minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, padding: "7px 8px", boxSizing: "border-box" }}
+                          >
+                            Name bearbeiten
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); toggleManagedEventArchive(event, true); }}
+                            style={{ ...smallGhostButtonStyle, width: "100%", minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, padding: "7px 8px", boxSizing: "border-box" }}
+                          >
+                            Archivieren
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 18 }}>
+            <button
+              type="button"
+              onClick={() => setShowArchivedEvents((value) => !value)}
+              style={smallGhostButtonStyle}
+            >
+              {showArchivedEvents ? "Archiv ausblenden" : `Archiv anzeigen (${getFilteredManagedEvents(true).length})`}
+            </button>
+          </div>
+          {showArchivedEvents && (
+            <div style={{ marginTop: 14, display: "grid", gap: 14 }}>
+              <h3 style={{ margin: 0, color: colors.title }}>Archivierte Rennen / Rennserien</h3>
+              {archivedGroupedEvents.length === 0 ? (
+                <div style={{ color: colors.muted }}>Keine archivierten Rennen/Rennserien vorhanden.</div>
+              ) : archivedGroupedEvents.map((group) => (
+                <details key={`archiv-${group.year}`} open={false} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 12, padding: 12, background: "#fbfdff" }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 900, color: colors.title }}>{group.year} · {group.events.length} archiviert</summary>
+                  <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                    {group.events.map((event) => (
+                      <div key={event.id} style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between", borderTop: `1px solid ${colors.cardBorder}`, paddingTop: 8 }}>
+                        <button type="button" onClick={() => openManagedEvent(event)} style={{ ...smallGhostButtonStyle, textAlign: "left", flex: 1 }}>
+                          {event.name} · {event.year} · {event.type === "single" ? "Einzelrennen" : "Rennserie"} · Teilnehmer: {getManagedEventParticipantCount(event.id)}
+                        </button>
+                        <button type="button" onClick={() => toggleManagedEventArchive(event, false)} style={smallGhostButtonStyle}>Wieder anzeigen</button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
               ))}
             </div>
           )}
@@ -3826,7 +4046,7 @@ export default function App() {
             onClick={loadMasterParticipants}
             style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
           >
-            Teilnehmer neu laden
+            Teilnehmer aktualisieren
           </button>
         </div>
         <div style={{ ...basePanelStyle }}>
@@ -3895,27 +4115,59 @@ export default function App() {
                         </div>
                       </td>
                       <td style={{ ...tableCellStyle, textAlign: "right" }}>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSelectedMasterParticipant(null);
-                            setLastEditedMasterParticipantId(String(participant.raw?.id || ""));
-                            setEditingRider(participant.raw);
-                            window.setTimeout(() => {
-                              participantFormRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
-                            }, 0);
-                          }}
-                          style={smallGhostButtonStyle}
-                        >
-                          Bearbeiten
-                        </button>
+                        <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedMasterParticipant(null);
+                              setLastEditedMasterParticipantId(String(participant.raw?.id || ""));
+                              setEditingRider(participant.raw);
+                              window.setTimeout(() => {
+                                participantFormRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+                              }, 0);
+                            }}
+                            style={smallGhostButtonStyle}
+                          >
+                            Bearbeiten
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              deleteMasterParticipantGroup(participant);
+                            }}
+                            style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}
+                          >
+                            Löschen
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          )}
+
+          {getDeletedMasterParticipantGroups().length > 0 && (
+            <details style={{ ...basePanelStyle, marginTop: 18, background: "#fff8f1" }}>
+              <summary style={{ cursor: "pointer", fontWeight: 900, color: colors.title }}>
+                Papierkorb gelöschte Teilnehmer ({getDeletedMasterParticipantGroups().length})
+              </summary>
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                {getDeletedMasterParticipantGroups().map((participant: any) => (
+                  <div key={participant.key} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center", padding: 10, border: `1px solid ${colors.cardBorder}`, borderRadius: 10, background: "#fff" }}>
+                    <div>
+                      <strong>{participant.name}</strong> · #{participant.plate || "-"} · {participant.birthYear || "-"} | {participant.gender || "-"}
+                      <div style={{ color: colors.muted, fontSize: 12 }}>Einträge im Papierkorb: {participant.count}</div>
+                    </div>
+                    <button type="button" onClick={() => restoreMasterParticipantGroup(participant)} style={smallGhostButtonStyle}>Wiederherstellen</button>
+                    <button type="button" onClick={() => permanentlyDeleteMasterParticipantGroup(participant)} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>Endgültig löschen</button>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
 
           {selectedMasterParticipant && (
@@ -4520,38 +4772,57 @@ export default function App() {
               placeholder="Name, Startnummer oder Verein eingeben ..."
               style={inputStyle}
             />
-            <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflowY: "auto", overflowX: "hidden", background: "#fff", maxHeight: 260 }}>
+            <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+                {getMasterParticipantSuggestions().length} Teilnehmer angezeigt · {selectedMasterParticipantKeys.length} ausgewählt
+              </div>
+              <button
+                type="button"
+                onClick={addSelectedMasterParticipantsToCurrentEvent}
+                disabled={selectedMasterParticipantKeys.length === 0}
+                style={selectedMasterParticipantKeys.length === 0 ? disabledButtonStyle : compactPrimaryButtonStyle}
+              >
+                Ausgewählte hinzufügen
+              </button>
+            </div>
+            <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflowY: "auto", overflowX: "hidden", background: "#fff", maxHeight: 360 }}>
               {getMasterParticipantSuggestions().length === 0 ? (
                 <div style={{ padding: 10, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden.</div>
               ) : (
-                getMasterParticipantSuggestions().map((participant: any) => (
-                  <button
-                    key={participant.key}
-                    type="button"
-                    onClick={() => addMasterParticipantToCurrentEvent(participant)}
-                    style={{
-                      width: "100%",
-                      display: "grid",
-                      gridTemplateColumns: "90px 1fr 130px 1fr auto",
-                      gap: 10,
-                      alignItems: "center",
-                      padding: "9px 10px",
-                      border: "none",
-                      borderBottom: `1px solid ${colors.cardBorder}`,
-                      background: "#fff",
-                      color: colors.text,
-                      cursor: "pointer",
-                      textAlign: "left",
-                      fontSize: 13,
-                    }}
-                  >
-                    <strong>#{participant.plate || "-"}</strong>
-                    <span style={{ fontWeight: 800 }}>{participant.name}</span>
-                    <span>{participant.birthYear || "-"} | {participant.gender || "-"}</span>
-                    <span style={{ color: colors.muted }}>{participant.club || "-"}</span>
-                    <span style={{ color: colors.blueBtn, fontWeight: 900 }}>hinzufügen</span>
-                  </button>
-                ))
+                getMasterParticipantSuggestions().map((participant: any) => {
+                  const checked = selectedMasterParticipantKeys.includes(participant.key);
+                  return (
+                    <div
+                      key={participant.key}
+                      style={{
+                        width: "100%",
+                        display: "grid",
+                        gridTemplateColumns: "34px 90px 1fr 130px 1fr auto",
+                        gap: 10,
+                        alignItems: "center",
+                        padding: "9px 10px",
+                        borderBottom: `1px solid ${colors.cardBorder}`,
+                        background: checked ? "#eef6ff" : "#fff",
+                        color: colors.text,
+                        textAlign: "left",
+                        fontSize: 13,
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleMasterParticipantSelection(participant.key)}
+                        aria-label={`${participant.name} auswählen`}
+                      />
+                      <strong>#{participant.plate || "-"}</strong>
+                      <span style={{ fontWeight: 800 }}>{participant.name}</span>
+                      <span>{participant.birthYear || "-"} | {participant.gender || "-"}</span>
+                      <span style={{ color: colors.muted }}>{participant.club || "-"}</span>
+                      <button type="button" onClick={() => addMasterParticipantToCurrentEvent(participant)} style={smallGhostButtonStyle}>hinzufügen</button>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -4722,7 +4993,7 @@ export default function App() {
                   {activeRaces.map((_, index) => (
                     <div key={`participant-race-head-${index + 1}`} style={checkboxCellStyle}>R{index + 1}</div>
                   ))}
-                  <div style={{ width: 170 }} />
+                  <div style={{ width: 88 }} />
                 </div>
 
                 {filteredGroupedAll[cat].map((r: any) => (
@@ -4763,7 +5034,7 @@ export default function App() {
 
                     <div
                       style={{
-                        width: 170,
+                        width: 88,
                         textAlign: "right",
                         display: "flex",
                         gap: 6,
@@ -4775,12 +5046,6 @@ export default function App() {
                         style={editButtonStyle}
                       >
                         Bearbeiten
-                      </button>
-                      <button
-                        onClick={() => deleteRider(r.id)}
-                        style={smallDeleteButtonStyle}
-                      >
-                        Teilnehmer löschen
                       </button>
                     </div>
                   </div>
