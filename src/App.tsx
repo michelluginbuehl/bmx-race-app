@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.2";
+const APP_VERSION = "v1.9.3";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Papierkorb, Archiv, Suche und Mehrfachauswahl ergänzt";
+const APP_CHANGE_NOTE = "Teilnehmerzahlen auf Startkacheln korrigiert";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -116,6 +116,7 @@ export default function App() {
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [eventParticipantSearch, setEventParticipantSearch] = useState("");
   const [selectedMasterParticipantKeys, setSelectedMasterParticipantKeys] = useState<string[]>([]);
+  const [eventTileCounts, setEventTileCounts] = useState<Record<string, { total: number; races: Record<string, number> }>>({});
   const [participantQuickFilter, setParticipantQuickFilter] = useState<
     "all" | "missing" | "duplicates" | "cruiser"
   >("all");
@@ -620,25 +621,19 @@ export default function App() {
   };
 
 
+  const normalizeEventIdForCount = (value: any) => String(value || "legacy");
+
+  const getRiderCountId = (rider: any) => String(rider?.id || `${rider?.name || ""}-${rider?.plate || ""}-${rider?.birthYear || rider?.jahrgang || ""}-${rider?.gender || rider?.geschlecht || ""}`);
+
   const getManagedEventParticipantCount = (eventId: string) => {
-    const unique = new Set<string>();
-    masterParticipants
-      .filter((rider: any) => !rider.deletedAt && rider.eventId === eventId)
-      .forEach((rider: any) => unique.add(getMasterParticipantKey(rider)));
-    return unique.size;
+    const normalizedEventId = normalizeEventIdForCount(eventId);
+    return eventTileCounts[normalizedEventId]?.total ?? 0;
   };
 
   const getManagedEventRaceParticipantCounts = (event: ManagedEvent) => {
     const raceCount = getManagedEventRaceCount(event.id, event.type);
-    const eventRiders = masterParticipants.filter((rider: any) => !rider.deletedAt && rider.eventId === event.id);
-    return RACES.slice(0, raceCount).map((race) => {
-      const flag = raceKeyMap[race];
-      const unique = new Set<string>();
-      eventRiders
-        .filter((rider: any) => !!rider[flag])
-        .forEach((rider: any) => unique.add(getMasterParticipantKey(rider)));
-      return { race, count: unique.size };
-    });
+    const counts = eventTileCounts[normalizeEventIdForCount(event.id)]?.races || {};
+    return RACES.slice(0, raceCount).map((race) => ({ race, count: counts[race] || 0 }));
   };
 
   const deleteMasterParticipantGroup = async (participant: any) => {
@@ -1256,6 +1251,34 @@ export default function App() {
       loadMasterParticipants();
     }
   }, [appShellView, managedEvents]);
+
+  useEffect(() => {
+    const loadEventTileCounts = async () => {
+      const all = (await db.table("riders").toArray()).map(normalizeRider).filter((rider: any) => !rider.deletedAt);
+      const nextCounts: Record<string, { total: number; races: Record<string, number> }> = {};
+      managedEvents.forEach((event) => {
+        const eventId = normalizeEventIdForCount(event.id);
+        const eventRiders = all.filter((rider: any) => normalizeEventIdForCount(rider.eventId) === eventId && normalizeEventIdForCount(rider.eventId) !== "master");
+        const totalIds = new Set<string>();
+        eventRiders.forEach((rider: any) => totalIds.add(getRiderCountId(rider)));
+        const raceCounts: Record<string, number> = {};
+        RACES.forEach((race) => {
+          const flag = raceKeyMap[race];
+          const raceIds = new Set<string>();
+          eventRiders.forEach((rider: any) => {
+            if (rider[flag] === true) raceIds.add(getRiderCountId(rider));
+          });
+          raceCounts[race] = raceIds.size;
+        });
+        nextCounts[eventId] = { total: totalIds.size, races: raceCounts };
+      });
+      setEventTileCounts(nextCounts);
+    };
+
+    if (appShellView === "events" || appShellView === "masterParticipants") {
+      loadEventTileCounts();
+    }
+  }, [appShellView, managedEvents, masterParticipants]);
 
   useEffect(() => {
     if (appShellView === "manager" && viewMode === "participants") {
