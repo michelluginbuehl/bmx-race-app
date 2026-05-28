@@ -67,9 +67,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.8.5";
+const APP_VERSION = "v1.8.6";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Globales Backup, Startseiten-Import/Export und Race-Navigation verbessert";
+const APP_CHANGE_NOTE = "Teilnehmerauswahl, Import/Export und Fusszeile bereinigt";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -600,14 +600,12 @@ export default function App() {
   const getMasterParticipantSuggestions = () => {
     const query = eventParticipantSearch.trim().toLowerCase();
     const groups = getMasterParticipantGroups();
-    if (!query) return groups.slice(0, 20);
+    if (!query) return groups;
     const parts = query.split(/\s+/).filter(Boolean);
-    return groups
-      .filter((participant: any) => {
-        const text = getMasterParticipantSearchText(participant);
-        return parts.every((part) => text.includes(part)) || text.includes(query);
-      })
-      .slice(0, 20);
+    return groups.filter((participant: any) => {
+      const text = getMasterParticipantSearchText(participant);
+      return parts.every((part) => text.includes(part)) || text.includes(query);
+    });
   };
 
   const addMasterParticipantToCurrentEvent = async (participant: any) => {
@@ -2242,8 +2240,7 @@ export default function App() {
         justifyContent: "space-between",
       }}
     >
-      <span>{APP_NAME} {APP_VERSION}</span>
-      <span style={{ textAlign: "right" }}>{APP_CHANGE_NOTE}</span>
+      <span>Version {APP_VERSION}</span>
     </div>
   );
 
@@ -3725,14 +3722,14 @@ export default function App() {
 
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Import / Export</h2>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <button onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
+            <button onClick={saveAndExportFullBackup} style={{ ...compactSaveButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               Speichern
             </button>
-            <button onClick={() => exportBackup("Manuelles komplettes Backup")} style={compactPrimaryButtonStyle}>
+            <button onClick={() => exportBackup("Manuelles komplettes Backup")} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               Backup erstellen
             </button>
-            <label style={{ ...compactHomeButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <label style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
               Backup importieren
               <input
                 type="file"
@@ -4186,39 +4183,7 @@ export default function App() {
 
         {warningsPanel}
 
-        <div style={{ ...basePanelStyle }}>
-          <h2 style={{ marginTop: 0, color: colors.title }}>
-            Änderungsprotokoll
-          </h2>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-            {getChangeLogFilterOptions().map((option) => (
-              <button
-                key={option}
-                onClick={() => setChangeLogFilter(option)}
-                style={changeLogFilter === option ? activeRaceButtonStyle : secondaryButtonStyle}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-          {filteredChangeLog.length === 0 ? (
-            <div style={{ color: colors.muted }}>
-              Noch keine protokollierten Aktionen.
-            </div>
-          ) : (
-            <div style={{ maxHeight: 320, overflow: "auto", borderTop: "1px solid #eef2f6" }}>
-              {filteredChangeLog.slice(0, 50).map((entry, index) => (
-                <div
-                  key={`${entry}-${index}`}
-                  style={{ padding: "8px 0", borderBottom: "1px solid #eef2f6" }}
-                >
-                  {entry}
-                </div>
-              ))}
-            </div>
-          )}
-          {versionFooter}
-        </div>
+        {versionFooter}
       </div>
     );
   }
