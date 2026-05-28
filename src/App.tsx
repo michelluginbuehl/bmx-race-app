@@ -69,7 +69,7 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.1";
+const APP_VERSION = "v1.9.2";
 const APP_NAME = "BMX Race Manager";
 const APP_CHANGE_NOTE = "Papierkorb, Archiv, Suche und Mehrfachauswahl ergänzt";
 
@@ -628,6 +628,19 @@ export default function App() {
     return unique.size;
   };
 
+  const getManagedEventRaceParticipantCounts = (event: ManagedEvent) => {
+    const raceCount = getManagedEventRaceCount(event.id, event.type);
+    const eventRiders = masterParticipants.filter((rider: any) => !rider.deletedAt && rider.eventId === event.id);
+    return RACES.slice(0, raceCount).map((race) => {
+      const flag = raceKeyMap[race];
+      const unique = new Set<string>();
+      eventRiders
+        .filter((rider: any) => !!rider[flag])
+        .forEach((rider: any) => unique.add(getMasterParticipantKey(rider)));
+      return { race, count: unique.size };
+    });
+  };
+
   const deleteMasterParticipantGroup = async (participant: any) => {
     const name = participant?.name || "diesen Teilnehmer";
     const eventCount = Array.isArray(participant?.events) ? participant.events.length : 0;
@@ -734,7 +747,8 @@ export default function App() {
 
   const getMasterParticipantSuggestions = () => {
     const query = eventParticipantSearch.trim().toLowerCase();
-    const groups = getMasterParticipantGroups();
+    const existingKeys = new Set(allRiders.map((rider: any) => getMasterParticipantKey(rider)));
+    const groups = getMasterParticipantGroups().filter((participant: any) => !existingKeys.has(participant.key));
     if (!query) return groups;
     const parts = query.split(/\s+/).filter(Boolean);
     return groups.filter((participant: any) => {
@@ -3938,16 +3952,15 @@ export default function App() {
                         style={{
                           ...compactHomeButtonStyle,
                           width: "100%",
-                          aspectRatio: "1 / 1",
-                          minHeight: 260,
+                          minHeight: 132,
                           textAlign: "left",
                           display: "grid",
-                          gridTemplateRows: "1fr auto auto",
-                          alignItems: "stretch",
-                          gap: 10,
+                          gridTemplateRows: "auto auto 1fr auto",
+                          alignItems: "start",
+                          gap: 7,
                           cursor: "pointer",
                           boxSizing: "border-box",
-                          padding: 18,
+                          padding: 14,
                           justifyItems: "stretch",
                           overflow: "hidden",
                         }}
@@ -3955,9 +3968,9 @@ export default function App() {
                         <span style={{ alignSelf: "start", minWidth: 0 }}>
                           <span
                             style={{
-                              fontSize: 16,
+                              fontSize: 15,
                               fontWeight: 900,
-                              lineHeight: 1.16,
+                              lineHeight: 1.12,
                               display: "block",
                               overflowWrap: "anywhere",
                               wordBreak: "break-word",
@@ -3966,10 +3979,14 @@ export default function App() {
                             {event.name}
                           </span>
                         </span>
-                        <span style={{ ...getStatusBadgeStyle(event.type === "single" ? "Einzelrennen" : "Rennserie"), justifySelf: "start" }}>{event.type === "single" ? "Einzel" : "Serie"}</span>
-                        <span style={{ color: colors.title, fontWeight: 900, fontSize: 14 }}>
-                          Teilnehmer: {getManagedEventParticipantCount(event.id)}
-                        </span>
+                        <span style={{ ...getStatusBadgeStyle(event.type === "single" ? "Einzelrennen" : "Rennserie"), justifySelf: "start", fontSize: 11, padding: "3px 8px" }}>{event.type === "single" ? "Einzel" : "Serie"}</span>
+                        <div style={{ color: colors.title, fontWeight: 900, fontSize: 12, lineHeight: 1.22, display: "grid", gridTemplateColumns: event.type === "series" ? "repeat(2, minmax(0, 1fr))" : "1fr", gap: "2px 10px" }}>
+                          {event.type === "series" ? getManagedEventRaceParticipantCounts(event).map((item) => (
+                            <span key={`${event.id}-${item.race}`} style={{ whiteSpace: "nowrap" }}>{item.race}: {item.count}</span>
+                          )) : (
+                            <span>Teilnehmer: {getManagedEventParticipantCount(event.id)}</span>
+                          )}
+                        </div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignItems: "stretch" }}>
                           <button
                             type="button"
