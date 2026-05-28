@@ -12,6 +12,15 @@ const BOX_MIN_HEIGHT = 8 * ROW_HEIGHT + 34;
 const RACES = ["Race 1", "Race 2", "Race 3", "Race 4", "Race 5", "Race 6", "Race 7", "Race 8", "Race 9", "Race 10"] as const;
 type RaceName = (typeof RACES)[number];
 
+type ManagedEvent = {
+  id: string;
+  type: "series" | "single";
+  name: string;
+  year: number;
+  createdAt: string;
+  updatedAt?: string;
+};
+
 const BMX_AGE_CATEGORIES = [
   {
     minBoys: 0,
@@ -58,15 +67,18 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.7.6";
+const APP_VERSION = "v1.8.0";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Duplikatprüfung bei Erfassung und Import ergänzt";
+const APP_CHANGE_NOTE = "Startseite mit Rennserien/Rennen, History und Event-Daten ergänzt";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
   const [viewMode, setViewMode] = useState<
     "dashboard" | "participants" | "race" | "overall"
   >("dashboard");
+  const [appShellView, setAppShellView] = useState<"events" | "manager" | "history">("events");
+  const [managedEvents, setManagedEvents] = useState<ManagedEvent[]>([]);
+  const [currentEventId, setCurrentEventId] = useState<string>("");
 
   const [allRiders, setAllRiders] = useState<any[]>([]);
   const [riders, setRiders] = useState<any[]>([]);
@@ -351,6 +363,81 @@ export default function App() {
     return allRiders.filter((r: any) => getRiderSearchText(r).includes(query)).slice(0, 12);
   }, [allRiders, globalSearch]);
 
+
+  const EVENT_LIST_KEY = "bmx_managed_events_v1";
+
+  const getRawManagedEvents = (): ManagedEvent[] => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(EVENT_LIST_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveManagedEvents = (events: ManagedEvent[]) => {
+    const sorted = [...events].sort((a, b) => (b.year || 0) - (a.year || 0) || String(b.createdAt).localeCompare(String(a.createdAt)));
+    localStorage.setItem(EVENT_LIST_KEY, JSON.stringify(sorted));
+    setManagedEvents(sorted);
+  };
+
+  const scopedKeyForEvent = (eventId: string, key: string) => {
+    if (!eventId || eventId === "legacy") return key;
+    if (!key.startsWith("bmx_") || key.startsWith("bmx_event_")) return key;
+    if (key === EVENT_LIST_KEY) return key;
+    return `bmx_event_${eventId}_${key}`;
+  };
+
+  const scopedKey = (key: string) => scopedKeyForEvent(currentEventId, key);
+
+  const getCurrentEvent = () => managedEvents.find((event) => event.id === currentEventId) || null;
+
+  const getEventDisplayName = (event: ManagedEvent) => `${event.name || (event.type === "single" ? "Einzel Rennen" : "Rennserie")} · ${event.year}`;
+
+  const createManagedEvent = (type: "series" | "single") => {
+    const defaultName = type === "single" ? "Einzel Rennen" : "Neue Rennserie";
+    const name = window.prompt(type === "single" ? "Name des Einzelrennens" : "Name der Rennserie", defaultName);
+    if (!name) return;
+    const yearValue = window.prompt("Jahr", String(new Date().getFullYear()));
+    const year = Math.max(2000, Math.min(2100, Number(yearValue) || new Date().getFullYear()));
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const nextEvent: ManagedEvent = { id, type, name: name.trim(), year, createdAt, updatedAt: createdAt };
+    const nextEvents = [...managedEvents, nextEvent];
+    saveManagedEvents(nextEvents);
+    localStorage.setItem(scopedKeyForEvent(id, "bmx_home_event_series"), JSON.stringify(name.trim()));
+    localStorage.setItem(scopedKeyForEvent(id, "bmx_series_race_count"), JSON.stringify(type === "single" ? 1 : 4));
+    localStorage.setItem(scopedKeyForEvent(id, "bmx_overall_counting_races"), JSON.stringify(type === "single" ? 1 : 3));
+    openManagedEvent(nextEvent);
+  };
+
+  const openManagedEvent = (event: ManagedEvent) => {
+    setCurrentEventId(event.id);
+    setAppShellView("manager");
+    setViewMode("dashboard");
+    setInitialLoaded(false);
+  };
+
+  const getEventGroupedByYear = () => {
+    const groups: Record<string, ManagedEvent[]> = {};
+    managedEvents.forEach((event) => {
+      const year = String(event.year || new Date(event.createdAt).getFullYear() || new Date().getFullYear());
+      if (!groups[year]) groups[year] = [];
+      groups[year].push(event);
+    });
+    return Object.keys(groups)
+      .sort((a, b) => Number(b) - Number(a))
+      .map((year) => ({ year, events: groups[year].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))) }));
+  };
+
+  const getEventHistoryEntries = () => {
+    return managedEvents.map((event) => {
+      const logs = JSON.parse(localStorage.getItem(scopedKeyForEvent(event.id, "bmx_change_log")) || "[]");
+      const backups = JSON.parse(localStorage.getItem(scopedKeyForEvent(event.id, "bmx_backup_history")) || "[]");
+      return { event, logs: Array.isArray(logs) ? logs : [], backups: Array.isArray(backups) ? backups : [] };
+    });
+  };
+
   const getStoredRaceData = (race: RaceName, key: string, fallback: any) => {
     if (race === selectedRace && key === "heats") return heats;
     if (race === selectedRace && key === "finals") return finals;
@@ -492,21 +579,23 @@ export default function App() {
   );
 
   const getStorageKey = (suffix: string) =>
-    `bmx_${selectedRace.toLowerCase().replace(/\s+/g, "_")}_${suffix}`;
+    scopedKey(`bmx_${selectedRace.toLowerCase().replace(/\s+/g, "_")}_${suffix}`);
 
   const getRaceStorageKey = (race: RaceName, suffix: string) =>
-    `bmx_${race.toLowerCase().replace(/\s+/g, "_")}_${suffix}`;
+    scopedKey(`bmx_${race.toLowerCase().replace(/\s+/g, "_")}_${suffix}`);
 
   const saveAppData = async (key: string, value: any) => {
-    await db.table("appData").put({ key, value });
+    const storageKey = scopedKey(key);
+    await db.table("appData").put({ key: storageKey, value });
   };
 
   const loadAppData = async <T,>(key: string, fallback: T): Promise<T> => {
-    const saved = await db.table("appData").get(key);
+    const storageKey = scopedKey(key);
+    const saved = await db.table("appData").get(storageKey);
     if (saved && Object.prototype.hasOwnProperty.call(saved, "value"))
       return saved.value as T;
 
-    const localValue = localStorage.getItem(key);
+    const localValue = localStorage.getItem(storageKey);
     if (localValue === null) return fallback;
 
     try {
@@ -517,21 +606,27 @@ export default function App() {
   };
 
   const saveBoth = async (key: string, value: any) => {
+    const storageKey = scopedKey(key);
     localStorage.setItem(
-      key,
+      storageKey,
       typeof value === "string" ? value : JSON.stringify(value),
     );
     await saveAppData(key, value);
   };
 
+  const belongsToCurrentEvent = (rider: any) => {
+    if (!currentEventId || currentEventId === "legacy") return !rider.eventId || rider.eventId === "legacy";
+    return rider.eventId === currentEventId;
+  };
+
   const loadAllRiders = async () => {
-    const all = (await db.table("riders").toArray()).map(normalizeRider);
+    const all = (await db.table("riders").toArray()).map(normalizeRider).filter(belongsToCurrentEvent);
 
     setAllRiders(sortRidersByCategoryAndName(all));
   };
 
   const loadRaceRiders = async () => {
-    const all = (await db.table("riders").toArray()).map(normalizeRider);
+    const all = (await db.table("riders").toArray()).map(normalizeRider).filter(belongsToCurrentEvent);
     const flag = raceKeyMap[selectedRace];
 
     const filtered = all.filter((r: any) => !!r[flag]);
@@ -551,6 +646,23 @@ export default function App() {
   }, [editingRider?.id, viewMode]);
 
   useEffect(() => {
+    const existing = getRawManagedEvents();
+    if (existing.length > 0) {
+      saveManagedEvents(existing);
+      return;
+    }
+    const legacyEvent: ManagedEvent = {
+      id: "legacy",
+      type: "series",
+      name: "Bestehende Rennserie",
+      year: new Date().getFullYear(),
+      createdAt: new Date().toISOString(),
+    };
+    saveManagedEvents([legacyEvent]);
+  }, []);
+
+  useEffect(() => {
+    if (appShellView !== "manager" || !currentEventId) return;
     const loadInitialData = async () => {
       const allSavedAppData = await db.table("appData").toArray();
       allSavedAppData.forEach((row: any) => {
@@ -608,7 +720,7 @@ export default function App() {
     };
 
     loadInitialData();
-  }, []);
+  }, [appShellView, currentEventId]);
 
   useEffect(() => {
     if (!initialLoaded) return;
@@ -825,7 +937,9 @@ export default function App() {
     )
       return;
     await exportBackup("Sicherheitsbackup vor Teilnehmer-Löschung");
-    await db.table("riders").clear();
+    const allBeforeDelete = await db.table("riders").toArray();
+    const currentIds = allBeforeDelete.filter(belongsToCurrentEvent).map((r: any) => r.id);
+    if (currentIds.length > 0) await db.table("riders").bulkDelete(currentIds);
     setEditingRider(null);
     setAllRiders([]);
     setRiders([]);
@@ -841,7 +955,7 @@ export default function App() {
   const deleteAllRaceAssignments = async () => {
     if (!window.confirm(`${selectedRace}: Race-Zuordnungen wirklich löschen?`))
       return;
-    const all = await db.table("riders").toArray();
+    const all = (await db.table("riders").toArray()).filter(belongsToCurrentEvent);
     const flag = raceKeyMap[selectedRace];
 
     for (const rider of all) {
@@ -2924,8 +3038,11 @@ export default function App() {
 
   const exportBackup = async (reason = "Manuelles Backup") => {
     try {
-      const ridersBackup = await db.table("riders").toArray();
-      const appDataBackup = await db.table("appData").toArray();
+      const ridersBackup = (await db.table("riders").toArray()).filter(belongsToCurrentEvent);
+      const allAppDataBackup = await db.table("appData").toArray();
+      const appDataBackup = currentEventId && currentEventId !== "legacy"
+        ? allAppDataBackup.filter((row: any) => String(row.key || "").startsWith(`bmx_event_${currentEventId}_`))
+        : allAppDataBackup.filter((row: any) => !String(row.key || "").startsWith("bmx_event_"));
 
       const backup = {
         app: APP_NAME,
@@ -3019,16 +3136,32 @@ export default function App() {
         db.table("riders"),
         db.table("appData"),
         async () => {
-          await db.table("riders").clear();
-          await db.table("appData").clear();
+          const existingRiders = await db.table("riders").toArray();
+          const currentIds = existingRiders.filter(belongsToCurrentEvent).map((r: any) => r.id);
+          if (currentIds.length > 0) await db.table("riders").bulkDelete(currentIds);
+          const existingAppData = await db.table("appData").toArray();
+          const appDataIds = existingAppData
+            .filter((row: any) => currentEventId && currentEventId !== "legacy"
+              ? String(row.key || "").startsWith(`bmx_event_${currentEventId}_`)
+              : !String(row.key || "").startsWith("bmx_event_"))
+            .map((row: any) => row.key);
+          if (appDataIds.length > 0) await db.table("appData").bulkDelete(appDataIds);
           if (backup.riders.length > 0)
-            await db.table("riders").bulkPut(backup.riders);
+            await db.table("riders").bulkPut(backup.riders.map((r: any) => ({ ...r, eventId: currentEventId || "legacy" })));
           if (backup.appData.length > 0)
             await db.table("appData").bulkPut(backup.appData);
         },
       );
 
-      localStorage.clear();
+      if (currentEventId && currentEventId !== "legacy") {
+        Object.keys(localStorage).forEach((key) => {
+          if (key.startsWith(`bmx_event_${currentEventId}_`)) localStorage.removeItem(key);
+        });
+      } else {
+        Object.keys(localStorage).forEach((key) => {
+          if (!key.startsWith("bmx_event_") && key !== EVENT_LIST_KEY) localStorage.removeItem(key);
+        });
+      }
       for (const row of backup.appData) {
         localStorage.setItem(
           row.key,
@@ -3198,6 +3331,103 @@ export default function App() {
     </div>
   );
 
+
+  if (appShellView === "events") {
+    return (
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1120, margin: "0 auto" }}>
+        {renderAppHeader()}
+        <div style={{ ...basePanelStyle, marginBottom: 16 }}>
+          <h2 style={{ marginTop: 0, color: colors.title }}>Startseite</h2>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button onClick={() => createManagedEvent("series")} style={mainButtonStyle}>Rennserie erstellen</button>
+            <button onClick={() => createManagedEvent("single")} style={secondaryButtonStyle}>Einzel Rennen erstellen</button>
+            <button onClick={() => setAppShellView("history")} style={{ ...smallGhostButtonStyle, marginLeft: "auto" }}>History / Speicher & Import</button>
+          </div>
+        </div>
+        <div style={{ ...basePanelStyle }}>
+          <h2 style={{ marginTop: 0, color: colors.title }}>Erstellte Rennen / Rennserien</h2>
+          {managedEvents.length === 0 ? (
+            <div style={{ color: colors.muted }}>Noch keine Rennen oder Rennserien erstellt.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 16 }}>
+              {getEventGroupedByYear().map((group) => (
+                <div key={group.year}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "6px 0 10px" }}>
+                    <strong style={{ color: colors.title, fontSize: 18 }}>{group.year}</strong>
+                    <div style={{ height: 1, background: colors.cardBorder, flex: 1 }} />
+                  </div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {group.events.map((event) => (
+                      <button
+                        key={event.id}
+                        onClick={() => openManagedEvent(event)}
+                        style={{
+                          ...compactHomeButtonStyle,
+                          width: "100%",
+                          minHeight: 70,
+                          textAlign: "left",
+                          display: "grid",
+                          gridTemplateColumns: "1fr auto",
+                          alignItems: "center",
+                        }}
+                      >
+                        <span>
+                          <span style={{ fontSize: 17, fontWeight: 900 }}>{event.name}</span><br />
+                          <span style={{ color: colors.muted, fontSize: 13 }}>{event.type === "single" ? "Einzel Rennen" : "Rennserie"} · erstellt {formatDateTime(event.createdAt)}</span>
+                        </span>
+                        <span style={getStatusBadgeStyle(event.type === "single" ? "Einzelrennen" : "Rennserie")}>{event.type === "single" ? "Einzel" : "Serie"}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {versionFooter}
+        </div>
+      </div>
+    );
+  }
+
+  if (appShellView === "history") {
+    const historyEntries = getEventHistoryEntries();
+    return (
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1120, margin: "0 auto" }}>
+        {renderAppHeader()}
+        <div style={{ ...basePanelStyle, marginBottom: 16 }}>
+          <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
+        </div>
+        <div style={{ ...basePanelStyle }}>
+          <h2 style={{ marginTop: 0, color: colors.title }}>Änderungshistory / Speicher- und Import-History</h2>
+          {historyEntries.length === 0 ? (
+            <div style={{ color: colors.muted }}>Noch keine History vorhanden.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 18 }}>
+              {historyEntries.map(({ event, logs, backups }) => (
+                <div key={event.id} style={{ borderTop: "1px solid #e5ebf1", paddingTop: 12 }}>
+                  <h3 style={{ margin: "0 0 8px", color: colors.title }}>{getEventDisplayName(event)}</h3>
+                  <strong>Speicher / Import / Backup</strong>
+                  <div style={{ marginTop: 6, color: colors.muted, display: "grid", gap: 4 }}>
+                    {backups.length ? backups.slice(0, 8).map((entry: any, index: number) => (
+                      <div key={`${event.id}-backup-${index}`}>{formatDateTime(entry.iso)} · {entry.fileName || "Backup"}{entry.reason ? ` · ${entry.reason}` : ""}</div>
+                    )) : <div>Keine Backup-Einträge.</div>}
+                  </div>
+                  <strong style={{ display: "block", marginTop: 12 }}>Änderungen</strong>
+                  <div style={{ marginTop: 6, color: colors.muted, display: "grid", gap: 4 }}>
+                    {logs.length ? logs.slice(0, 12).map((entry: any, index: number) => (
+                      <div key={`${event.id}-log-${index}`}>{entry}</div>
+                    )) : <div>Keine Änderungen protokolliert.</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {versionFooter}
+        </div>
+      </div>
+    );
+  }
+
   if (viewMode === "dashboard") {
     return (
       <div
@@ -3212,6 +3442,14 @@ export default function App() {
         }}
       >
         {renderAppHeader()}
+
+        <div style={{ ...basePanelStyle, marginBottom: 14, display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+          <div>
+            <strong>{getCurrentEvent()?.name || "Rennserie"}</strong><br />
+            <span style={{ color: colors.muted }}>{getCurrentEvent()?.type === "single" ? "Einzel Rennen" : "Rennserie"} · {getCurrentEvent()?.year || ""}</span>
+          </div>
+          <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zur Startseite</button>
+        </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 14 }}>
           <div
@@ -3729,6 +3967,7 @@ export default function App() {
             onCancelEdit={() => setEditingRider(null)}
             existingCategories={sortCategories(Object.keys(groupedAll))}
             eventYear={participantEventYear}
+            currentEventId={currentEventId}
           />
         </div>
 
