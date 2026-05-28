@@ -9,6 +9,7 @@ type Props = {
   existingCategories?: string[];
   eventYear?: string;
   currentEventId?: string;
+  masterMode?: boolean;
 };
 
 const raceDefaults = Object.fromEntries(
@@ -226,6 +227,7 @@ export default function RiderForm({
   onCancelEdit,
   eventYear,
   currentEventId,
+  masterMode = false,
 }: Props) {
   const [name, setName] = useState("");
   const [plate, setPlate] = useState("");
@@ -325,7 +327,7 @@ export default function RiderForm({
       club: club.trim(),
       cruiser,
       isCruiser: cruiser,
-      eventId: currentEventId || "legacy",
+      eventId: masterMode ? "master" : currentEventId || "legacy",
     };
 
     if (!editId && !allowDuplicateSave) {
@@ -343,8 +345,10 @@ export default function RiderForm({
     if (editId) {
       await db.table("riders").update(editId, rider);
     } else {
+      const id = crypto.randomUUID();
       await db.table("riders").add({
-        id: crypto.randomUUID(),
+        id,
+        masterId: masterMode ? id : "",
         ...rider,
         ...raceDefaults,
       });
@@ -420,7 +424,8 @@ export default function RiderForm({
           club: importedClub,
           cruiser: importedCruiser,
           isCruiser: importedCruiser,
-          eventId: currentEventId || "legacy",
+          eventId: masterMode ? "master" : currentEventId || "legacy",
+          masterId: masterMode ? "" : "",
           ...Object.fromEntries(
             Array.from({ length: 10 }, (_, raceIndex) => {
               const raceNo = raceIndex + 1;
@@ -429,6 +434,8 @@ export default function RiderForm({
             }),
           ),
         };
+
+        if (masterMode) importedRider.masterId = importedRider.id;
 
         const categoryHint = importedCruiser ? "Cruiser" : `${importedGender}-${importedBirthYear}`;
         const duplicateKey = `${categoryHint}|||${importedPlate}`;
@@ -500,7 +507,7 @@ export default function RiderForm({
   return (
     <div>
       <h2 style={{ marginTop: 0, color: "#1f2a37" }}>
-        {editId ? "Teilnehmer bearbeiten" : "Teilnehmer erfassen"}
+        {editId ? "Teilnehmer bearbeiten" : masterMode ? "Teilnehmer in Hauptdatenbank erfassen" : "Teilnehmer erfassen"}
       </h2>
 
       <form onSubmit={saveRider}>
@@ -636,7 +643,7 @@ export default function RiderForm({
           style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}
         >
           <button type="submit" style={buttonStyle}>
-            {editId ? "Speichern" : "Teilnehmer hinzufügen"}
+            {editId ? "Speichern" : masterMode ? "In Hauptdatenbank speichern" : "Teilnehmer hinzufügen"}
           </button>
           {editId && (
             <button
