@@ -527,9 +527,31 @@ export default function RiderForm({
               <div style={{ marginTop: 6, border: "1px solid #f59e0b", borderRadius: 8, background: "#fffbeb", padding: 8, fontSize: 13, color: "#78350f" }}>
                 <strong>Mögliche vorhandene Teilnehmer</strong>
                 {nameSuggestions.map((suggestion) => (
-                  <div key={`${suggestion.id || suggestion.name}-${suggestion.score}`} style={{ marginTop: 4 }}>
+                  <button
+                    key={`${suggestion.id || suggestion.name}-${suggestion.score}`}
+                    type="button"
+                    onClick={() => {
+                      setName(suggestion.name || "");
+                      if (suggestion.plate) setPlate(String(suggestion.plate));
+                      if (suggestion.birthYear) setBirthYear(String(suggestion.birthYear));
+                      if (suggestion.gender) setGender(normalizeGender(suggestion.gender));
+                      if (suggestion.club) setClub(String(suggestion.club));
+                      setNameSuggestions([]);
+                    }}
+                    style={{
+                      marginTop: 4,
+                      padding: "6px 8px",
+                      textAlign: "left",
+                      border: "1px solid #fcd34d",
+                      borderRadius: 8,
+                      background: "#fff7ed",
+                      color: "#78350f",
+                      cursor: "pointer",
+                      width: "100%",
+                    }}
+                  >
                     #{suggestion.plate || "-"} {suggestion.name} · {suggestion.birthYear || "-"} | {suggestion.gender || "-"}{suggestion.club ? ` · ${suggestion.club}` : ""} · {suggestion.score}%
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
