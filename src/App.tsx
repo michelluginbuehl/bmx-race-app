@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.4";
+const APP_VERSION = "v1.9.5";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Rennen und Rennserien können auf der Startseite gelöscht werden";
+const APP_CHANGE_NOTE = "Erstellen, Löschen und Gesamtwertungsberechnung verbessert";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -113,6 +113,7 @@ export default function App() {
   const [raceNavigationOpen, setRaceNavigationOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [eventSearch, setEventSearch] = useState("");
+  const [showEventCreateChoice, setShowEventCreateChoice] = useState(false);
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [eventParticipantSearch, setEventParticipantSearch] = useState("");
   const [selectedMasterParticipantKeys, setSelectedMasterParticipantKeys] = useState<string[]>([]);
@@ -527,17 +528,16 @@ export default function App() {
 
   const deleteManagedEvent = async (event: ManagedEvent) => {
     const eventName = getEventDisplayName(event);
-    const confirmation = window.prompt(
-      `${eventName} wirklich löschen?
+    if (
+      !window.confirm(
+        `${eventName} wirklich löschen?
 
 Das Rennen / die Rennserie wird von der Startseite entfernt. Alle zugehörigen Teilnehmer-Zuordnungen, Vorläufe, Finals, Resultate und Einstellungen dieses Eintrags werden gelöscht.
 
-Vor dem Löschen wird automatisch ein komplettes Backup erstellt.
-
-Zum Bestätigen bitte LÖSCHEN eingeben.`,
-      "",
-    );
-    if (confirmation !== "LÖSCHEN") return;
+Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
+      )
+    )
+      return;
 
     await exportBackup(`Sicherheitsbackup vor Löschen von ${eventName}`);
 
@@ -3351,55 +3351,88 @@ Zum Bestätigen bitte LÖSCHEN eingeben.`,
   };
 
 
+  const getRoundNameFromFinalResultKey = (key: string) => {
+    const roundOrder = ["A-Final", "B-Final", "C-Final", "4. Vorlauf"];
+    return roundOrder.find((roundName) => key.endsWith(`_${roundName}`)) || "";
+  };
+
+  const buildRaceCategoryRankingFromStoredFinals = (
+    race: RaceName,
+    category: string,
+    parsedFinalResults: Record<string, any[]>,
+    savedFinalOrder: Record<string, string[]>,
+  ) => {
+    const roundOrder = ["A-Final", "B-Final", "C-Final", "4. Vorlauf"];
+    const ranking: any[] = [];
+    let globalRank = 1;
+
+    roundOrder.forEach((roundName) => {
+      const roundRows: any[] = [];
+
+      Object.keys(parsedFinalResults || {}).forEach((key) => {
+        if (getRoundNameFromFinalResultKey(key) !== roundName) return;
+        const value = Array.isArray(parsedFinalResults[key]) ? parsedFinalResults[key] : [];
+        value.forEach((entry: any) => {
+          const riderData = allRiders.find((x: any) => String(x.id) === String(entry.riderId));
+          const originalCategory = riderData?.category || entry.originalCategory || entry.category || "";
+          if (originalCategory !== category) return;
+          roundRows.push({
+            ...entry,
+            riderId: String(entry.riderId),
+            originalCategory,
+            category,
+            roundName,
+          });
+        });
+      });
+
+      sortRaceResultRows(roundRows).forEach((row) => {
+        ranking.push({ ...row, rank: globalRank });
+        globalRank += 1;
+      });
+    });
+
+    const savedOrder = savedFinalOrder[category] || [];
+    if (savedOrder.length > 0) {
+      const map = new Map(ranking.map((item: any) => [String(item.riderId), item]));
+      const ordered: any[] = [];
+      savedOrder.forEach((id: string) => {
+        const found = map.get(String(id));
+        if (found) {
+          ordered.push(found);
+          map.delete(String(id));
+        }
+      });
+      map.forEach((value) => ordered.push(value));
+      return ordered.map((item, index) => ({ ...item, rank: index + 1 }));
+    }
+
+    return sortRaceResultRows(ranking).map((item, index) => ({ ...item, rank: index + 1 }));
+  };
+
   const buildRacePointsMap = (race: RaceName) => {
     const parsed = loadFinalResultsForRace(race);
     const savedFinalOrder = loadFinalManualOrderForRace(race);
 
-    const byOriginalCategory: Record<string, any[]> = {};
-
-    Object.keys(parsed).forEach((key) => {
-      const value = parsed[key] || [];
+    const categories = new Set<string>();
+    Object.keys(parsed || {}).forEach((key) => {
+      const value = Array.isArray(parsed[key]) ? parsed[key] : [];
       value.forEach((entry: any) => {
-        const riderData = allRiders.find(
-          (x: any) => String(x.id) === String(entry.riderId),
-        );
-        const originalCategory = riderData?.category || entry.category || "";
-        if (!originalCategory) return;
-        if (!byOriginalCategory[originalCategory])
-          byOriginalCategory[originalCategory] = [];
-        byOriginalCategory[originalCategory].push(entry);
+        const riderData = allRiders.find((x: any) => String(x.id) === String(entry.riderId));
+        const originalCategory = riderData?.category || entry.originalCategory || entry.category || "";
+        if (originalCategory) categories.add(originalCategory);
       });
     });
 
     const pointsMap: Record<string, number | null> = {};
 
-    Object.keys(byOriginalCategory).forEach((category) => {
-      const ranking = byOriginalCategory[category];
-      const savedOrder = savedFinalOrder[category] || [];
-      let orderedRanking = ranking;
-
-      if (savedOrder.length > 0) {
-        const map = new Map(
-          ranking.map((item: any) => [String(item.riderId), item]),
-        );
-        const ordered: any[] = [];
-        savedOrder.forEach((id: string) => {
-          const found = map.get(String(id));
-          if (found) {
-            ordered.push(found);
-            map.delete(String(id));
-          }
-        });
-        map.forEach((value) => ordered.push(value));
-        orderedRanking = ordered;
-      }
-
-      // Für die Gesamtwertung zählt exakt die gespeicherte Race-Rangliste.
-      // Wenn die Rangliste manuell verschoben wurde, darf hier NICHT nochmals sortiert werden,
-      // sonst würde die Gesamtwertung wieder von der manuellen Reihenfolge abweichen.
-      const raceRankingForOverall = savedOrder.length > 0
-        ? orderedRanking
-        : sortRaceResultRows(orderedRanking);
+    categories.forEach((category) => {
+      const raceRankingForOverall = buildRaceCategoryRankingFromStoredFinals(
+        race,
+        category,
+        parsed,
+        savedFinalOrder,
+      );
 
       raceRankingForOverall.forEach((r: any, index: number) => {
         const riderId = String(r.riderId);
@@ -3967,10 +4000,46 @@ Zum Bestätigen bitte LÖSCHEN eingeben.`,
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Startseite</h2>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <button onClick={() => createManagedEvent()} style={mainButtonStyle}>Rennen / Rennserie erstellen</button>
+            <button onClick={() => setShowEventCreateChoice((open) => !open)} style={mainButtonStyle}>Rennen / Rennserie erstellen</button>
             <button onClick={() => setAppShellView("masterParticipants")} style={secondaryButtonStyle}>Teilnehmer</button>
             <button onClick={() => setAppShellView("history")} style={{ ...smallGhostButtonStyle, marginLeft: "auto" }}>History / Speicher & Import</button>
           </div>
+          {showEventCreateChoice && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: 14,
+                border: `1px solid ${colors.cardBorder}`,
+                borderRadius: 14,
+                background: "#f8fbff",
+              }}
+            >
+              <div style={{ fontWeight: 900, color: colors.title, marginBottom: 10 }}>
+                Was möchtest du erstellen?
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => {
+                    setShowEventCreateChoice(false);
+                    createManagedEvent("single");
+                  }}
+                  style={compactHomeButtonStyle}
+                >
+                  Einzelrennen
+                </button>
+                <button
+                  onClick={() => {
+                    setShowEventCreateChoice(false);
+                    createManagedEvent("series");
+                  }}
+                  style={compactPrimaryButtonStyle}
+                >
+                  Rennserie
+                </button>
+              </div>
+            </div>
+          )}
+
           <div style={{ marginTop: 14 }}>
             <label style={labelStyle}>Rennen/Rennserie suchen</label>
             <input
