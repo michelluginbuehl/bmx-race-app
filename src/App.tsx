@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { db } from "./db";
 import RiderForm from "./components/RiderForm";
 import { generateCategoryHeats, generateFinals } from "./race";
@@ -58,9 +58,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.7.3";
+const APP_VERSION = "v1.7.4";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Serie abschliessen, Vorlagen und Excel-Export ergänzt";
+const APP_CHANGE_NOTE = "Teilnehmer-Erfassung und Bearbeitungs-Scroll verbessert";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -76,6 +76,8 @@ export default function App() {
   const [finalResults, setFinalResults] = useState<any>({});
 
   const [editingRider, setEditingRider] = useState<any | null>(null);
+  const participantFormRef = useRef<HTMLDivElement | null>(null);
+  const participantRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [overallManualOrder, setOverallManualOrder] = useState<
     Record<string, string[]>
   >({});
@@ -537,6 +539,16 @@ export default function App() {
     setRiders(sortRidersByCategoryAndName(filtered));
     setAllRiders(sortRidersByCategoryAndName(all));
   };
+
+  useEffect(() => {
+    if (!editingRider || viewMode !== "participants") return;
+    window.setTimeout(() => {
+      participantFormRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 60);
+  }, [editingRider?.id, viewMode]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -3686,7 +3698,7 @@ export default function App() {
 
         {warningsPanel}
 
-        <div style={{ ...basePanelStyle, marginBottom: 20 }}>
+        <div ref={participantFormRef} style={{ ...basePanelStyle, marginBottom: 20 }}>
           <div style={{ maxWidth: 240, marginBottom: 14 }}>
             <label style={labelStyle}>Rennjahr für Kategorien</label>
             <input
@@ -3700,9 +3712,18 @@ export default function App() {
           </div>
           <RiderForm
             onChange={async () => {
+              const savedRiderId = editingRider?.id ? String(editingRider.id) : "";
               setEditingRider(null);
               await loadAllRiders();
               await loadRaceRiders();
+              if (savedRiderId) {
+                window.setTimeout(() => {
+                  participantRowRefs.current[savedRiderId]?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "center",
+                  });
+                }, 120);
+              }
             }}
             editingRider={editingRider}
             onCancelEdit={() => setEditingRider(null)}
@@ -3882,6 +3903,9 @@ export default function App() {
                 {filteredGroupedAll[cat].map((r: any) => (
                   <div
                     key={r.id}
+                    ref={(element) => {
+                      participantRowRefs.current[String(r.id || "")] = element;
+                    }}
                     style={{
                       display: "flex",
                       alignItems: "center",
