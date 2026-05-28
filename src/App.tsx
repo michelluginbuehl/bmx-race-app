@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.6";
+const APP_VERSION = "v1.9.7";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Manuelle Resultaterstellung und Gesamtwertungsbuttons verbessert";
+const APP_CHANGE_NOTE = "Manuelle Resultaterstellung zeigt alle Teilnehmer pro Kategorie";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -5129,7 +5129,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                 <button type="button" onClick={() => { setManualResultsMode(false); setManualResultOrder({}); }} style={compactHomeButtonStyle}>Abbrechen</button>
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
               {sortCategories(Object.keys(groupedRace)).map((cat) => {
                 const selectedIds = manualResultOrder[cat] || [];
                 return (
@@ -5138,8 +5138,15 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       <strong style={{ color: colors.title }}>{cat}</strong>
                       <span style={{ color: colors.muted, fontSize: 12, fontWeight: 800 }}>{selectedIds.length}/{(groupedRace[cat] || []).length}</span>
                     </div>
-                    <div style={{ display: "grid", gap: 6, maxHeight: 240, overflowY: "auto", paddingRight: 4 }}>
-                      {(groupedRace[cat] || []).map((r: any) => {
+                    <div style={{ display: "grid", gap: 6, paddingRight: 4 }}>
+                      {[...(groupedRace[cat] || [])]
+                        .sort((a: any, b: any) => {
+                          const plateA = Number(String(a.plate || "").replace(/\D/g, ""));
+                          const plateB = Number(String(b.plate || "").replace(/\D/g, ""));
+                          if (Number.isFinite(plateA) && Number.isFinite(plateB) && plateA !== plateB) return plateA - plateB;
+                          return String(a.name || "").localeCompare(String(b.name || ""), "de");
+                        })
+                        .map((r: any) => {
                         const riderId = String(r.id);
                         const selectedIndex = selectedIds.indexOf(riderId);
                         const selected = selectedIndex >= 0;
@@ -5150,7 +5157,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                             onClick={() => toggleManualResultRider(cat, r)}
                             style={{
                               display: "grid",
-                              gridTemplateColumns: "34px 70px minmax(0, 1fr) 78px",
+                              gridTemplateColumns: "44px 90px minmax(0, 1fr) 90px",
                               gap: 8,
                               alignItems: "center",
                               textAlign: "left",
@@ -5158,7 +5165,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                               background: selected ? "#eaf2ff" : "#fff",
                               color: colors.text,
                               borderRadius: 8,
-                              padding: "8px 9px",
+                              padding: "9px 10px",
                               cursor: "pointer",
                               fontWeight: selected ? 900 : 700,
                             }}
