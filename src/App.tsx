@@ -67,9 +67,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.8.6";
+const APP_VERSION = "v1.8.7";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Teilnehmerauswahl, Import/Export und Fusszeile bereinigt";
+const APP_CHANGE_NOTE = "Teilnehmer-Hauptdatenbank und Race-Teilnehmerbutton verbessert";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -3811,9 +3811,19 @@ export default function App() {
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1120, margin: "0 auto" }}>
         {renderAppHeader()}
-        <div style={{ ...basePanelStyle, marginBottom: 16, display: "flex", gap: 10, alignItems: "center" }}>
-          <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
-          <button onClick={loadMasterParticipants} style={compactHomeButtonStyle}>Teilnehmer neu laden</button>
+        <div style={{ ...basePanelStyle, marginBottom: 16, display: "flex", gap: 10, alignItems: "stretch" }}>
+          <button
+            onClick={() => setAppShellView("events")}
+            style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+          >
+            Zurück zur Startseite
+          </button>
+          <button
+            onClick={loadMasterParticipants}
+            style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+          >
+            Teilnehmer neu laden
+          </button>
         </div>
         <div style={{ ...basePanelStyle }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Teilnehmer-Hauptdatenbank</h2>
@@ -3823,8 +3833,11 @@ export default function App() {
           <div style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
             <RiderForm
               onChange={async () => {
+                setEditingRider(null);
                 await loadMasterParticipants();
               }}
+              editingRider={editingRider}
+              onCancelEdit={() => setEditingRider(null)}
               eventYear={String(new Date().getFullYear())}
               currentEventId="master"
               masterMode
@@ -3842,6 +3855,7 @@ export default function App() {
                     <th style={tableHeaderStyle}>Jg | B/G</th>
                     <th style={tableHeaderStyle}>Verein</th>
                     <th style={tableHeaderStyle}>Rennen / Rennserien</th>
+                    <th style={{ ...tableHeaderStyle, textAlign: "right" }}>Aktion</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3865,6 +3879,22 @@ export default function App() {
                           ))}
                           <span style={{ color: colors.blueBtn, fontWeight: 800, fontSize: 12 }}>Details/Rangierungen anzeigen</span>
                         </div>
+                      </td>
+                      <td style={{ ...tableCellStyle, textAlign: "right" }}>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedMasterParticipant(null);
+                            setEditingRider(participant.raw);
+                            window.setTimeout(() => {
+                              participantFormRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+                            }, 0);
+                          }}
+                          style={smallGhostButtonStyle}
+                        >
+                          Bearbeiten
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -4164,7 +4194,7 @@ export default function App() {
               onClick={() => setViewMode("participants")}
               style={{ ...compactHomeButtonStyle, flex: "0 0 180px", minHeight: 54, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
             >
-              Teilnehmer erfassen
+              Teilnehmer hinzufügen
             </button>
           </div>
         </div>
