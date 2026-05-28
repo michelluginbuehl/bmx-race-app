@@ -11,7 +11,7 @@ type Props = {
 };
 
 const raceDefaults = Object.fromEntries(
-  Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, true]),
+  Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false]),
 ) as Record<string, boolean>;
 
 const normalizeHeader = (value: any) =>
@@ -268,7 +268,7 @@ export default function RiderForm({
             Array.from({ length: 10 }, (_, raceIndex) => {
               const raceNo = raceIndex + 1;
               const value = getValue(row, [`Race ${raceNo}`, `Race${raceNo}`, `R${raceNo}`]);
-              return [`race${raceNo}`, value === "" ? true : parseBoolean(value)];
+              return [`race${raceNo}`, value === "" ? false : parseBoolean(value)];
             }),
           ),
         });
