@@ -643,7 +643,7 @@ export default function RiderForm({
           style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}
         >
           <button type="submit" style={buttonStyle}>
-            {editId ? "Speichern" : masterMode ? "In Hauptdatenbank speichern" : "Teilnehmer hinzufügen"}
+            {editId ? "Änderungen speichern" : masterMode ? "In Hauptdatenbank speichern" : "Teilnehmer hinzufügen"}
           </button>
           {editId && (
             <button
