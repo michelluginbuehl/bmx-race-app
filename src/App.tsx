@@ -58,9 +58,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.7.5";
+const APP_VERSION = "v1.7.6";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Bearbeitungsnavigation ohne Scroll-Effekt angepasst";
+const APP_CHANGE_NOTE = "Duplikatprüfung bei Erfassung und Import ergänzt";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
