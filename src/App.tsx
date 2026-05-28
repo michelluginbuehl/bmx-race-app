@@ -67,9 +67,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.8.7";
+const APP_VERSION = "v1.8.8";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Teilnehmer-Hauptdatenbank und Race-Teilnehmerbutton verbessert";
+const APP_CHANGE_NOTE = "Bearbeitungsnavigation, Startkacheln und Rennkopf verbessert";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -83,6 +83,7 @@ export default function App() {
   const [allRiders, setAllRiders] = useState<any[]>([]);
   const [masterParticipants, setMasterParticipants] = useState<any[]>([]);
   const [selectedMasterParticipant, setSelectedMasterParticipant] = useState<any | null>(null);
+  const [lastEditedMasterParticipantId, setLastEditedMasterParticipantId] = useState<string>("");
   const [riders, setRiders] = useState<any[]>([]);
   const [heats, setHeats] = useState<any>({});
   const [results, setResults] = useState<any>({});
@@ -3760,7 +3761,7 @@ export default function App() {
                     <strong style={{ color: colors.title, fontSize: 18 }}>{group.year}</strong>
                     <div style={{ height: 1, background: colors.cardBorder, flex: 1 }} />
                   </div>
-                  <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
                     {group.events.map((event) => (
                       <div
                         key={event.id}
@@ -3771,21 +3772,24 @@ export default function App() {
                         style={{
                           ...compactHomeButtonStyle,
                           width: "100%",
-                          minHeight: 70,
+                          aspectRatio: "1 / 1",
+                          minHeight: 170,
                           textAlign: "left",
                           display: "grid",
-                          gridTemplateColumns: "1fr auto auto",
-                          alignItems: "center",
+                          gridTemplateRows: "1fr auto auto",
+                          alignItems: "stretch",
                           gap: 10,
                           cursor: "pointer",
                           boxSizing: "border-box",
+                          padding: 14,
+                          justifyItems: "stretch",
                         }}
                       >
-                        <span>
-                          <span style={{ fontSize: 17, fontWeight: 900 }}>{event.name}</span><br />
-                          <span style={{ color: colors.muted, fontSize: 13 }}>{event.type === "single" ? "Einzelrennen" : "Rennserie"} · erstellt {formatDateTime(event.createdAt)}</span>
+                        <span style={{ alignSelf: "start" }}>
+                          <span style={{ fontSize: 17, fontWeight: 900, lineHeight: 1.2 }}>{event.name}</span><br />
+                          <span style={{ color: colors.muted, fontSize: 13, lineHeight: 1.35 }}>{event.type === "single" ? "Einzelrennen" : "Rennserie"} · erstellt {formatDateTime(event.createdAt)}</span>
                         </span>
-                        <span style={getStatusBadgeStyle(event.type === "single" ? "Einzelrennen" : "Rennserie")}>{event.type === "single" ? "Einzel" : "Serie"}</span>
+                        <span style={{ ...getStatusBadgeStyle(event.type === "single" ? "Einzelrennen" : "Rennserie"), justifySelf: "start" }}>{event.type === "single" ? "Einzel" : "Serie"}</span>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); renameManagedEvent(event); }}
@@ -3833,11 +3837,18 @@ export default function App() {
           <div style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
             <RiderForm
               onChange={async () => {
+                const editedId = String(editingRider?.id || lastEditedMasterParticipantId || "");
                 setEditingRider(null);
                 await loadMasterParticipants();
+                if (editedId) {
+                  setLastEditedMasterParticipantId(editedId);
+                  window.setTimeout(() => {
+                    participantRowRefs.current[`master-${editedId}`]?.scrollIntoView({ behavior: "auto", block: "center" });
+                  }, 0);
+                }
               }}
               editingRider={editingRider}
-              onCancelEdit={() => setEditingRider(null)}
+              onCancelEdit={() => { setEditingRider(null); setLastEditedMasterParticipantId(""); }}
               eventYear={String(new Date().getFullYear())}
               currentEventId="master"
               masterMode
@@ -3862,6 +3873,9 @@ export default function App() {
                   {groups.map((participant: any, index: number) => (
                     <tr
                       key={`${participant.name}-${participant.birthYear}-${participant.gender}-${index}`}
+                      ref={(element) => {
+                        participantRowRefs.current[`master-${String(participant.raw?.id || "")}`] = element as any;
+                      }}
                       onClick={() => setSelectedMasterParticipant(participant)}
                       title="Teilnehmerdetails anzeigen"
                       style={{ borderBottom: "1px solid #e5ebf1", cursor: "pointer" }}
@@ -3886,6 +3900,7 @@ export default function App() {
                           onClick={(event) => {
                             event.stopPropagation();
                             setSelectedMasterParticipant(null);
+                            setLastEditedMasterParticipantId(String(participant.raw?.id || ""));
                             setEditingRider(participant.raw);
                             window.setTimeout(() => {
                               participantFormRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
@@ -4040,12 +4055,24 @@ export default function App() {
       >
         {renderAppHeader()}
 
-        <div style={{ ...basePanelStyle, marginBottom: 14, display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+        <div
+          style={{
+            ...basePanelStyle,
+            marginBottom: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            justifyContent: "space-between",
+            background: "linear-gradient(135deg, #e8f1ff 0%, #f8fbff 100%)",
+            borderColor: "#9bbcff",
+            boxShadow: "0 10px 24px rgba(45, 108, 223, 0.14)",
+          }}
+        >
           <div>
-            <strong>{getCurrentEvent()?.name || "Rennserie"}</strong><br />
-            <span style={{ color: colors.muted }}>{getCurrentEvent()?.type === "single" ? "Einzel Rennen" : "Rennserie"} · {getCurrentEvent()?.year || ""}</span>
+            <strong style={{ fontSize: 22, color: colors.title }}>{getCurrentEvent()?.name || "Rennserie"}</strong><br />
+            <span style={{ color: colors.muted, fontSize: 15, fontWeight: 800 }}>{getCurrentEvent()?.type === "single" ? "Einzel Rennen" : "Rennserie"} · {getCurrentEvent()?.year || ""}</span>
           </div>
-          <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zur Startseite</button>
+          <button onClick={() => setAppShellView("events")} style={{ ...secondaryButtonStyle, minHeight: 46 }}>Zur Startseite</button>
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 14 }}>
