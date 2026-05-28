@@ -8,6 +8,7 @@ type Props = {
   onCancelEdit?: () => void;
   existingCategories?: string[];
   eventYear?: string;
+  currentEventId?: string;
 };
 
 const raceDefaults = Object.fromEntries(
@@ -224,6 +225,7 @@ export default function RiderForm({
   editingRider,
   onCancelEdit,
   eventYear,
+  currentEventId,
 }: Props) {
   const [name, setName] = useState("");
   const [plate, setPlate] = useState("");
@@ -239,6 +241,7 @@ export default function RiderForm({
   const [importDecisions, setImportDecisions] = useState<Record<string, "import" | "skip">>({});
   const [importSkippedRows, setImportSkippedRows] = useState<string[]>([]);
   const [importFileName, setImportFileName] = useState("");
+  const [nameSuggestions, setNameSuggestions] = useState<DuplicateCandidate[]>([]);
 
   const calculatedAge = useMemo(() => {
     const raceYear = Number(eventYear);
@@ -247,6 +250,27 @@ export default function RiderForm({
       return "";
     return String(raceYear - year);
   }, [eventYear, birthYear]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const query = name.trim();
+    if (query.length < 2 || editId) {
+      setNameSuggestions([]);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      const existingRiders = await db.table("riders").toArray();
+      const suggestions = findDuplicateCandidates(
+        { name: query, plate, birthYear, gender },
+        existingRiders,
+      );
+      if (!cancelled) setNameSuggestions(suggestions.slice(0, 6));
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [name, plate, birthYear, gender, editId]);
 
   useEffect(() => {
     if (!editingRider) return;
@@ -273,6 +297,7 @@ export default function RiderForm({
     setImportMessage("");
     setDuplicateWarning([]);
     setAllowDuplicateSave(false);
+    setNameSuggestions([]);
   };
 
   const saveRider = async (event: React.FormEvent) => {
@@ -300,6 +325,7 @@ export default function RiderForm({
       club: club.trim(),
       cruiser,
       isCruiser: cruiser,
+      eventId: currentEventId || "legacy",
     };
 
     if (!editId && !allowDuplicateSave) {
@@ -394,6 +420,7 @@ export default function RiderForm({
           club: importedClub,
           cruiser: importedCruiser,
           isCruiser: importedCruiser,
+          eventId: currentEventId || "legacy",
           ...Object.fromEntries(
             Array.from({ length: 10 }, (_, raceIndex) => {
               const raceNo = raceIndex + 1;
@@ -489,9 +516,23 @@ export default function RiderForm({
             <label style={labelStyle}>Name</label>
             <input
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setAllowDuplicateSave(false);
+                setDuplicateWarning([]);
+              }}
               style={inputStyle}
             />
+            {nameSuggestions.length > 0 && (
+              <div style={{ marginTop: 6, border: "1px solid #f59e0b", borderRadius: 8, background: "#fffbeb", padding: 8, fontSize: 13, color: "#78350f" }}>
+                <strong>Mögliche vorhandene Teilnehmer</strong>
+                {nameSuggestions.map((suggestion) => (
+                  <div key={`${suggestion.id || suggestion.name}-${suggestion.score}`} style={{ marginTop: 4 }}>
+                    #{suggestion.plate || "-"} {suggestion.name} · {suggestion.birthYear || "-"} | {suggestion.gender || "-"}{suggestion.club ? ` · ${suggestion.club}` : ""} · {suggestion.score}%
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div>
