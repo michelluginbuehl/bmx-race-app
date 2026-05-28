@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.3";
+const APP_VERSION = "v1.9.4";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Teilnehmerzahlen auf Startkacheln korrigiert";
+const APP_CHANGE_NOTE = "Rennen und Rennserien können auf der Startseite gelöscht werden";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -523,6 +523,64 @@ export default function App() {
         : item,
     );
     saveManagedEvents(nextEvents);
+  };
+
+  const deleteManagedEvent = async (event: ManagedEvent) => {
+    const eventName = getEventDisplayName(event);
+    const confirmation = window.prompt(
+      `${eventName} wirklich löschen?
+
+Das Rennen / die Rennserie wird von der Startseite entfernt. Alle zugehörigen Teilnehmer-Zuordnungen, Vorläufe, Finals, Resultate und Einstellungen dieses Eintrags werden gelöscht.
+
+Vor dem Löschen wird automatisch ein komplettes Backup erstellt.
+
+Zum Bestätigen bitte LÖSCHEN eingeben.`,
+      "",
+    );
+    if (confirmation !== "LÖSCHEN") return;
+
+    await exportBackup(`Sicherheitsbackup vor Löschen von ${eventName}`);
+
+    const eventKeyPrefix = `bmx_event_${event.id}_`;
+    const nextEvents = managedEvents.filter((item) => item.id !== event.id);
+    saveManagedEvents(nextEvents);
+
+    try {
+      const allRiders = await db.table("riders").toArray();
+      const riderIdsToDelete = allRiders
+        .filter((rider: any) => String(rider.eventId || "") === String(event.id))
+        .map((rider: any) => rider.id)
+        .filter(Boolean);
+      if (riderIdsToDelete.length > 0) {
+        await db.table("riders").bulkDelete(riderIdsToDelete);
+      }
+
+      const allAppData = await db.table("appData").toArray();
+      const appDataKeysToDelete = allAppData
+        .filter((row: any) => String(row.key || "").startsWith(eventKeyPrefix))
+        .map((row: any) => row.key)
+        .filter(Boolean);
+      if (appDataKeysToDelete.length > 0) {
+        await db.table("appData").bulkDelete(appDataKeysToDelete);
+      }
+
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith(eventKeyPrefix)) localStorage.removeItem(key);
+      });
+    } catch (error: any) {
+      window.alert(`Rennen wurde aus der Startliste entfernt, aber beim Bereinigen der lokalen Daten ist ein Fehler aufgetreten: ${error?.message || "Unbekannter Fehler"}`);
+    }
+
+    if (currentEventId === event.id) {
+      setCurrentEventId(nextEvents[0]?.id || "legacy");
+      setAppShellView("events");
+      setViewMode("dashboard");
+    }
+
+    await loadMasterParticipants();
+    await loadAllRiders();
+    await loadRaceRiders();
+    setBackupMessage(`Gelöscht: ${eventName}`);
   };
 
   const getFilteredManagedEvents = (archived: boolean) => {
@@ -4010,7 +4068,7 @@ export default function App() {
                             <span>Teilnehmer: {getManagedEventParticipantCount(event.id)}</span>
                           )}
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignItems: "stretch" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, alignItems: "stretch" }}>
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); renameManagedEvent(event); }}
@@ -4024,6 +4082,13 @@ export default function App() {
                             style={{ ...smallGhostButtonStyle, width: "100%", minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, padding: "7px 8px", boxSizing: "border-box" }}
                           >
                             Archivieren
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); deleteManagedEvent(event); }}
+                            style={{ ...smallGhostButtonStyle, width: "100%", minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, padding: "7px 8px", boxSizing: "border-box", color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}
+                          >
+                            Löschen
                           </button>
                         </div>
                       </div>
@@ -4057,6 +4122,7 @@ export default function App() {
                           {event.name} · {event.year} · {event.type === "single" ? "Einzelrennen" : "Rennserie"} · Teilnehmer: {getManagedEventParticipantCount(event.id)}
                         </button>
                         <button type="button" onClick={() => toggleManagedEventArchive(event, false)} style={smallGhostButtonStyle}>Wieder anzeigen</button>
+                        <button type="button" onClick={() => deleteManagedEvent(event)} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>Löschen</button>
                       </div>
                     ))}
                   </div>
