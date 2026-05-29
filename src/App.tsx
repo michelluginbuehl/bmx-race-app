@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.10";
+const APP_VERSION = "v1.9.11";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Manuelle Rangliste für Resultate korrigiert";
+const APP_CHANGE_NOTE = "Teilnehmerdatenbank und manuelle Rangliste vereinfacht";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -1926,10 +1926,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       .filter(Boolean);
 
     if (missing.length > 0) {
-      const proceed = window.confirm(
-        `Nicht alle Teilnehmer wurden für die manuelle Resultatliste ausgewählt.\n\n${missing.join("\n")}\n\nResultate trotzdem erstellen? Nicht ausgewählte Teilnehmer erscheinen nicht in der Resultatliste.`,
+      window.alert(
+        `Bitte zuerst alle Teilnehmer platzieren.\n\nNoch offen:\n${missing.join("\n")}\n\nDie Resultatliste wird erst gespeichert, wenn alle Fahrer einer Kategorie in der Rangfolge angeklickt wurden.`,
       );
-      if (!proceed) return;
+      return;
     }
 
     const nextFinals: Record<string, Record<string, any[]>> = {};
@@ -3865,7 +3865,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       .replace(/[^a-z0-9äöüÄÖÜ_-]+/gi, "-")
       .replace(/-+/g, "-")
       .replace(/^-|-$/g, "");
-    return `${cleanSeries}-Backup-${date}-${time}.json`;
+    const cleanApp = APP_NAME.replace(/[^a-z0-9äöüÄÖÜ_-]+/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    return `${cleanApp}_${cleanSeries}_${APP_VERSION}_${date}_${time}.json`;
   };
 
   const exportBackup = async (reason = "Manuelles Backup") => {
@@ -4375,19 +4376,24 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1120, margin: "0 auto" }}>
         {renderAppHeader()}
-        <div style={{ ...basePanelStyle, marginBottom: 16, display: "flex", gap: 10, alignItems: "stretch" }}>
-          <button
-            onClick={() => setAppShellView("events")}
-            style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-          >
-            Zurück zur Startseite
-          </button>
-          <button
-            onClick={loadMasterParticipants}
-            style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-          >
-            Teilnehmer aktualisieren
-          </button>
+        <div style={{ ...basePanelStyle, marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+            <button
+              onClick={() => setAppShellView("events")}
+              style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+            >
+              Zurück zur Startseite
+            </button>
+            <button
+              onClick={loadMasterParticipants}
+              style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+            >
+              Teilnehmerdatenbank aktualisieren
+            </button>
+          </div>
+          <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+            Aktualisiert die Hauptdatenbank aus allen gespeicherten Rennen und Rennserien. Rennhistorie und Rangierungen sind über Klick auf den Fahrer sichtbar.
+          </div>
         </div>
         <div style={{ ...basePanelStyle }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Teilnehmer-Hauptdatenbank</h2>
@@ -4425,7 +4431,6 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                     <th style={tableHeaderStyle}>Plate</th>
                     <th style={tableHeaderStyle}>Jg | B/G</th>
                     <th style={tableHeaderStyle}>Verein</th>
-                    <th style={tableHeaderStyle}>Rennen / Rennserien</th>
                     <th style={{ ...tableHeaderStyle, textAlign: "right" }}>Aktion</th>
                   </tr>
                 </thead>
@@ -4440,20 +4445,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       title="Teilnehmerdetails anzeigen"
                       style={{ borderBottom: "1px solid #e5ebf1", cursor: "pointer" }}
                     >
-                      <td style={tableCellStyle}><strong>{participant.name}</strong>{participant.cruiser ? " · Cruiser" : ""}</td>
+                      <td style={tableCellStyle}>
+                        <strong>{participant.name}</strong>{participant.cruiser ? " · Cruiser" : ""}
+                        <div style={{ color: colors.blueBtn, fontWeight: 800, fontSize: 12 }}>Details/Rangierungen anzeigen</div>
+                      </td>
                       <td style={tableCellStyle}>#{participant.plate || "-"}</td>
                       <td style={tableCellStyle}>{participant.birthYear || "-"} | {participant.gender || "-"}</td>
                       <td style={tableCellStyle}>{participant.club || "-"}</td>
-                      <td style={tableCellStyle}>
-                        <div style={{ display: "grid", gap: 4 }}>
-                          {participant.events.map((entry: any, eventIndex: number) => (
-                            <div key={`${participant.name}-${eventIndex}`}>
-                              <strong>{entry.name}</strong>{entry.year ? ` · ${entry.year}` : ""} · {entry.type === "single" ? "Einzelrennen" : "Rennserie"} · {entry.races}
-                            </div>
-                          ))}
-                          <span style={{ color: colors.blueBtn, fontWeight: 800, fontSize: 12 }}>Details/Rangierungen anzeigen</span>
-                        </div>
-                      </td>
                       <td style={{ ...tableCellStyle, textAlign: "right" }}>
                         <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
                           <button
@@ -5173,8 +5171,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
               <div>
                 <h2 style={{ margin: 0, color: colors.title }}>Manuelle Rangliste erstellen</h2>
-                <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4 }}>
-                  Teilnehmer pro Kategorie der Rangfolge nach anklicken. Erst der Button „Resultatliste erstellen“ übernimmt diese Reihenfolge als Schlussrangliste.
+                <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4, lineHeight: 1.35 }}>
+                  1. Kategorie prüfen · 2. Fahrer der Zielreihenfolge nach anklicken · 3. Mit „Resultatliste erstellen“ speichern.
+                  Alle Fahrer einer Kategorie müssen platziert sein.
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -5232,9 +5231,31 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       })}
                     </div>
                     {selectedIds.length > 0 && (
-                      <button type="button" onClick={() => clearManualResultCategory(cat)} style={{ ...smallGhostButtonStyle, marginTop: 8 }}>
-                        Auswahl löschen
-                      </button>
+                      <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#f8fbff", border: `1px solid ${colors.cardBorder}` }}>
+                        <div style={{ fontWeight: 900, color: colors.title, marginBottom: 6 }}>Aktuelle Rangfolge</div>
+                        <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                          {selectedIds.map((id, orderIndex) => {
+                            const selectedRider = (groupedRace[cat] || []).find((r: any) => String(r.id) === String(id));
+                            return (
+                              <div key={`manual-order-${cat}-${id}`}>{orderIndex + 1}. #{selectedRider?.plate || "-"} {selectedRider?.name || "Unbekannter Fahrer"}</div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {selectedIds.length > 0 && (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => setManualResultOrder((prev) => ({ ...prev, [cat]: (prev[cat] || []).slice(0, -1) }))}
+                          style={smallGhostButtonStyle}
+                        >
+                          Letzten Fahrer rückgängig
+                        </button>
+                        <button type="button" onClick={() => clearManualResultCategory(cat)} style={smallGhostButtonStyle}>
+                          Kategorie zurücksetzen
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
