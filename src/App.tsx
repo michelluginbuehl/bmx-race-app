@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.12.0";
+const APP_VERSION = "v1.12.1";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Datenprüfung, Reparatur, Speicherstatus und Archiv verbessert";
+const APP_CHANGE_NOTE = "Dublettenbestätigung, Moto-Bezeichnungen und Race-Nummerierung verbessert";
 const DATA_SCHEMA_VERSION = 4;
 
 export default function App() {
@@ -119,6 +119,7 @@ export default function App() {
   const [eventParticipantSearch, setEventParticipantSearch] = useState("");
   const [masterParticipantSearch, setMasterParticipantSearch] = useState("");
   const [masterParticipantFilter, setMasterParticipantFilter] = useState<"active" | "trash" | "all">("active");
+  const [duplicateOkKeys, setDuplicateOkKeys] = useState<string[]>([]);
   const [showEmergencyTools, setShowEmergencyTools] = useState(false);
   const [selectedMasterParticipantKeys, setSelectedMasterParticipantKeys] = useState<string[]>([]);
   const [manualResultsMode, setManualResultsMode] = useState(false);
@@ -430,18 +431,77 @@ export default function App() {
     return false;
   };
 
-  const getDuplicateMasterParticipantKeys = (items: any[]) => {
-    const keys = new Set<string>();
-    for (let i = 0; i < items.length; i += 1) {
-      for (let j = i + 1; j < items.length; j += 1) {
-        if (areLikelyDuplicateParticipants(items[i], items[j])) {
-          keys.add(String(items[i].key || `${items[i].name}-${i}`));
-          keys.add(String(items[j].key || `${items[j].name}-${j}`));
+  const duplicateGroupPalette = [
+    { bg: "#fff7d6", border: "#f2b705", text: "#7c5600" },
+    { bg: "#e8f1ff", border: "#7da7f7", text: "#1d4ed8" },
+    { bg: "#f3e8ff", border: "#b290f5", text: "#6b21a8" },
+    { bg: "#e7fff3", border: "#46b97a", text: "#047857" },
+    { bg: "#fff1f1", border: "#f2b8b5", text: "#b91c1c" },
+    { bg: "#e0f7fa", border: "#67c4d0", text: "#0e7490" },
+  ];
+
+  const getDuplicateMasterParticipantInfo = (items: any[]) => {
+    const okKeys = new Set(duplicateOkKeys);
+    const unconfirmed = items.filter((item: any) => !okKeys.has(String(item.key || "")));
+    const parent = new Map<string, string>();
+    const find = (key: string): string => {
+      const current = parent.get(key) || key;
+      if (current === key) return key;
+      const root = find(current);
+      parent.set(key, root);
+      return root;
+    };
+    const union = (a: string, b: string) => {
+      const rootA = find(a);
+      const rootB = find(b);
+      if (rootA !== rootB) parent.set(rootB, rootA);
+    };
+
+    unconfirmed.forEach((item: any, index: number) => {
+      const key = String(item.key || `${item.name}-${index}`);
+      parent.set(key, key);
+    });
+
+    for (let i = 0; i < unconfirmed.length; i += 1) {
+      for (let j = i + 1; j < unconfirmed.length; j += 1) {
+        if (areLikelyDuplicateParticipants(unconfirmed[i], unconfirmed[j])) {
+          const keyA = String(unconfirmed[i].key || `${unconfirmed[i].name}-${i}`);
+          const keyB = String(unconfirmed[j].key || `${unconfirmed[j].name}-${j}`);
+          union(keyA, keyB);
         }
       }
     }
-    return keys;
+
+    const grouped = new Map<string, string[]>();
+    Array.from(parent.keys()).forEach((key) => {
+      const root = find(key);
+      const list = grouped.get(root) || [];
+      list.push(key);
+      grouped.set(root, list);
+    });
+
+    const keys = new Set<string>();
+    const byKey: Record<string, { groupIndex: number; bg: string; border: string; text: string }> = {};
+    let groupIndex = 0;
+    Array.from(grouped.values()).filter((group) => group.length > 1).forEach((group) => {
+      const palette = duplicateGroupPalette[groupIndex % duplicateGroupPalette.length];
+      group.forEach((key) => {
+        keys.add(key);
+        byKey[key] = { groupIndex: groupIndex + 1, ...palette };
+      });
+      groupIndex += 1;
+    });
+
+    return { keys, byKey, groupCount: groupIndex };
   };
+
+  const markMasterParticipantDuplicateOk = (key: string) => {
+    const next = Array.from(new Set([...duplicateOkKeys, key]));
+    setDuplicateOkKeys(next);
+    localStorage.setItem("bmx_duplicate_ok_keys_v1", JSON.stringify(next));
+  };
+
+  const getDuplicateMasterParticipantKeys = (items: any[]) => getDuplicateMasterParticipantInfo(items).keys;
 
 
 
@@ -603,7 +663,7 @@ export default function App() {
       !window.confirm(
         `${eventName} wirklich löschen?
 
-Das Rennen / die Rennserie wird von der Startseite entfernt. Alle zugehörigen Teilnehmer-Zuordnungen, Vorläufe, Finals, Resultate und Einstellungen dieses Eintrags werden gelöscht.
+Das Rennen / die Rennserie wird von der Startseite entfernt. Alle zugehörigen Teilnehmer-Zuordnungen, Motos, Finals, Resultate und Einstellungen dieses Eintrags werden gelöscht.
 
 Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       )
@@ -1389,6 +1449,15 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem("bmx_duplicate_ok_keys_v1");
+      if (saved) setDuplicateOkKeys(JSON.parse(saved));
+    } catch {
+      setDuplicateOkKeys([]);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!editingRider || viewMode !== "participants") return;
     window.setTimeout(() => {
       participantFormRef.current?.scrollIntoView({
@@ -1863,6 +1932,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     });
   };
 
+  const getRoundDisplayName = (roundName: string) =>
+    roundName === "4. Vorlauf" ? "4. Moto" : roundName;
+
   const getFinalCategoryLabel = (finalCategory: string) => {
     const originals = getOriginalCategoriesForFinalRaceCategory(finalCategory);
     if (originals.length <= 1) return finalCategory;
@@ -1960,7 +2032,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           "Das Rennen kann trotzdem durchgeführt werden.",
           `\nDoppelte Startnummern pro Kategorie:\n${issues.duplicates.slice(0, 12).join("\n")}`,
           issues.duplicates.length > 12 ? "\nWeitere Einträge vorhanden." : "",
-          "\nVorläufe trotzdem erstellen?",
+          "\nMotos trotzdem erstellen?",
         ]
           .filter(Boolean)
           .join("\n"),
@@ -2006,8 +2078,18 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     )
       return "Resultate erfasst";
     if (Object.keys(finalData || {}).length > 0) return "Finals erstellt";
-    if (Object.keys(heatData || {}).length > 0) return "Vorläufe erstellt";
+    if (Object.keys(heatData || {}).length > 0) return "Motos erstellt";
     return "Offen";
+  };
+
+  const getSequentialHeatRaceNumber = (heatData: any, category: string, runIndex: number, heatIndex: number) => {
+    let count = 0;
+    for (const cat of sortCategories(Object.keys(heatData || {}))) {
+      const groups = heatData?.[cat]?.[runIndex] || [];
+      if (cat === category) return count + heatIndex + 1;
+      count += Array.isArray(groups) ? groups.length : 0;
+    }
+    return heatIndex + 1;
   };
 
   const findRiderStartInfo = (rider: any) => {
@@ -2022,7 +2104,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         (raceHeats[cat] || []).forEach((runGroups: any[], runIndex: number) => {
           (runGroups || []).forEach((group: any[], heatIndex: number) => {
             const found = (group || []).find((x: any) => String(x.id ?? x.riderId) === riderId);
-            if (found) heatsInfo.push({ run: runIndex + 1, heat: heatIndex + 1, startPos: found.startPos || "-", category: cat });
+            if (found) heatsInfo.push({ run: runIndex + 1, heat: getSequentialHeatRaceNumber(raceHeats, cat, runIndex, heatIndex), startPos: found.startPos || "-", category: cat });
           });
         });
       });
@@ -2084,7 +2166,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     ].filter(Boolean);
 
     if (stillMissing.length > 0) {
-      window.alert(`Vorläufe können noch nicht erstellt werden. Es fehlt: ${stillMissing.join(", ")}.`);
+      window.alert(`Motos können noch nicht erstellt werden. Es fehlt: ${stillMissing.join(", ")}.`);
       return false;
     }
 
@@ -2233,8 +2315,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     }
     if (!validateSelectedRaceBeforeBuild()) return;
     if (Object.keys(heats || {}).length > 0) {
-      if (!window.confirm("Vorläufe neu erstellen? Bestehende Vorläufe/Resultate werden überschrieben.")) return;
-      await exportBackup("Sicherheitsbackup vor Vorläufe neu erstellen");
+      if (!window.confirm("Motos neu erstellen? Bestehende Motos/Resultate werden überschrieben.")) return;
+      await exportBackup("Sicherheitsbackup vor Motos neu erstellen");
     }
 
     const heatRiders = riders.map((r: any) => ({
@@ -2252,13 +2334,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     setFinalManualOrder({});
     setManualResultsMode(false);
     setManualResultOrder({});
-    addChangeLog(`${selectedRace}: Vorläufe erstellt`);
+    addChangeLog(`${selectedRace}: Motos erstellt`);
   };
 
   const resetHeats = async () => {
     if (
       !window.confirm(
-        `${selectedRace} wirklich zurücksetzen? Vorläufe, Finals und Resultate dieses Race werden gelöscht.`,
+        `${selectedRace} wirklich zurücksetzen? Motos, Finals und Resultate dieses Race werden gelöscht.`,
       )
     )
       return;
@@ -3038,7 +3120,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   const getRoundLabelForRankingAndPdf = (roundName: string) =>
-    roundName === "4. Vorlauf" ? "Wertungsläufe" : roundName;
+    roundName === "4. Vorlauf" ? "4. Moto" : roundName;
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -3366,9 +3448,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   const getPdfSectionColor = (label: string) => {
-    if (label === "Heat 1") return [232, 241, 255];
-    if (label === "Heat 2") return [233, 248, 239];
-    if (label === "Heat 3") return [245, 237, 255];
+    if (label === "Race 1") return [232, 241, 255];
+    if (label === "Race 2") return [233, 248, 239];
+    if (label === "Race 3") return [245, 237, 255];
     if (label === "Manuelle Rangliste") return [207, 226, 255];
     if (label === "A-Final") return [255, 233, 168];
     if (label === "B-Final") return [232, 241, 255];
@@ -3402,7 +3484,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             "Lauf 1",
             "Lauf 2",
             "Lauf 3",
-            "Finale/Lauf 4",
+            "Finals/Moto 4",
             "Wertungslauf",
           ],
         ],
@@ -3463,8 +3545,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       if (!firstPage) doc.addPage();
       firstPage = false;
 
-      const title = "BMX Vorläufe - Startplätze";
-      const subtitle = `Vorlauf ${runIndex + 1}`;
+      const title = "BMX Motos - Startplätze";
+      const subtitle = `Moto ${runIndex + 1}`;
       addPdfHeader(doc, title, subtitle);
 
       let currentY = 52;
@@ -3480,7 +3562,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         currentY += 6;
 
         catHeats.forEach((group: any[], heatIndex: number) => {
-          const heatLabel = `Heat ${heatIndex + 1}`;
+          const heatLabel = `Race ${getSequentialHeatRaceNumber(heats, cat, runIndex, heatIndex)}`;
           const sectionColor = getPdfSectionColor(heatLabel);
 
           currentY = ensurePdfSpace(doc, currentY, 52, title, subtitle, cat);
@@ -3538,7 +3620,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     });
 
     addPdfPageNumbers(doc);
-    doc.save(buildPdfFilename("bmx_vorlaeufe_startplaetze"));
+    doc.save(buildPdfFilename("bmx_motos_startplaetze"));
   };
 
   const exportFinalsStartPdf = () => {
@@ -3568,7 +3650,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         autoTable(doc, {
           startY: currentY,
           margin: { left: 14, right: 14 },
-          head: [[roundName, "", "", "", ""]],
+          head: [[getRoundDisplayName(roundName), "", "", "", ""]],
           body: Array.from({ length: roundName === "Manuelle Rangliste" ? heat.length : 8 }).map((_, pos) => {
             const rider = heat.find((r: any) => r.startPos === pos + 1);
             return [
@@ -3598,7 +3680,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           },
           didParseCell: (data) => {
             if (data.section === "head") {
-              if (data.column.index === 0) data.cell.text = [roundName];
+              if (data.column.index === 0) data.cell.text = [getRoundDisplayName(roundName)];
               else if (data.column.index === 1) data.cell.text = ["Name"];
               else if (data.column.index === 2) data.cell.text = ["Plate"];
               else if (data.column.index === 3) data.cell.text = ["Jg | B/G"];
@@ -4047,7 +4129,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   const getRaceCloseWarnings = () => {
     const warnings: string[] = [];
     if (Object.keys(heats || {}).length === 0)
-      warnings.push("Vorläufe wurden noch nicht erstellt.");
+      warnings.push("Motos wurden noch nicht erstellt.");
     if (Object.keys(finals || {}).length === 0)
       warnings.push("Finals wurden noch nicht erstellt.");
 
@@ -4057,7 +4139,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         const saved = finalResults[`${cat}_${roundName}`] || [];
         if (startList.length > 0 && saved.length !== startList.length) {
           warnings.push(
-            `${getFinalCategoryLabel(cat)} ${roundName}: ${saved.length}/${startList.length} Resultate erfasst.`,
+            `${getFinalCategoryLabel(cat)} ${getRoundDisplayName(roundName)}: ${saved.length}/${startList.length} Resultate erfasst.`,
           );
         }
         const ids = new Set<string>();
@@ -4068,14 +4150,14 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           const rank = Number(r.rank);
           if (id && ids.has(id))
             warnings.push(
-              `${getFinalCategoryLabel(cat)} ${roundName}: Fahrer doppelt im Resultat.`,
+              `${getFinalCategoryLabel(cat)} ${getRoundDisplayName(roundName)}: Fahrer doppelt im Resultat.`,
             );
           if (id) ids.add(id);
           if (!status && (!Number.isFinite(rank) || rank <= 0)) {
-            warnings.push(`${getFinalCategoryLabel(cat)} ${roundName}: Resultat ohne Rang oder Status.`);
+            warnings.push(`${getFinalCategoryLabel(cat)} ${getRoundDisplayName(roundName)}: Resultat ohne Rang oder Status.`);
           }
           if (!status && Number.isFinite(rank) && rank > 0) {
-            if (ranks.has(rank)) warnings.push(`${getFinalCategoryLabel(cat)} ${roundName}: Rang ${rank} ist doppelt vergeben.`);
+            if (ranks.has(rank)) warnings.push(`${getFinalCategoryLabel(cat)} ${getRoundDisplayName(roundName)}: Rang ${rank} ist doppelt vergeben.`);
             ranks.add(rank);
           }
         });
@@ -4104,7 +4186,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       : "";
     if (
       !window.confirm(
-        `${selectedRace} abschliessen und sperren? Vorläufe, Finals und Resultate sind danach gegen versehentliche Änderungen geschützt.${warningText}`,
+        `${selectedRace} abschliessen und sperren? Motos, Finals und Resultate sind danach gegen versehentliche Änderungen geschützt.${warningText}`,
       )
     )
       return;
@@ -4751,7 +4833,8 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
   if (appShellView === "masterParticipants") {
     const activeGroups = getMasterParticipantGroups();
     const trashGroups = getDeletedMasterParticipantGroups();
-    const masterDuplicateKeys = getDuplicateMasterParticipantKeys(activeGroups);
+    const masterDuplicateInfo = getDuplicateMasterParticipantInfo(activeGroups);
+    const masterDuplicateKeys = masterDuplicateInfo.keys;
     const masterSearchQuery = masterParticipantSearch.trim().toLowerCase();
     const participantMatches = (participant: any) => {
       if (!masterSearchQuery) return true;
@@ -4827,7 +4910,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
           </div>
           {masterDuplicateKeys.size > 0 && masterParticipantFilter !== "trash" && (
             <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: 12, border: `1px solid ${colors.warningBorder}`, borderLeft: `5px solid ${colors.warningBorder}`, background: colors.warningBg, color: "#92400e", fontWeight: 900 }}>
-              ⚠ Mögliche Dubletten erkannt: {masterDuplicateKeys.size} Einträge. Bitte bei den markierten Teilnehmern Details prüfen.
+              ⚠ Mögliche Dubletten erkannt: {masterDuplicateKeys.size} Einträge in {masterDuplicateInfo.groupCount} Gruppe(n). Ähnliche Teilnehmer sind jeweils gleichfarbig markiert. Mit „Teilnehmer OK“ bestätigte Einträge werden nicht mehr als Dublette angezeigt.
             </div>
           )}
           <div style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
@@ -4865,7 +4948,10 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                   </tr>
                 </thead>
                 <tbody>
-                  {groups.map((participant: any, index: number) => (
+                  {groups.map((participant: any, index: number) => {
+                    const duplicateStyle = masterDuplicateInfo.byKey[String(participant.key || "")];
+                    const rowBackground = duplicateStyle ? duplicateStyle.bg : (index % 2 ? colors.tableRowAlt : "#fff");
+                    return (
                     <tr
                       key={`${participant.name}-${participant.birthYear}-${participant.gender}-${index}`}
                       ref={(element) => {
@@ -4873,12 +4959,14 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                       }}
                       onClick={() => setSelectedMasterParticipant(participant)}
                       title="Teilnehmerdetails anzeigen"
-                      style={{ borderBottom: `1px solid ${colors.cardBorder}`, cursor: "pointer", background: index % 2 ? colors.tableRowAlt : "#fff" }}
+                      style={{ borderBottom: `1px solid ${duplicateStyle?.border || colors.cardBorder}`, cursor: "pointer", background: rowBackground }}
                     >
                       <td style={tableCellStyle}>
                         <strong>{participant.name}</strong>{participant.cruiser ? " · Cruiser" : ""}
-                        {masterDuplicateKeys.has(String(participant.key || "")) && (
-                          <span style={{ ...getStatusBadgeStyle("Warnung"), marginLeft: 8, background: colors.warningBg, color: "#92400e", borderColor: colors.warningBorder }}>Mögliche Dublette</span>
+                        {duplicateStyle && (
+                          <span style={{ ...getStatusBadgeStyle("Warnung"), marginLeft: 8, background: duplicateStyle.bg, color: duplicateStyle.text, borderColor: duplicateStyle.border }}>
+                            Mögliche Dublette · Gruppe {duplicateStyle.groupIndex}
+                          </span>
                         )}
                         <div style={{ color: colors.blueBtn, fontWeight: 800, fontSize: 12 }}>Details/Rangierungen anzeigen</div>
                       </td>
@@ -4902,6 +4990,19 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                           >
                             Bearbeiten
                           </button>
+                          {duplicateStyle && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                markMasterParticipantDuplicateOk(String(participant.key || ""));
+                              }}
+                              style={{ ...smallGhostButtonStyle, color: duplicateStyle.text, borderColor: duplicateStyle.border, background: "#ffffff" }}
+                              title="Bestätigen, dass dieser Teilnehmer kein problematisches Duplikat ist."
+                            >
+                              Teilnehmer OK
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={(event) => {
@@ -4915,7 +5016,8 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -5037,11 +5139,11 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
       },
       {
         title: "3. Rennen starten",
-        text: "Im Bereich Rennen Starten öffnest du Race 1, Race 2 usw. Dort werden Teilnehmer hinzugefügt, Vorläufe oder manuelle Ranglisten erstellt und Resultate gespeichert.",
+        text: "Im Bereich Rennen Starten öffnest du Race 1, Race 2 usw. Dort werden Teilnehmer hinzugefügt, Motos oder manuelle Ranglisten erstellt und Resultate gespeichert.",
       },
       {
         title: "4. Normale Rennabwicklung",
-        text: "Teilnehmer auswählen, Vorläufe erstellen, Resultate erfassen, Finals erstellen, Finalresultate erfassen, Race abschliessen und PDF exportieren.",
+        text: "Teilnehmer auswählen, Motos erstellen, Resultate erfassen, Finals erstellen, Finalresultate erfassen, Race abschliessen und PDF exportieren.",
       },
       {
         title: "5. Manuelle Rangliste",
@@ -5053,7 +5155,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
       },
       {
         title: "7. PDFs",
-        text: "PDFs können für Vorläufe, Finals, Resultate und Gesamtwertung erstellt werden. Resultat-PDFs zeigen je nach Status PROVISORISCH oder OFFIZIELL.",
+        text: "PDFs können für Motos, Finals, Resultate und Gesamtwertung erstellt werden. Resultat-PDFs zeigen je nach Status PROVISORISCH oder OFFIZIELL.",
       },
     ];
 
@@ -5083,7 +5185,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
             <li>Backup erstellen.</li>
             <li>Renninformationen prüfen: Rennserie/Rennname, Ort und Datum.</li>
             <li>Teilnehmer aus der Hauptdatenbank ins Rennen übernehmen.</li>
-            <li>Race öffnen und Vorläufe oder manuelle Rangliste erstellen.</li>
+            <li>Race öffnen und Motos oder manuelle Rangliste erstellen.</li>
             <li>Resultate erfassen, Race abschliessen und PDF erstellen.</li>
             <li>Bei Serien: Nach abgeschlossenen Rennen die Gesamtwertung erstellen.</li>
           </ol>
@@ -5116,7 +5218,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
           <div style={{ ...basePanelStyle }}>
             <h3 style={{ marginTop: 0, color: colors.title }}>Race-Wertung</h3>
             <ul style={{ marginBottom: 0, lineHeight: 1.7, fontWeight: 800 }}>
-              <li>In den Vorläufen werden eingegebene Ränge als Rangpunkte gezählt.</li>
+              <li>In den Motos werden eingegebene Ränge als Rangpunkte gezählt.</li>
               <li>DNF und DNS zählen im einzelnen Race mit 10 Punkten.</li>
               <li>DSQ zählt im einzelnen Race mit 50 Punkten und wird dadurch ans Ende gesetzt.</li>
               <li>Finalresultate bestimmen die endgültige Race-Rangliste.</li>
@@ -6232,11 +6334,11 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
               }
               title={
                 heatsCreated
-                  ? "Vorläufe sind bereits erstellt. Für Änderungen zuerst Reset klicken."
+                  ? "Motos sind bereits erstellt. Für Änderungen zuerst Reset klicken."
                   : undefined
               }
             >
-              Vorläufe erstellen
+              Motos erstellen
             </button>
             <button
               onClick={startManualResultsMode}
@@ -6247,7 +6349,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
               Resultate manuell erstellen
             </button>
             <button onClick={exportHeatsStartPdf} style={compactHomeButtonStyle}>
-              Vorläufe PDF
+              Motos PDF
             </button>
             <button
               onClick={createFinals}
@@ -6259,7 +6361,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
               }
               title={
                 !heatsCreated
-                  ? "Zuerst Vorläufe erstellen."
+                  ? "Zuerst Motos erstellen."
                   : finalsCreated
                     ? "Finals sind bereits erstellt. Für Änderungen zuerst Reset klicken."
                     : undefined
@@ -6312,7 +6414,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
 
           {(!homeEventSeries.trim() || !eventLocation.trim() || !eventDate.trim()) && (
             <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 14, border: `1px solid ${colors.warningBorder}`, borderLeft: `6px solid ${colors.warningBorder}`, background: colors.warningBg, color: "#92400e", fontWeight: 900 }}>
-              ⚠ Renninformationen unvollständig: {[!homeEventSeries.trim() ? "Rennserie" : "", !eventLocation.trim() ? "Rennort" : "", !eventDate.trim() ? "Datum" : ""].filter(Boolean).join(", ")} fehlt. Bitte vor dem Erstellen der Vorläufe ergänzen.
+              ⚠ Renninformationen unvollständig: {[!homeEventSeries.trim() ? "Rennserie" : "", !eventLocation.trim() ? "Rennort" : "", !eventDate.trim() ? "Datum" : ""].filter(Boolean).join(", ")} fehlt. Bitte vor dem Erstellen der Motos ergänzen.
             </div>
           )}
 
@@ -6398,19 +6500,19 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                 onClick={() => scrollToSection("vorlauf-1")}
                 style={sideRaceNavigationSubButtonStyle}
               >
-                Vorlauf 1
+                Moto 1
               </button>
               <button
                 onClick={() => scrollToSection("vorlauf-2")}
                 style={sideRaceNavigationSubButtonStyle}
               >
-                Vorlauf 2
+                Moto 2
               </button>
               <button
                 onClick={() => scrollToSection("vorlauf-3")}
                 style={sideRaceNavigationSubButtonStyle}
               >
-                Vorlauf 3
+                Moto 3
               </button>
               <button
                 onClick={() => scrollToSection("finallaeufe")}
@@ -6522,7 +6624,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                       fontWeight: 700,
                     }}
                   >
-                    Cruiser fahren in den Vorläufen und Finals zusammen mit{" "}
+                    Cruiser fahren in den Motos und Finals zusammen mit{" "}
                     {cruiserMergeTarget}. Rangliste und Gesamtwertung bleiben
                     getrennt unter Cruiser.
                   </div>
@@ -6568,7 +6670,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
 
         {Object.keys(heats).length > 0 && (
           <div style={{ marginTop: 30 }}>
-            <h2 style={{ color: colors.title }}>🏁 Vorläufe</h2>
+            <h2 style={{ color: colors.title }}>🏁 Motos</h2>
 
             {[0, 1, 2].map((runIndex) => (
               <div
@@ -6576,7 +6678,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                 key={runIndex}
                 style={{ marginBottom: 30, scrollMarginTop: 120 }}
               >
-                <h3 style={{ color: colors.title }}>Vorlauf {runIndex + 1}</h3>
+                <h3 style={{ color: colors.title }}>Moto {runIndex + 1}</h3>
 
                 {sortCategories(Object.keys(heats)).map((cat) => (
                   <div key={cat} style={{ marginBottom: 20 }}>
@@ -6593,7 +6695,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                             style={getRaceCardStyle(result.length > 0)}
                           >
                             <strong style={{ color: colors.title }}>
-                              Heat {heatIndex + 1}
+                              Race {getSequentialHeatRaceNumber(heats, cat, runIndex, heatIndex)}
                             </strong>
 
                             <div
@@ -6656,7 +6758,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                             fontSize: roundName === "A-Final" || roundName === "Manuelle Rangliste" ? 22 : 18,
                           }}
                         >
-                          {roundName}
+                          {getRoundDisplayName(roundName)}
                         </strong>
 
                         <div
@@ -6845,11 +6947,11 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
               >
                 <div style={basePanelStyle}>
                   <h3 style={{ marginTop: 0, color: colors.title }}>
-                    Vorläufe
+                    Motos
                   </h3>
                   {selectedRiderInfo.heatsInfo.length === 0 ? (
                     <div style={{ color: colors.muted }}>
-                      Noch keine Vorläufe erstellt.
+                      Noch keine Motos erstellt.
                     </div>
                   ) : (
                     selectedRiderInfo.heatsInfo.map((item: any) => (
@@ -6860,9 +6962,9 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                           borderTop: "1px solid #eef2f6",
                         }}
                       >
-                        <strong>Vorlauf {item.run}</strong>
+                        <strong>Moto {item.run}</strong>
                         <br />
-                        Heat {item.heat}, Startposition {item.startPos}
+                        Race {item.heat}, Startposition {item.startPos}
                       </div>
                     ))
                   )}
@@ -6883,7 +6985,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                           borderTop: "1px solid #eef2f6",
                         }}
                       >
-                        <strong>{item.roundName}</strong>
+                        <strong>{getRoundDisplayName(item.roundName)}</strong>
                         <br />
                         Startposition {item.startPos}
                       </div>
@@ -6899,7 +7001,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                       <div key={info.race} style={{ border: "1px solid #d8e0e6", borderRadius: 12, padding: 10, background: info.assigned ? "#f8fafc" : "#f1f4f7" }}>
                         <strong>{info.race}</strong><br />
                         <span>{info.assigned ? "zugeteilt" : "nicht zugeteilt"}</span><br />
-                        <span style={{ color: colors.muted }}>{info.heatsInfo.length} Vorlauf-Einträge · {info.finalsInfo.length} Final-Einträge</span><br />
+                        <span style={{ color: colors.muted }}>{info.heatsInfo.length} Moto-Einträge · {info.finalsInfo.length} Final-Einträge</span><br />
                         {info.ranking ? <span>Rang: {info.ranking.rank} {info.ranking.status !== "OK" ? `(${info.ranking.status})` : ""}</span> : <span style={{ color: colors.muted }}>kein Resultat</span>}
                       </div>
                     ))}
