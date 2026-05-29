@@ -69,7 +69,7 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.11.3";
+const APP_VERSION = "v1.11.4";
 const APP_NAME = "BMX Race Manager";
 const APP_CHANGE_NOTE = "Rennen-Startbereich und Layoutbreite angepasst";
 
@@ -78,7 +78,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<
     "dashboard" | "participants" | "race" | "overall"
   >("dashboard");
-  const [appShellView, setAppShellView] = useState<"events" | "manager" | "history" | "masterParticipants">("events");
+  const [appShellView, setAppShellView] = useState<"events" | "manager" | "history" | "masterParticipants" | "guide" | "regulations">("events");
   const [managedEvents, setManagedEvents] = useState<ManagedEvent[]>([]);
   const [currentEventId, setCurrentEventId] = useState<string>("");
 
@@ -4306,7 +4306,11 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button onClick={() => setShowEventCreateChoice((open) => !open)} style={mainButtonStyle}>Rennen / Rennserie erstellen</button>
             <button onClick={() => setAppShellView("masterParticipants")} style={secondaryButtonStyle}>Teilnehmer</button>
-            <button onClick={() => setAppShellView("history")} style={{ ...smallGhostButtonStyle, marginLeft: "auto" }}>History / Speicher & Import</button>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <button onClick={() => setAppShellView("guide")} style={smallGhostButtonStyle}>Anleitung</button>
+              <button onClick={() => setAppShellView("regulations")} style={smallGhostButtonStyle}>Reglement</button>
+              <button onClick={() => setAppShellView("history")} style={smallGhostButtonStyle}>History / Speicher & Import</button>
+            </div>
           </div>
           {showEventCreateChoice && (
             <div
@@ -4788,6 +4792,148 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     );
   }
 
+
+  if (appShellView === "guide") {
+    const guideCards = [
+      {
+        title: "1. Startseite",
+        text: "Erstelle ein neues Rennen oder eine Rennserie, öffne bestehende Einträge, verwalte die Haupt-Teilnehmerdatenbank und erstelle globale Backups.",
+      },
+      {
+        title: "2. Teilnehmerdatenbank",
+        text: "Teilnehmer werden zentral erfasst. Beim Hinzufügen zu einem Rennen wählst du sie aus der Hauptdatenbank aus. Dubletten werden markiert und gelöschte Teilnehmer landen zuerst im Papierkorb.",
+      },
+      {
+        title: "3. Rennen starten",
+        text: "Im Bereich Rennen Starten öffnest du Race 1, Race 2 usw. Dort werden Teilnehmer hinzugefügt, Vorläufe oder manuelle Ranglisten erstellt und Resultate gespeichert.",
+      },
+      {
+        title: "4. Normale Rennabwicklung",
+        text: "Teilnehmer auswählen, Vorläufe erstellen, Resultate erfassen, Finals erstellen, Finalresultate erfassen, Race abschliessen und PDF exportieren.",
+      },
+      {
+        title: "5. Manuelle Rangliste",
+        text: "Wenn keine Läufe gefahren werden, öffne Notfall / Reparatur oder den Button Resultate manuell erstellen. Danach platzierst du alle Fahrer einer Kategorie in Zielreihenfolge und speicherst daraus die Resultatliste.",
+      },
+      {
+        title: "6. Speichern und Backup",
+        text: "Speichern erstellt ein komplettes Datei-Backup mit allen Rennen, Teilnehmern, Resultaten und Einstellungen. Vor kritischen Aktionen wird automatisch ein Sicherheitsbackup erstellt.",
+      },
+      {
+        title: "7. PDFs",
+        text: "PDFs können für Vorläufe, Finals, Resultate und Gesamtwertung erstellt werden. Resultat-PDFs zeigen je nach Status PROVISORISCH oder OFFIZIELL.",
+      },
+    ];
+
+    return (
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
+        {renderAppHeader()}
+        <div style={{ ...basePanelStyle, marginBottom: 16, background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ ...sectionTitleStyle, fontSize: 24 }}>Anleitung</h2>
+              <div style={helperTextStyle}>Kurzübersicht zur Bedienung des BMX Race Managers.</div>
+            </div>
+            <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+          {guideCards.map((card) => (
+            <div key={card.title} style={{ ...basePanelStyle, minHeight: 130 }}>
+              <h3 style={{ margin: "0 0 8px", color: colors.title, fontSize: 18 }}>{card.title}</h3>
+              <p style={{ ...helperTextStyle, margin: 0, fontSize: 14 }}>{card.text}</p>
+            </div>
+          ))}
+        </div>
+        <div style={{ ...basePanelStyle, marginTop: 16, borderLeft: `6px solid ${colors.blueBtn}` }}>
+          <h3 style={{ marginTop: 0, color: colors.title }}>Empfohlener Ablauf am Renntag</h3>
+          <ol style={{ marginBottom: 0, lineHeight: 1.7, fontWeight: 800, color: colors.text }}>
+            <li>Backup erstellen.</li>
+            <li>Renninformationen prüfen: Rennserie/Rennname, Ort und Datum.</li>
+            <li>Teilnehmer aus der Hauptdatenbank ins Rennen übernehmen.</li>
+            <li>Race öffnen und Vorläufe oder manuelle Rangliste erstellen.</li>
+            <li>Resultate erfassen, Race abschliessen und PDF erstellen.</li>
+            <li>Bei Serien: Nach abgeschlossenen Rennen die Gesamtwertung erstellen.</li>
+          </ol>
+        </div>
+        {versionFooter}
+      </div>
+    );
+  }
+
+  if (appShellView === "regulations") {
+    const pointRows = Array.from({ length: 12 }, (_, index) => {
+      const rank = index + 1;
+      return { rank, points: getOverallPointsForRank(rank) };
+    });
+
+    return (
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
+        {renderAppHeader()}
+        <div style={{ ...basePanelStyle, marginBottom: 16, background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ ...sectionTitleStyle, fontSize: 24 }}>Reglement</h2>
+              <div style={helperTextStyle}>Zusammenfassung der aktuell in der App hinterlegten Wertungslogik.</div>
+            </div>
+            <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 14, alignItems: "start" }}>
+          <div style={{ ...basePanelStyle }}>
+            <h3 style={{ marginTop: 0, color: colors.title }}>Race-Wertung</h3>
+            <ul style={{ marginBottom: 0, lineHeight: 1.7, fontWeight: 800 }}>
+              <li>In den Vorläufen werden eingegebene Ränge als Rangpunkte gezählt.</li>
+              <li>DNF und DNS zählen im einzelnen Race mit 10 Punkten.</li>
+              <li>DSQ zählt im einzelnen Race mit 50 Punkten und wird dadurch ans Ende gesetzt.</li>
+              <li>Finalresultate bestimmen die endgültige Race-Rangliste.</li>
+              <li>B-Final wird hinter A-Final gewertet: Gewinner B-Final entspricht Rang 9.</li>
+              <li>C-Final wird entsprechend hinter B-Final gewertet.</li>
+            </ul>
+          </div>
+
+          <div style={{ ...basePanelStyle }}>
+            <h3 style={{ marginTop: 0, color: colors.title }}>Punktetabelle Gesamtwertung</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+              <div style={{ ...tableHeaderStyle, position: "static" }}>Rang</div>
+              <div style={{ ...tableHeaderStyle, position: "static" }}>Punkte</div>
+              {pointRows.map((row) => (
+                <React.Fragment key={row.rank}>
+                  <div style={{ ...tableCellStyle, padding: "8px 10px" }}>{row.rank}</div>
+                  <div style={{ ...tableCellStyle, padding: "8px 10px", fontWeight: 900 }}>{row.points}</div>
+                </React.Fragment>
+              ))}
+            </div>
+            <div style={{ ...helperTextStyle, marginTop: 10 }}>Ab Rang 10 wird die Punktzahl nach der hinterlegten Formel weiter reduziert.</div>
+          </div>
+        </div>
+
+        <div style={{ ...basePanelStyle, marginTop: 14 }}>
+          <h3 style={{ marginTop: 0, color: colors.title }}>Gesamtwertung und Streichresultate</h3>
+          <ul style={{ marginBottom: 0, lineHeight: 1.7, fontWeight: 800 }}>
+            <li>Bei einer Rennserie wird eingestellt, wie viele Rennen zur Gesamtwertung zählen.</li>
+            <li>Für jeden Fahrer werden die besten Resultate gemäss Einstellung gezählt.</li>
+            <li>Nicht zählende Resultate werden als Streichresultate in Klammern angezeigt.</li>
+            <li>Für die Gesamtwertung werden nur abgeschlossene Rennen berücksichtigt.</li>
+            <li>Bei Punktegleichheit entscheidet zuerst das bessere Streichresultat.</li>
+            <li>Gibt es mehrere Streichresultate, werden diese nacheinander verglichen.</li>
+            <li>Danach entscheidet das beste Einzelresultat, danach das letzte gefahrene Resultat.</li>
+            <li>Bei vollständiger Serie werden Fahrer mit zu wenigen Resultaten nicht mehr in der Gesamtwertung geführt.</li>
+          </ul>
+        </div>
+
+        <div style={{ ...basePanelStyle, marginTop: 14, borderLeft: `6px solid ${colors.warningBorder}`, background: colors.warningBg }}>
+          <h3 style={{ marginTop: 0, color: colors.title }}>Hinweis</h3>
+          <div style={{ ...helperTextStyle, color: "#92400e" }}>
+            Dieses Reglement beschreibt die in der App umgesetzte Logik. Falls eure Rennserie ein offizielles Vereins- oder Verbandsreglement hat, sollte diese Seite entsprechend angepasst werden.
+          </div>
+        </div>
+        {versionFooter}
+      </div>
+    );
+  }
+
   if (appShellView === "history") {
     const historyEntries = getEventHistoryEntries();
     return (
@@ -4915,7 +5061,19 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                 <div style={{ color: colors.muted, fontSize: 12, fontWeight: 900 }}>Rennformat</div>
                 <div style={{ color: colors.title, fontSize: 16, fontWeight: 900 }}>Einzelrennen · 1 Race</div>
               </div>
-              <button onClick={toggleSeriesLocked} style={{ ...(seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle), minHeight: 62 }}>
+              <button
+                onClick={toggleSeriesLocked}
+                style={{
+                  ...(seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle),
+                  height: 62,
+                  minHeight: 62,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "10px 14px",
+                  boxSizing: "border-box",
+                }}
+              >
                 {seriesLocked ? "Rennen öffnen" : "Rennen abschliessen"}
               </button>
             </div>
@@ -4946,7 +5104,19 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                 />
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
-                <button onClick={toggleSeriesLocked} style={seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle}>
+                <button
+                  onClick={toggleSeriesLocked}
+                  style={{
+                    ...(seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle),
+                    height: 42,
+                    minHeight: 42,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "8px 12px",
+                    boxSizing: "border-box",
+                  }}
+                >
                   {seriesLocked ? "Serie öffnen" : "Serie abschliessen"}
                 </button>
               </div>
