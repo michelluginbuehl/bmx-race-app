@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.11.0";
+const APP_VERSION = "v1.11.1";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Stabilere manuelle Rangliste, Backup-Warnung, PDF-Status und Teilnehmerdatenbank-Filter";
+const APP_CHANGE_NOTE = "Race-Einstieg auf der Startseite klarer dargestellt";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -4957,8 +4957,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           </div>
         </div>
 
-        <div style={{ ...basePanelStyle, marginBottom: 14 }}>
-          <h2 style={sectionTitleStyle}>Race-Status</h2>
+        <div style={{ ...basePanelStyle, marginBottom: 14, borderColor: colors.blueBorder, background: "linear-gradient(135deg, #eff6ff 0%, #ffffff 70%)" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+            <h2 style={{ ...sectionTitleStyle, marginBottom: 0 }}>Rennen öffnen</h2>
+            <span style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+              Wähle ein Race, um Teilnehmer, Läufe oder Resultate zu bearbeiten.
+            </span>
+          </div>
           <div
             style={{
               display: "flex",
@@ -4976,21 +4981,25 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                   setSelectedRace(race);
                   setViewMode("race");
                 }}
+                title={`${race} öffnen`}
                 style={{
                   ...compactHomeButtonStyle,
-                  flex: "0 0 156px",
-                  minHeight: 64,
+                  flex: "0 0 168px",
+                  minHeight: 68,
                   textAlign: "left",
                   display: "grid",
                   alignContent: "center",
-                  gap: 4,
+                  gap: 5,
+                  borderColor: colors.blueBorder,
+                  background: "linear-gradient(135deg, #ffffff 0%, #dbeafe 100%)",
+                  boxShadow: "0 10px 22px rgba(37, 99, 235, 0.12)",
                 }}
               >
-                <span style={{ fontSize: 15, fontWeight: 900 }}>{race}</span>
+                <span style={{ fontSize: 15, fontWeight: 950, color: colors.blueBtnDark }}>{race} öffnen</span>
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
                   <span style={getStatusBadgeStyle(getRaceStatus(race))}>{getRaceStatus(race)}</span>
                   <span style={{ color: colors.muted, fontSize: 12, fontWeight: 900 }}>
-                    TN: {getRaceParticipantCount(race)}
+                    {getRaceParticipantCount(race)} TN
                   </span>
                 </span>
               </button>
@@ -4998,7 +5007,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             {!isSingleEvent && (
               <button
                 onClick={() => setViewMode("overall")}
-                style={{ ...compactHomeButtonStyle, marginLeft: "auto", flex: "0 0 128px", minHeight: 64, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                style={{ ...compactHomeButtonStyle, marginLeft: "auto", flex: "0 0 140px", minHeight: 68, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
               >
                 Gesamtwertung
               </button>
