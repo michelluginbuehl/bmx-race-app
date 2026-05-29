@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.9";
+const APP_VERSION = "v1.9.10";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Manuelle Resultaterstellung als Dummy-Heat verbessert";
+const APP_CHANGE_NOTE = "Manuelle Rangliste für Resultate korrigiert";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -1839,17 +1839,58 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       return;
     }
     if (!validateSelectedRaceBeforeBuild()) return;
-    if (Object.keys(finalResults || {}).length > 0) {
-      if (!window.confirm("Manuelle Resultaterstellung starten? Bestehende Resultate dieses Race werden beim Erstellen der neuen Resultatliste überschrieben.")) return;
+
+    const hasExistingRaceData =
+      Object.keys(heats || {}).length > 0 ||
+      Object.keys(results || {}).length > 0 ||
+      Object.keys(finals || {}).length > 0 ||
+      Object.keys(finalResults || {}).length > 0;
+
+    if (hasExistingRaceData) {
+      const proceed = window.confirm(
+        "Manuelle Rangliste erstellen? Bestehende Läufe, Finals oder Resultate dieses Race werden dadurch ersetzt.",
+      );
+      if (!proceed) return;
     }
 
-    setManualResultsMode(true);
+    const nextFinals: Record<string, Record<string, any[]>> = {};
+    const nextManualOrder: Record<string, string[]> = {};
+    const categories = originalRaceCategories();
+
+    categories.forEach((cat) => {
+      const ridersInCategory = [...(groupedRace[cat] || [])].sort((a: any, b: any) => {
+        const plateA = Number(String(a.plate || "").replace(/\D/g, ""));
+        const plateB = Number(String(b.plate || "").replace(/\D/g, ""));
+        if (Number.isFinite(plateA) && Number.isFinite(plateB) && plateA !== plateB) return plateA - plateB;
+        return String(a.name || "").localeCompare(String(b.name || ""), "de");
+      });
+      if (ridersInCategory.length === 0) return;
+
+      const finalCategory = getEffectiveFinalCategory(cat);
+      if (!nextFinals[finalCategory]) nextFinals[finalCategory] = {};
+      nextFinals[finalCategory]["Manuelle Rangliste"] = ridersInCategory.map((r: any, index: number) => ({
+        ...r,
+        riderId: String(r.id),
+        startPos: index + 1,
+        originalCategory: r.category,
+      }));
+      nextManualOrder[cat] = ridersInCategory.map((r: any) => String(r.id));
+    });
+
+    if (Object.keys(nextFinals).length === 0) {
+      window.alert("Es sind keine Teilnehmer für dieses Race ausgewählt.");
+      return;
+    }
+
+    setHeats({});
+    setResults({});
+    setFinals(nextFinals);
+    setFinalResults({});
+    setFinalManualOrder(nextManualOrder);
+    setManualResultsMode(false);
     setManualResultOrder({});
-    addChangeLog(`${selectedRace}: manuelle Resultaterstellung geöffnet`);
-    setTimeout(() => {
-      const el = document.getElementById("manual-results");
-      if (el) el.scrollIntoView({ block: "start" });
-    }, 0);
+    addChangeLog(`${selectedRace}: Manuelle Rangliste vorbereitet`);
+    setTimeout(() => scrollToSection("finallaeufe"), 0);
   };
 
   const toggleManualResultRider = (category: string, rider: any) => {
@@ -1916,10 +1957,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         .filter(Boolean) as any[];
 
       const finalCategory = getEffectiveFinalCategory(cat);
-      if (!nextFinals[finalCategory]) nextFinals[finalCategory] = { "A-Final": [] };
-      nextFinals[finalCategory]["A-Final"].push(...rows);
-      nextFinalResults[`${finalCategory}_A-Final`] = [
-        ...(nextFinalResults[`${finalCategory}_A-Final`] || []),
+      if (!nextFinals[finalCategory]) nextFinals[finalCategory] = { "Manuelle Rangliste": [] };
+      nextFinals[finalCategory]["Manuelle Rangliste"].push(...rows);
+      nextFinalResults[`${finalCategory}_Manuelle Rangliste`] = [
+        ...(nextFinalResults[`${finalCategory}_Manuelle Rangliste`] || []),
         ...rows,
       ];
       nextManualOrder[cat] = rows.map((row) => String(row.riderId));
@@ -2649,6 +2690,11 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       border = colors.fourthMotoBorder;
       borderWidth = 3;
       boxShadow = "0 4px 14px rgba(70,185,122,0.15)";
+    } else if (roundName === "Manuelle Rangliste") {
+      background = "#eef7ff";
+      border = colors.blueBtn;
+      borderWidth = 3;
+      boxShadow = "0 4px 14px rgba(43,108,176,0.14)";
     }
 
     if (hasResult) {
@@ -2661,8 +2707,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     }
 
     return {
-      marginBottom: roundName === "A-Final" ? 24 : 15,
-      padding: roundName === "A-Final" ? 16 : 12,
+      marginBottom: roundName === "A-Final" || roundName === "Manuelle Rangliste" ? 24 : 15,
+      padding: roundName === "A-Final" || roundName === "Manuelle Rangliste" ? 16 : 12,
       background,
       borderRadius: 12,
       border: `${borderWidth}px solid ${border}`,
@@ -2830,7 +2876,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     });
 
   const buildFinalCategoryRanking = (cat: string, useManualOrder = true) => {
-    const roundOrder = ["A-Final", "B-Final", "C-Final", "4. Vorlauf"];
+    const roundOrder = ["Manuelle Rangliste", "A-Final", "B-Final", "C-Final", "4. Vorlauf"];
     const ranking: any[] = [];
     let globalRank = 1;
 
@@ -3008,6 +3054,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     if (label === "Heat 1") return [232, 241, 255];
     if (label === "Heat 2") return [233, 248, 239];
     if (label === "Heat 3") return [245, 237, 255];
+    if (label === "Manuelle Rangliste") return [207, 226, 255];
     if (label === "A-Final") return [255, 233, 168];
     if (label === "B-Final") return [232, 241, 255];
     if (label === "C-Final") return [241, 232, 255];
@@ -3196,7 +3243,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
       let currentY = 52;
 
-      ["4. Vorlauf", "C-Final", "B-Final", "A-Final"].forEach((roundName) => {
+      ["Manuelle Rangliste", "4. Vorlauf", "C-Final", "B-Final", "A-Final"].forEach((roundName) => {
         const heat = rounds[roundName];
         if (!heat || !heat.length) return;
 
@@ -3207,7 +3254,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           startY: currentY,
           margin: { left: 14, right: 14 },
           head: [[roundName, "", "", "", ""]],
-          body: Array.from({ length: 8 }).map((_, pos) => {
+          body: Array.from({ length: roundName === "Manuelle Rangliste" ? heat.length : 8 }).map((_, pos) => {
             const rider = heat.find((r: any) => r.startPos === pos + 1);
             return [
               pos + 1,
@@ -3470,7 +3517,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
 
   const getRoundNameFromFinalResultKey = (key: string) => {
-    const roundOrder = ["A-Final", "B-Final", "C-Final", "4. Vorlauf"];
+    const roundOrder = ["Manuelle Rangliste", "A-Final", "B-Final", "C-Final", "4. Vorlauf"];
     return roundOrder.find((roundName) => key.endsWith(`_${roundName}`)) || "";
   };
 
@@ -3480,7 +3527,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     parsedFinalResults: Record<string, any[]>,
     savedFinalOrder: Record<string, string[]>,
   ) => {
-    const roundOrder = ["A-Final", "B-Final", "C-Final", "4. Vorlauf"];
+    const roundOrder = ["Manuelle Rangliste", "A-Final", "B-Final", "C-Final", "4. Vorlauf"];
     const ranking: any[] = [];
     let globalRank = 1;
 
@@ -5125,7 +5172,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           <div id="manual-results" style={{ ...basePanelStyle, marginBottom: 20, borderColor: colors.blueBtn, background: "#f8fbff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
               <div>
-                <h2 style={{ margin: 0, color: colors.title }}>Resultate manuell erstellen</h2>
+                <h2 style={{ margin: 0, color: colors.title }}>Manuelle Rangliste erstellen</h2>
                 <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4 }}>
                   Teilnehmer pro Kategorie der Rangfolge nach anklicken. Erst der Button „Resultatliste erstellen“ übernimmt diese Reihenfolge als Schlussrangliste.
                 </div>
@@ -5854,7 +5901,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                   {getFinalCategoryLabel(cat)}
                 </h3>
 
-                {["4. Vorlauf", "C-Final", "B-Final", "A-Final"].map(
+                {["Manuelle Rangliste", "4. Vorlauf", "C-Final", "B-Final", "A-Final"].map(
                   (roundName) => {
                     const heat = finals[cat]?.[roundName];
                     if (!heat || heat.length === 0) return null;
@@ -5870,7 +5917,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                         <strong
                           style={{
                             color: colors.title,
-                            fontSize: roundName === "A-Final" ? 22 : 18,
+                            fontSize: roundName === "A-Final" || roundName === "Manuelle Rangliste" ? 22 : 18,
                           }}
                         >
                           {roundName}
