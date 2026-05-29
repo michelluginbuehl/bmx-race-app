@@ -69,7 +69,7 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.11";
+const APP_VERSION = "v1.10.0";
 const APP_NAME = "BMX Race Manager";
 const APP_CHANGE_NOTE = "Teilnehmerdatenbank und manuelle Rangliste vereinfacht";
 
@@ -144,23 +144,28 @@ export default function App() {
   const [loadedRace, setLoadedRace] = useState<RaceName | null>(null);
 
   const colors = {
-    pageBg: "#f3f6f8",
+    pageBg: "#eef3f7",
+    pageGradient: "linear-gradient(180deg, #eef6ff 0%, #f6f8fb 42%, #eef3f7 100%)",
     cardBg: "#ffffff",
-    cardBorder: "#d8e0e6",
-    title: "#1f2a37",
-    text: "#2f3b45",
-    muted: "#7b8794",
-    greenBg: "#dff5e3",
-    greenBorder: "#86d19d",
-    blueBtn: "#2d6cdf",
-    redBtn: "#d64545",
-    grayBtn: "#e9eef3",
-    grayBtnText: "#23303b",
-    finalA: "#ffe9a8",
+    cardSoftBg: "#f8fbff",
+    cardBorder: "#d8e1ea",
+    cardBorderStrong: "#b9c7d6",
+    title: "#172033",
+    text: "#283545",
+    muted: "#6d7b8a",
+    blueBtn: "#2563eb",
+    blueBtnDark: "#1d4ed8",
+    greenBtn: "#16a34a",
+    redBtn: "#dc2626",
+    orangeBtn: "#f59e0b",
+    yellowBtn: "#facc15",
+    grayBtn: "#e9eef5",
+    grayBtnText: "#273445",
+    finalA: "#fff1b8",
     finalABorder: "#d7a800",
     finalB: "#e8f1ff",
-    finalBBorder: "#8ab2ff",
-    finalC: "#f1e8ff",
+    finalBBorder: "#7da7f7",
+    finalC: "#f3e8ff",
     finalCBorder: "#b290f5",
     fourthMotoBg: "#e7fff3",
     fourthMotoBorder: "#46b97a",
@@ -171,8 +176,13 @@ export default function App() {
     bronzeBg: "#f7dfcf",
     bronzeBorder: "#b87333",
     successBg: "#e8f8ef",
+    successBorder: "#91d7aa",
     warningBg: "#fff7e6",
+    warningBorder: "#f0b429",
     dangerBg: "#fff1f1",
+    dangerBorder: "#f2b8b5",
+    tableHeadBg: "#edf4fb",
+    tableRowAlt: "#f8fbff",
   };
 
   const raceKeyMap = Object.fromEntries(
@@ -322,47 +332,36 @@ export default function App() {
     const base: React.CSSProperties = {
       display: "inline-flex",
       alignItems: "center",
+      justifyContent: "center",
       borderRadius: 999,
       padding: "5px 10px",
       fontSize: 12,
       fontWeight: 900,
       border: "1px solid transparent",
       whiteSpace: "nowrap",
+      letterSpacing: "0.01em",
+      lineHeight: 1.1,
     };
-    if (status === "Abgeschlossen")
-      return {
-        ...base,
-        background: colors.successBg,
-        color: "#176b38",
-        borderColor: "#9addb5",
-      };
-    if (status === "Resultate erfasst")
-      return {
-        ...base,
-        background: "#e8f1ff",
-        color: "#1f5fbf",
-        borderColor: "#acc8ff",
-      };
-    if (status === "Finals erstellt")
-      return {
-        ...base,
-        background: colors.warningBg,
-        color: "#985f00",
-        borderColor: "#f3c46a",
-      };
-    if (status === "Vorläufe erstellt")
-      return {
-        ...base,
-        background: "#eef4ff",
-        color: "#2d6cdf",
-        borderColor: "#bfd2ff",
-      };
-    return {
-      ...base,
-      background: "#f1f4f7",
-      color: colors.muted,
-      borderColor: "#d8e0e6",
-    };
+    const normalized = String(status || "").toLowerCase();
+    if (normalized.includes("abgeschlossen") || normalized.includes("offiziell")) {
+      return { ...base, background: colors.successBg, color: "#166534", borderColor: colors.successBorder };
+    }
+    if (normalized.includes("resultate")) {
+      return { ...base, background: "#e8f1ff", color: colors.blueBtnDark, borderColor: "#acc8ff" };
+    }
+    if (normalized.includes("final")) {
+      return { ...base, background: "#f3e8ff", color: "#6d28d9", borderColor: "#c4b5fd" };
+    }
+    if (normalized.includes("vorlauf")) {
+      return { ...base, background: "#eef4ff", color: colors.blueBtn, borderColor: "#bfd2ff" };
+    }
+    if (normalized.includes("archiv")) {
+      return { ...base, background: "#e5e7eb", color: "#374151", borderColor: "#cbd5e1" };
+    }
+    if (normalized.includes("serie") || normalized.includes("einzel")) {
+      return { ...base, background: "#eef4ff", color: colors.blueBtnDark, borderColor: "#bfd2ff" };
+    }
+    return { ...base, background: "#f1f4f7", color: colors.muted, borderColor: colors.cardBorder };
   };
 
   const getRiderSearchText = (r: any) =>
@@ -2302,10 +2301,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   const basePanelStyle: React.CSSProperties = {
     border: `1px solid ${colors.cardBorder}`,
-    borderRadius: 16,
+    borderRadius: 20,
     background: colors.cardBg,
     padding: 18,
-    boxShadow: "0 8px 24px rgba(31,42,55,0.06)",
+    boxShadow: "0 12px 30px rgba(23,32,51,0.08)",
   };
 
   const listBoxStyle: React.CSSProperties = {
@@ -2316,23 +2315,24 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: colors.blueBtn,
     color: "#fff",
     border: "none",
-    borderRadius: 8,
+    borderRadius: 11,
     padding: "12px 18px",
     minHeight: 46,
     cursor: "pointer",
-    fontWeight: 800,
+    fontWeight: 900,
     fontSize: 15,
+    boxShadow: "0 6px 14px rgba(37,99,235,0.20)",
   };
 
   const secondaryButtonStyle: React.CSSProperties = {
     background: colors.grayBtn,
     color: colors.grayBtnText,
-    border: "1px solid #d3dbe3",
-    borderRadius: 8,
+    border: `1px solid ${colors.cardBorder}`,
+    borderRadius: 11,
     padding: "12px 18px",
     minHeight: 46,
     cursor: "pointer",
-    fontWeight: 800,
+    fontWeight: 850,
     fontSize: 15,
   };
 
@@ -2340,24 +2340,24 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: colors.title,
     color: "#fff",
     border: "2px solid #111827",
-    borderRadius: 8,
+    borderRadius: 11,
     padding: "12px 20px",
     minHeight: 46,
     cursor: "pointer",
     fontWeight: 900,
     fontSize: 15,
-    boxShadow: "0 4px 12px rgba(17,24,39,0.18)",
+    boxShadow: "0 7px 16px rgba(17,24,39,0.20)",
   };
 
   const compactHomeButtonStyle: React.CSSProperties = {
     background: colors.grayBtn,
     color: colors.grayBtnText,
-    border: "1px solid #d3dbe3",
-    borderRadius: 8,
-    padding: "7px 8px",
-    minHeight: 34,
+    border: `1px solid ${colors.cardBorder}`,
+    borderRadius: 10,
+    padding: "7px 10px",
+    minHeight: 36,
     cursor: "pointer",
-    fontWeight: 800,
+    fontWeight: 850,
     fontSize: 12,
     whiteSpace: "nowrap",
   };
@@ -2366,13 +2366,14 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: colors.blueBtn,
     color: "#fff",
     border: "none",
-    borderRadius: 8,
-    padding: "7px 8px",
-    minHeight: 34,
+    borderRadius: 10,
+    padding: "7px 10px",
+    minHeight: 36,
     cursor: "pointer",
-    fontWeight: 800,
+    fontWeight: 900,
     fontSize: 12,
     whiteSpace: "nowrap",
+    boxShadow: "0 4px 10px rgba(37,99,235,0.16)",
   };
 
   const compactSaveButtonStyle: React.CSSProperties = {
@@ -2504,32 +2505,71 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   const inputStyle: React.CSSProperties = {
     width: "100%",
     padding: "10px 12px",
-    borderRadius: 8,
-    border: "1px solid #cfd8e3",
+    borderRadius: 11,
+    border: `1px solid ${colors.cardBorderStrong}`,
     fontSize: 14,
     boxSizing: "border-box",
+    background: "#fff",
+    outlineColor: colors.blueBtn,
   };
 
   const labelStyle: React.CSSProperties = {
     display: "block",
     marginBottom: 6,
-    fontWeight: 700,
+    fontWeight: 900,
     color: colors.title,
+    fontSize: 13,
+    letterSpacing: "0.01em",
   };
 
   const tableHeaderStyle: React.CSSProperties = {
-    padding: "10px 8px",
+    padding: "11px 9px",
     textAlign: "left",
-    borderBottom: "1px solid #d8e0e6",
+    borderBottom: `1px solid ${colors.cardBorder}`,
     color: colors.title,
+    background: colors.tableHeadBg,
     fontWeight: 900,
     whiteSpace: "nowrap",
+    position: "sticky",
+    top: 0,
+    zIndex: 1,
   };
 
   const tableCellStyle: React.CSSProperties = {
-    padding: "9px 8px",
+    padding: "10px 9px",
     verticalAlign: "top",
     color: colors.text,
+    borderBottom: `1px solid ${colors.cardBorder}`,
+  };
+
+
+  const sectionTitleStyle: React.CSSProperties = {
+    margin: 0,
+    color: colors.title,
+    fontSize: 20,
+    fontWeight: 950,
+    letterSpacing: "-0.01em",
+  };
+
+  const helperTextStyle: React.CSSProperties = {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: 800,
+    lineHeight: 1.35,
+  };
+
+  const chipStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    padding: "5px 9px",
+    border: `1px solid ${colors.cardBorder}`,
+    background: colors.cardSoftBg,
+    color: colors.grayBtnText,
+    fontWeight: 900,
+    fontSize: 12,
+    whiteSpace: "nowrap",
   };
 
   const checkboxCellStyle: React.CSSProperties = {
@@ -2548,53 +2588,57 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   const stickyButtonBarStyle: React.CSSProperties = {
     ...basePanelStyle,
-    padding: 10,
+    padding: 9,
     position: "sticky",
     top: 0,
     zIndex: 20,
     marginBottom: 20,
-    borderRadius: "0 0 14px 14px",
-    boxShadow: "0 8px 18px rgba(31,42,55,0.12)",
+    borderRadius: "0 0 18px 18px",
+    background: "rgba(255,255,255,0.96)",
+    backdropFilter: "blur(8px)",
+    boxShadow: "0 10px 24px rgba(23,32,51,0.14)",
   };
 
   const sideRaceNavigationStyle: React.CSSProperties = {
     position: "fixed",
-    right: 12,
-    top: 12,
+    right: 14,
+    top: 10,
     zIndex: 30,
     display: "flex",
     flexDirection: "column",
     alignItems: "stretch",
     gap: 8,
-    width: 92,
+    width: 104,
   };
 
   const sideRaceNavigationButtonStyle: React.CSSProperties = {
     background: colors.title,
     color: "#fff",
     border: "1px solid #111827",
-    borderRadius: 8,
+    borderRadius: 999,
     padding: "8px 7px",
-    minHeight: 36,
+    minHeight: 42,
+    width: 42,
+    alignSelf: "flex-end",
     cursor: "pointer",
     fontWeight: 900,
     fontSize: 22,
     lineHeight: 1,
-    boxShadow: "0 5px 14px rgba(17,24,39,0.20)",
+    boxShadow: "0 8px 18px rgba(17,24,39,0.24)",
   };
 
   const sideRaceNavigationSubButtonStyle: React.CSSProperties = {
-    background: "#ffffff",
+    background: "rgba(255,255,255,0.98)",
     color: colors.grayBtnText,
-    border: "1px solid #cfd8e3",
-    borderRadius: 8,
-    padding: "7px 6px",
-    minHeight: 31,
+    border: `1px solid ${colors.cardBorder}`,
+    borderRadius: 10,
+    padding: "8px 7px",
+    minHeight: 32,
     cursor: "pointer",
-    fontWeight: 800,
+    fontWeight: 900,
     fontSize: 11,
     lineHeight: 1.1,
-    boxShadow: "0 3px 10px rgba(31,42,55,0.10)",
+    boxShadow: "0 4px 12px rgba(31,42,55,0.12)",
   };
 
   const buildRaceSeriesLabel = (race: RaceName = selectedRace) => {
@@ -2607,8 +2651,14 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       style={{
         display: "flex",
         alignItems: "center",
+        justifyContent: "space-between",
         gap: 12,
         marginBottom: 18,
+        padding: "14px 16px",
+        borderRadius: 20,
+        background: "rgba(255,255,255,0.78)",
+        border: `1px solid ${colors.cardBorder}`,
+        boxShadow: "0 10px 26px rgba(23,32,51,0.07)",
       }}
     >
       <button
@@ -2626,13 +2676,16 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           cursor: "pointer",
         }}
       >
-        <h1 style={{ color: colors.title, margin: 0, letterSpacing: "-0.02em" }}>
+        <h1 style={{ color: colors.title, margin: 0, letterSpacing: "-0.035em", fontSize: 31, lineHeight: 1 }}>
           🏁 {APP_NAME}
         </h1>
-        <div style={{ color: colors.muted, fontWeight: 800, marginTop: 4 }}>
+        <div style={{ color: colors.muted, fontWeight: 900, marginTop: 5, fontSize: 13 }}>
           {APP_VERSION}
         </div>
       </button>
+      <div style={{ ...chipStyle, background: backupWarningActive ? colors.warningBg : colors.successBg, borderColor: backupWarningActive ? colors.warningBorder : colors.successBorder }}>
+        {backupWarningActive ? "⚠ Backup empfohlen" : "💾 Datenstatus OK"}
+      </div>
     </div>
   );
 
@@ -2641,7 +2694,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       style={{
         marginTop: 28,
         padding: "12px 14px",
-        borderTop: "1px solid #d8e0e6",
+        borderTop: `1px solid ${colors.cardBorder}`,
         color: colors.muted,
         fontWeight: 800,
         display: "flex",
@@ -4137,21 +4190,24 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       style={{
         ...basePanelStyle,
         marginBottom: 20,
-        borderColor: warningCards.length ? "#f0b429" : colors.cardBorder,
+        borderColor: warningCards.length ? colors.warningBorder : colors.cardBorder,
         background: warningCards.length ? colors.warningBg : colors.cardBg,
+        borderLeft: warningCards.length ? `6px solid ${colors.warningBorder}` : `1px solid ${colors.cardBorder}`,
       }}
     >
-      <h2 style={{ marginTop: 0, color: colors.title }}>Warnungen</h2>
+      <h2 style={{ ...sectionTitleStyle, display: "flex", alignItems: "center", gap: 8 }}>
+        {warningCards.length ? "⚠ Warnungen" : "✅ Warnungen"}
+      </h2>
       {warningCards.length ? (
-        <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
           {warningCards.map((text) => (
-            <div key={text} style={{ color: colors.redBtn, fontWeight: 800, lineHeight: 1.3 }}>
-              ⚠ {text}
+            <div key={text} style={{ color: "#92400e", fontWeight: 900, lineHeight: 1.35, padding: "8px 10px", borderRadius: 10, background: "rgba(255,255,255,0.55)", border: `1px solid ${colors.warningBorder}` }}>
+              {text}
             </div>
           ))}
         </div>
       ) : (
-        <div style={{ fontSize: 18, fontWeight: 900, color: "#176b38" }}>Keine Warnungen</div>
+        <div style={{ marginTop: 10, fontSize: 16, fontWeight: 900, color: "#166534" }}>Keine Warnungen</div>
       )}
     </div>
   );
@@ -4161,10 +4217,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     const activeGroupedEvents = getEventGroupedByYear();
     const archivedGroupedEvents = getArchivedEventGroupedByYear();
     return (
-      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1120, margin: "0 auto" }}>
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1240, margin: "0 auto" }}>
         {renderAppHeader()}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
-          <h2 style={{ marginTop: 0, color: colors.title }}>Startseite</h2>
+          <h2 style={sectionTitleStyle}>Dashboard</h2>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button onClick={() => setShowEventCreateChoice((open) => !open)} style={mainButtonStyle}>Rennen / Rennserie erstellen</button>
             <button onClick={() => setAppShellView("masterParticipants")} style={secondaryButtonStyle}>Teilnehmer</button>
@@ -4218,7 +4274,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
-          <h2 style={{ marginTop: 0, color: colors.title }}>Import / Export</h2>
+          <h2 style={sectionTitleStyle}>Import / Export</h2>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
             <button onClick={saveAndExportFullBackup} style={{ ...compactSaveButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               Speichern
@@ -4246,9 +4302,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           )}
         </div>
         <div style={{ ...basePanelStyle }}>
-          <h2 style={{ marginTop: 0, color: colors.title }}>Erstellte Rennen / Rennserien</h2>
+          <h2 style={sectionTitleStyle}>Aktive Rennen / Rennserien</h2>
           {activeGroupedEvents.length === 0 ? (
-            <div style={{ color: colors.muted }}>{eventSearch.trim() ? "Keine passenden aktiven Rennen/Rennserien gefunden." : "Noch keine aktiven Rennen oder Rennserien erstellt."}</div>
+            <div style={{ color: colors.muted, padding: 22, border: `1px dashed ${colors.cardBorderStrong}`, borderRadius: 16, textAlign: "center", fontWeight: 900, background: colors.cardSoftBg }}>{eventSearch.trim() ? "Keine passenden aktiven Rennen/Rennserien gefunden." : "Noch keine Rennen erstellt. Erstelle dein erstes Einzelrennen oder eine Rennserie."}</div>
           ) : (
             <div style={{ display: "grid", gap: 16 }}>
               {activeGroupedEvents.map((group) => (
@@ -4268,24 +4324,27 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                         style={{
                           ...compactHomeButtonStyle,
                           width: "100%",
-                          minHeight: 132,
+                          minHeight: 124,
                           textAlign: "left",
                           display: "grid",
                           gridTemplateRows: "auto auto 1fr auto",
                           alignItems: "start",
-                          gap: 7,
+                          gap: 8,
                           cursor: "pointer",
                           boxSizing: "border-box",
-                          padding: 14,
+                          padding: 16,
                           justifyItems: "stretch",
                           overflow: "hidden",
+                          background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+                          boxShadow: "0 12px 24px rgba(23,32,51,0.10)",
+                          border: `1px solid ${colors.cardBorderStrong}`,
                         }}
                       >
                         <span style={{ alignSelf: "start", minWidth: 0 }}>
                           <span
                             style={{
-                              fontSize: 15,
-                              fontWeight: 900,
+                              fontSize: 17,
+                              fontWeight: 950,
                               lineHeight: 1.12,
                               display: "block",
                               overflowWrap: "anywhere",
@@ -4374,7 +4433,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   if (appShellView === "masterParticipants") {
     const groups = getMasterParticipantGroups();
     return (
-      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1120, margin: "0 auto" }}>
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1240, margin: "0 auto" }}>
         {renderAppHeader()}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
@@ -4443,7 +4502,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       }}
                       onClick={() => setSelectedMasterParticipant(participant)}
                       title="Teilnehmerdetails anzeigen"
-                      style={{ borderBottom: "1px solid #e5ebf1", cursor: "pointer" }}
+                      style={{ borderBottom: `1px solid ${colors.cardBorder}`, cursor: "pointer", background: index % 2 ? colors.tableRowAlt : "#fff" }}
                     >
                       <td style={tableCellStyle}>
                         <strong>{participant.name}</strong>{participant.cruiser ? " · Cruiser" : ""}
@@ -4594,7 +4653,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   if (appShellView === "history") {
     const historyEntries = getEventHistoryEntries();
     return (
-      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1120, margin: "0 auto" }}>
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1240, margin: "0 auto" }}>
         {renderAppHeader()}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
@@ -4756,7 +4815,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 14 }}>
-          <h2 style={{ marginTop: 0, marginBottom: 12, color: colors.title }}>Race-Status</h2>
+          <h2 style={sectionTitleStyle}>Race-Status</h2>
           <div
             style={{
               display: "flex",
@@ -4805,7 +4864,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 14 }}>
-          <h2 style={{ marginTop: 0, marginBottom: 12, color: colors.title }}>Teilnehmer</h2>
+          <h2 style={sectionTitleStyle}>Teilnehmer</h2>
           <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
             <button
               onClick={() => setViewMode("participants")}
@@ -4837,7 +4896,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   if (viewMode === "overall" && isSingleEvent) {
     return (
-      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageBg, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
         {renderAppHeader()}
         <div style={{ ...basePanelStyle }}>
           <button onClick={() => setViewMode("dashboard")} style={secondaryButtonStyle}>Zurück</button>
@@ -5135,7 +5194,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       style={{
                         width: "100%",
                         display: "grid",
-                        gridTemplateColumns: "34px 90px 1fr 130px 1fr auto",
+                        gridTemplateColumns: "34px 90px minmax(180px, 1fr) 130px minmax(120px, 1fr) auto",
                         gap: 10,
                         alignItems: "center",
                         padding: "9px 10px",
@@ -5167,10 +5226,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         </div>
 
         {manualResultsMode && (
-          <div id="manual-results" style={{ ...basePanelStyle, marginBottom: 20, borderColor: colors.blueBtn, background: "#f8fbff" }}>
+          <div id="manual-results" style={{ ...basePanelStyle, marginBottom: 20, borderColor: colors.blueBtn, background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)", borderLeft: `6px solid ${colors.blueBtn}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
               <div>
-                <h2 style={{ margin: 0, color: colors.title }}>Manuelle Rangliste erstellen</h2>
+                <h2 style={{ ...sectionTitleStyle, display: "flex", alignItems: "center", gap: 8 }}>🏁 Manuelle Rangliste erstellen</h2>
                 <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4, lineHeight: 1.35 }}>
                   1. Kategorie prüfen · 2. Fahrer der Zielreihenfolge nach anklicken · 3. Mit „Resultatliste erstellen“ speichern.
                   Alle Fahrer einer Kategorie müssen platziert sein.
@@ -5185,7 +5244,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
               {sortCategories(Object.keys(groupedRace)).map((cat) => {
                 const selectedIds = manualResultOrder[cat] || [];
                 return (
-                  <div key={`manual-${cat}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 12, padding: 12, background: "#fff" }}>
+                  <div key={`manual-${cat}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 16, padding: 14, background: "#fff", boxShadow: "0 6px 16px rgba(23,32,51,0.06)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
                       <strong style={{ color: colors.title }}>{cat}</strong>
                       <span style={{ color: colors.muted, fontSize: 12, fontWeight: 800 }}>{selectedIds.length}/{(groupedRace[cat] || []).length}</span>
@@ -5620,7 +5679,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           </div>
 
           {(!homeEventSeries.trim() || !eventLocation.trim() || !eventDate.trim()) && (
-            <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, border: "1px solid #f59e0b", background: colors.warningBg, color: "#92400e", fontWeight: 800 }}>
+            <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 14, border: `1px solid ${colors.warningBorder}`, borderLeft: `6px solid ${colors.warningBorder}`, background: colors.warningBg, color: "#92400e", fontWeight: 900 }}>
               ⚠ Renninformationen unvollständig: {[!homeEventSeries.trim() ? "Rennserie" : "", !eventLocation.trim() ? "Rennort" : "", !eventDate.trim() ? "Datum" : ""].filter(Boolean).join(", ")} fehlt. Bitte vor dem Erstellen der Vorläufe ergänzen.
             </div>
           )}
