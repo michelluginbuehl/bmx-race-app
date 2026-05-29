@@ -237,7 +237,7 @@ export default function HeatInput({ heat, value = [], onSave, allowUnlimitedSele
       <div style={{ marginBottom: 10 }}>
         <strong style={{ color: colors.title }}>Zieleinlauf erfassen</strong>
         <div style={{ marginTop: 4, fontSize: 12, color: "#667085" }}>
-          DNF = 10 Rangpunkte im Vorlauf. DSQ/DNS werden ans Ende sortiert. DNS zählt nicht für die Gesamtwertung.
+          DNF = 10 Rangpunkte in der Moto. DSQ/DNS werden ans Ende sortiert. DNS zählt nicht für die Gesamtwertung.
         </div>
       </div>
 
