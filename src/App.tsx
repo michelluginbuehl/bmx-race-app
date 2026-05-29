@@ -69,7 +69,7 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.10.1";
+const APP_VERSION = "v1.10.2";
 const APP_NAME = "BMX Race Manager";
 const APP_CHANGE_NOTE = "Teilnehmerdatenbank und manuelle Rangliste vereinfacht";
 
@@ -6016,6 +6016,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                           <HeatInput
                             heat={heat}
                             value={result}
+                            allowUnlimitedSelectedRows={roundName === "Manuelle Rangliste"}
                             onSave={(data: any[]) =>
                               saveFinalResult(cat, roundName, data)
                             }
