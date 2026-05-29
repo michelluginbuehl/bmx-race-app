@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.10.2";
+const APP_VERSION = "v1.11.0";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Teilnehmerdatenbank und manuelle Rangliste vereinfacht";
+const APP_CHANGE_NOTE = "Stabilere manuelle Rangliste, Backup-Warnung, PDF-Status und Teilnehmerdatenbank-Filter";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -116,6 +116,9 @@ export default function App() {
   const [showEventCreateChoice, setShowEventCreateChoice] = useState(false);
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [eventParticipantSearch, setEventParticipantSearch] = useState("");
+  const [masterParticipantSearch, setMasterParticipantSearch] = useState("");
+  const [masterParticipantFilter, setMasterParticipantFilter] = useState<"active" | "trash" | "all">("active");
+  const [showEmergencyTools, setShowEmergencyTools] = useState(false);
   const [selectedMasterParticipantKeys, setSelectedMasterParticipantKeys] = useState<string[]>([]);
   const [manualResultsMode, setManualResultsMode] = useState(false);
   const [manualResultOrder, setManualResultOrder] = useState<Record<string, string[]>>({});
@@ -373,6 +376,64 @@ export default function App() {
     const query = globalSearch.trim().toLowerCase();
     if (!query) return true;
     return getRiderSearchText(r).includes(query);
+  };
+
+  const normalizeParticipantName = (value: string) =>
+    String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const getSortedNameKey = (value: string) =>
+    normalizeParticipantName(value).split(" ").filter(Boolean).sort().join(" ");
+
+  const getLevenshteinDistance = (a: string, b: string) => {
+    const s1 = normalizeParticipantName(a);
+    const s2 = normalizeParticipantName(b);
+    if (!s1 || !s2) return Math.max(s1.length, s2.length);
+    const prev = Array.from({ length: s2.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= s1.length; i += 1) {
+      const curr = [i];
+      for (let j = 1; j <= s2.length; j += 1) {
+        curr[j] = Math.min(
+          curr[j - 1] + 1,
+          prev[j] + 1,
+          prev[j - 1] + (s1[i - 1] === s2[j - 1] ? 0 : 1),
+        );
+      }
+      for (let j = 0; j < prev.length; j += 1) prev[j] = curr[j];
+    }
+    return prev[s2.length];
+  };
+
+  const areLikelyDuplicateParticipants = (a: any, b: any) => {
+    const sameMeta = String(a.birthYear || "") === String(b.birthYear || "") && String(a.gender || "") === String(b.gender || "");
+    const samePlate = String(a.plate || "").trim() && String(a.plate || "").trim() === String(b.plate || "").trim();
+    const nameA = normalizeParticipantName(a.name || "");
+    const nameB = normalizeParticipantName(b.name || "");
+    const sortedA = getSortedNameKey(a.name || "");
+    const sortedB = getSortedNameKey(b.name || "");
+    const distance = getLevenshteinDistance(nameA, nameB);
+    if (samePlate && sameMeta) return true;
+    if (sameMeta && sortedA && sortedA === sortedB) return true;
+    if (sameMeta && Math.max(nameA.length, nameB.length) >= 6 && distance <= 2) return true;
+    return false;
+  };
+
+  const getDuplicateMasterParticipantKeys = (items: any[]) => {
+    const keys = new Set<string>();
+    for (let i = 0; i < items.length; i += 1) {
+      for (let j = i + 1; j < items.length; j += 1) {
+        if (areLikelyDuplicateParticipants(items[i], items[j])) {
+          keys.add(String(items[i].key || `${items[i].name}-${i}`));
+          keys.add(String(items[j].key || `${items[j].name}-${j}`));
+        }
+      }
+    }
+    return keys;
   };
 
 
@@ -1833,7 +1894,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
 
-  const startManualResultsMode = () => {
+  const startManualResultsMode = async () => {
     if (!ensureRaceInformationComplete()) return;
     if (raceClosed) {
       alert("Dieses Race ist abgeschlossen. Für Änderungen Race zuerst wieder öffnen.");
@@ -1849,49 +1910,22 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
     if (hasExistingRaceData) {
       const proceed = window.confirm(
-        "Manuelle Rangliste erstellen? Bestehende Läufe, Finals oder Resultate dieses Race werden dadurch ersetzt.",
+        "Manuelle Rangliste starten? Bestehende Läufe, Finals oder Resultate dieses Race werden beim Speichern der manuellen Resultatliste ersetzt.",
       );
       if (!proceed) return;
+      await exportBackup("Sicherheitsbackup vor manueller Rangliste");
     }
 
-    const nextFinals: Record<string, Record<string, any[]>> = {};
-    const nextManualOrder: Record<string, string[]> = {};
-    const categories = originalRaceCategories();
-
-    categories.forEach((cat) => {
-      const ridersInCategory = [...(groupedRace[cat] || [])].sort((a: any, b: any) => {
-        const plateA = Number(String(a.plate || "").replace(/\D/g, ""));
-        const plateB = Number(String(b.plate || "").replace(/\D/g, ""));
-        if (Number.isFinite(plateA) && Number.isFinite(plateB) && plateA !== plateB) return plateA - plateB;
-        return String(a.name || "").localeCompare(String(b.name || ""), "de");
-      });
-      if (ridersInCategory.length === 0) return;
-
-      const finalCategory = getEffectiveFinalCategory(cat);
-      if (!nextFinals[finalCategory]) nextFinals[finalCategory] = {};
-      nextFinals[finalCategory]["Manuelle Rangliste"] = ridersInCategory.map((r: any, index: number) => ({
-        ...r,
-        riderId: String(r.id),
-        startPos: index + 1,
-        originalCategory: r.category,
-      }));
-      nextManualOrder[cat] = ridersInCategory.map((r: any) => String(r.id));
-    });
-
-    if (Object.keys(nextFinals).length === 0) {
+    const categories = originalRaceCategories().filter((cat) => (groupedRace[cat] || []).length > 0);
+    if (categories.length === 0) {
       window.alert("Es sind keine Teilnehmer für dieses Race ausgewählt.");
       return;
     }
 
-    setHeats({});
-    setResults({});
-    setFinals(nextFinals);
-    setFinalResults({});
-    setFinalManualOrder(nextManualOrder);
-    setManualResultsMode(false);
     setManualResultOrder({});
-    addChangeLog(`${selectedRace}: Manuelle Rangliste vorbereitet`);
-    setTimeout(() => scrollToSection("finallaeufe"), 0);
+    setManualResultsMode(true);
+    addChangeLog(`${selectedRace}: Manuelle Rangliste gestartet`);
+    setTimeout(() => scrollToSection("manual-results"), 0);
   };
 
   const toggleManualResultRider = (category: string, rider: any) => {
@@ -1909,6 +1943,14 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   const clearManualResultCategory = (category: string) => {
     setManualResultOrder((prev) => ({ ...prev, [category]: [] }));
+  };
+
+  const addRemainingManualResultCategory = (category: string) => {
+    const current = manualResultOrder[category] || [];
+    const remaining = (groupedRace[category] || [])
+      .map((r: any) => String(r.id))
+      .filter((id: string) => !current.includes(id));
+    setManualResultOrder((prev) => ({ ...prev, [category]: [...current, ...remaining] }));
   };
 
   const createManualResults = () => {
@@ -1983,7 +2025,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     setTimeout(() => scrollToSection("resultate"), 0);
   };
 
-  const createHeats = () => {
+  const createHeats = async () => {
     if (!ensureRaceInformationComplete()) return;
     if (raceClosed) {
       alert(
@@ -1992,13 +2034,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       return;
     }
     if (!validateSelectedRaceBeforeBuild()) return;
-    if (
-      Object.keys(heats || {}).length > 0 &&
-      !window.confirm(
-        "Vorläufe neu erstellen? Bestehende Vorläufe/Resultate werden überschrieben.",
-      )
-    )
-      return;
+    if (Object.keys(heats || {}).length > 0) {
+      if (!window.confirm("Vorläufe neu erstellen? Bestehende Vorläufe/Resultate werden überschrieben.")) return;
+      await exportBackup("Sicherheitsbackup vor Vorläufe neu erstellen");
+    }
 
     const heatRiders = riders.map((r: any) => ({
       ...r,
@@ -2135,20 +2174,17 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     });
   };
 
-  const createFinals = () => {
+  const createFinals = async () => {
     if (raceClosed) {
       alert(
         "Dieses Race ist abgeschlossen. Für Änderungen Race zuerst wieder öffnen.",
       );
       return;
     }
-    if (
-      Object.keys(finals || {}).length > 0 &&
-      !window.confirm(
-        "Finals neu erstellen? Bestehende Finalresultate werden gelöscht.",
-      )
-    )
-      return;
+    if (Object.keys(finals || {}).length > 0) {
+      if (!window.confirm("Finals neu erstellen? Bestehende Finalresultate werden gelöscht.")) return;
+      await exportBackup("Sicherheitsbackup vor Finals neu erstellen");
+    }
     const all: any = {};
 
     getFinalRaceCategories().forEach((finalCategory) => {
@@ -2817,14 +2853,22 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       .replace(/[^\p{L}\p{N}_-]/gu, "");
 
   const buildPdfFilename = (base: string) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const labelMap: Record<string, string> = {
+      bmx_finalresultate: "Resultate",
+      bmx_vorlaeufe_startplaetze: "Vorlaeufe",
+      bmx_finals_startplaetze: "Finals",
+      bmx_gesamtwertung: "Gesamtwertung",
+    };
+    const documentType = labelMap[base] || base;
     const parts = [
-      sanitizeFilePart(base),
-      sanitizeFilePart(buildRaceSeriesLabel()),
-      sanitizeFilePart(eventLocation),
-      sanitizeFilePart(eventDate),
-    ].filter(Boolean);
+      APP_NAME,
+      buildRaceSeriesLabel(),
+      documentType,
+      eventDate || today,
+    ].map(sanitizeFilePart).filter(Boolean);
 
-    return `${parts.join("_") || "pdf"}.pdf`;
+    return `${parts.join("_") || "BMX_Race_Manager"}.pdf`;
   };
 
   const renderRows = (
@@ -3049,6 +3093,16 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       doc.text(`Datum: ${eventDate || "-"}`, eventInfoX + 3, 29);
     }
 
+    const pdfStatus = title.toLowerCase().includes("gesamt")
+      ? (overallLocked ? "OFFIZIELL" : "PROVISORISCH")
+      : (raceClosed ? "OFFIZIELL" : "PROVISORISCH");
+    doc.setFillColor(pdfStatus === "OFFIZIELL" ? 232 : 255, pdfStatus === "OFFIZIELL" ? 248 : 247, pdfStatus === "OFFIZIELL" ? 239 : 230);
+    doc.setDrawColor(pdfStatus === "OFFIZIELL" ? 145 : 240, pdfStatus === "OFFIZIELL" ? 215 : 180, pdfStatus === "OFFIZIELL" ? 170 : 41);
+    doc.roundedRect(14, 32, 34, 7, 2, 2, "FD");
+    doc.setFontSize(8);
+    doc.setTextColor(pdfStatus === "OFFIZIELL" ? 22 : 146, pdfStatus === "OFFIZIELL" ? 101 : 64, pdfStatus === "OFFIZIELL" ? 52 : 14);
+    doc.text(pdfStatus, 17, 37);
+
     if (eventLogo) {
       try {
         doc.addImage(eventLogo, "PNG", logoX, logoY, logoSize, logoSize);
@@ -3097,6 +3151,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       doc.setPage(page);
       doc.setFontSize(8);
       doc.setTextColor(110, 120, 130);
+      const created = new Date().toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" });
+      doc.text(`${APP_NAME} ${APP_VERSION} · Erstellt ${created}`, 14, pageHeightValue - 7);
       doc.text(
         `Seite ${page} / ${totalPages}`,
         pageWidth - 32,
@@ -3750,7 +3806,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     return grouped;
   };
 
-  const createOverallRanking = () => {
+  const createOverallRanking = async () => {
     if (overallLocked) {
       window.alert("Die Gesamtwertung ist gesperrt. Bitte zuerst freigeben, bevor sie neu erstellt wird.");
       return;
@@ -4215,12 +4271,35 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   );
 
 
+  const backupWarningBar = backupWarningActive ? (
+    <div style={{
+      marginBottom: 16,
+      padding: "12px 14px",
+      borderRadius: 14,
+      border: `1px solid ${colors.warningBorder}`,
+      borderLeft: `6px solid ${colors.warningBorder}`,
+      background: colors.warningBg,
+      color: "#92400e",
+      display: "flex",
+      gap: 12,
+      justifyContent: "space-between",
+      alignItems: "center",
+      fontWeight: 900,
+      flexWrap: "wrap",
+    }}>
+      <span>{backupAgeMinutes === null ? "⚠ Noch kein Backup erstellt." : `⚠ Letztes Backup vor ${backupAgeMinutes} Minuten.`}</span>
+      <button type="button" onClick={() => exportBackup("Manuelles Backup über Warnbalken")} style={compactSaveButtonStyle}>Backup jetzt erstellen</button>
+    </div>
+  ) : null;
+
+
   if (appShellView === "events") {
     const activeGroupedEvents = getEventGroupedByYear();
     const archivedGroupedEvents = getArchivedEventGroupedByYear();
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1240, margin: "0 auto" }}>
         {renderAppHeader()}
+        {backupWarningBar}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <h2 style={sectionTitleStyle}>Dashboard</h2>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -4433,10 +4512,31 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   }
 
   if (appShellView === "masterParticipants") {
-    const groups = getMasterParticipantGroups();
+    const activeGroups = getMasterParticipantGroups();
+    const trashGroups = getDeletedMasterParticipantGroups();
+    const masterDuplicateKeys = getDuplicateMasterParticipantKeys(activeGroups);
+    const masterSearchQuery = masterParticipantSearch.trim().toLowerCase();
+    const participantMatches = (participant: any) => {
+      if (!masterSearchQuery) return true;
+      return `${participant.name || ""} ${participant.plate || ""} ${participant.club || ""} ${participant.birthYear || ""} ${participant.gender || ""}`
+        .toLowerCase()
+        .includes(masterSearchQuery);
+    };
+    const visibleActiveGroups = activeGroups.filter((participant: any) => {
+      if (!participantMatches(participant)) return false;
+      if (masterParticipantFilter === "trash") return false;
+      return true;
+    });
+    const visibleTrashGroups = trashGroups.filter((participant: any) => {
+      if (!participantMatches(participant)) return false;
+      if (masterParticipantFilter === "active") return false;
+      return true;
+    });
+    const groups = visibleActiveGroups;
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1240, margin: "0 auto" }}>
         {renderAppHeader()}
+        {backupWarningBar}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             <button
@@ -4461,6 +4561,38 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           <p style={{ color: colors.muted, marginTop: -4 }}>
             Teilnehmer werden zentral hier erfasst oder importiert. In einem Rennen / einer Rennserie werden sie danach aus dieser Liste hinzugefügt.
           </p>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) auto", gap: 10, alignItems: "end", marginBottom: 14 }}>
+            <div>
+              <label style={labelStyle}>Teilnehmer suchen</label>
+              <input
+                value={masterParticipantSearch}
+                onChange={(e) => setMasterParticipantSearch(e.target.value)}
+                placeholder="Name, Startnummer, Verein, Jahrgang ..."
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {[
+                ["active", "Aktiv"],
+                ["trash", "Papierkorb"],
+                ["all", "Alle"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setMasterParticipantFilter(value as any)}
+                  style={masterParticipantFilter === value ? compactPrimaryButtonStyle : compactHomeButtonStyle}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {masterDuplicateKeys.size > 0 && masterParticipantFilter !== "trash" && (
+            <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: 12, border: `1px solid ${colors.warningBorder}`, borderLeft: `5px solid ${colors.warningBorder}`, background: colors.warningBg, color: "#92400e", fontWeight: 900 }}>
+              ⚠ Mögliche Dubletten erkannt: {masterDuplicateKeys.size} Einträge. Bitte bei den markierten Teilnehmern Details prüfen.
+            </div>
+          )}
           <div style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
             <RiderForm
               onChange={async () => {
@@ -4481,9 +4613,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
               masterMode
             />
           </div>
-          {groups.length === 0 ? (
-            <div style={{ color: colors.muted }}>Noch keine Teilnehmer vorhanden.</div>
-          ) : (
+          {groups.length === 0 && masterParticipantFilter !== "trash" ? (
+            <div style={{ color: colors.muted }}>Keine passenden aktiven Teilnehmer gefunden.</div>
+          ) : masterParticipantFilter === "trash" ? null : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                 <thead>
@@ -4508,6 +4640,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                     >
                       <td style={tableCellStyle}>
                         <strong>{participant.name}</strong>{participant.cruiser ? " · Cruiser" : ""}
+                        {masterDuplicateKeys.has(String(participant.key || "")) && (
+                          <span style={{ ...getStatusBadgeStyle("Warnung"), marginLeft: 8, background: colors.warningBg, color: "#92400e", borderColor: colors.warningBorder }}>Mögliche Dublette</span>
+                        )}
                         <div style={{ color: colors.blueBtn, fontWeight: 800, fontSize: 12 }}>Details/Rangierungen anzeigen</div>
                       </td>
                       <td style={tableCellStyle}>#{participant.plate || "-"}</td>
@@ -4549,13 +4684,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             </div>
           )}
 
-          {getDeletedMasterParticipantGroups().length > 0 && (
-            <details style={{ ...basePanelStyle, marginTop: 18, background: "#fff8f1" }}>
+          {visibleTrashGroups.length > 0 && (
+            <details open={masterParticipantFilter === "trash" || masterParticipantFilter === "all"} style={{ ...basePanelStyle, marginTop: 18, background: "#fff8f1" }}>
               <summary style={{ cursor: "pointer", fontWeight: 900, color: colors.title }}>
-                Papierkorb gelöschte Teilnehmer ({getDeletedMasterParticipantGroups().length})
+                Papierkorb gelöschte Teilnehmer ({visibleTrashGroups.length})
               </summary>
               <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                {getDeletedMasterParticipantGroups().map((participant: any) => (
+                {visibleTrashGroups.map((participant: any) => (
                   <div key={participant.key} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center", padding: 10, border: `1px solid ${colors.cardBorder}`, borderRadius: 10, background: "#fff" }}>
                     <div>
                       <strong>{participant.name}</strong> · #{participant.plate || "-"} · {participant.birthYear || "-"} | {participant.gender || "-"}
@@ -4705,6 +4840,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         }}
       >
         {renderAppHeader()}
+        {backupWarningBar}
 
         <div
           style={{
@@ -4722,6 +4858,11 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           <div>
             <strong style={{ fontSize: 22, color: colors.title }}>{getCurrentEvent()?.name || "Rennserie"}</strong><br />
             <span style={{ color: colors.muted, fontSize: 15, fontWeight: 800 }}>{getCurrentEvent()?.type === "single" ? "Einzel Rennen" : "Rennserie"} · {getCurrentEvent()?.year || ""}</span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              <span style={getStatusBadgeStyle(getRaceStatus(selectedRace))}>Status {selectedRace}: {getRaceStatus(selectedRace)}</span>
+              <span style={getStatusBadgeStyle("Teilnehmer")}>Teilnehmer: {getRaceParticipantCount(selectedRace)}</span>
+              <span style={getStatusBadgeStyle("Speichern")}>Letzte Speicherung: {lastSaveAt ? formatDateTime(lastSaveAt) : "-"}</span>
+            </div>
           </div>
           <button onClick={() => setAppShellView("events")} style={{ ...secondaryButtonStyle, minHeight: 46 }}>Zur Startseite</button>
         </div>
@@ -4924,6 +5065,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         }}
       >
         {renderAppHeader()}
+        {backupWarningBar}
 
         <div style={{ ...basePanelStyle, marginBottom: 20 }}>
           <div
@@ -5106,6 +5248,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         }}
       >
         {renderAppHeader()}
+        {backupWarningBar}
 
         <div style={{ ...basePanelStyle, marginBottom: 20 }}>
           <div
@@ -5251,7 +5394,11 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       <strong style={{ color: colors.title }}>{cat}</strong>
                       <span style={{ color: colors.muted, fontSize: 12, fontWeight: 800 }}>{selectedIds.length}/{(groupedRace[cat] || []).length}</span>
                     </div>
-                    <div style={{ display: "grid", gap: 6, paddingRight: 4 }}>
+                    <div style={{ display: "grid", gap: 8, paddingRight: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: colors.muted, fontSize: 12, fontWeight: 900 }}>
+                        <span>Noch nicht platzierte / anklickbare Fahrer</span>
+                        <span>{selectedIds.length}/{(groupedRace[cat] || []).length} platziert</span>
+                      </div>
                       {[...(groupedRace[cat] || [])]
                         .sort((a: any, b: any) => {
                           const plateA = Number(String(a.plate || "").replace(/\D/g, ""));
@@ -5293,7 +5440,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                     </div>
                     {selectedIds.length > 0 && (
                       <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#f8fbff", border: `1px solid ${colors.cardBorder}` }}>
-                        <div style={{ fontWeight: 900, color: colors.title, marginBottom: 6 }}>Aktuelle Rangfolge</div>
+                        <div style={{ fontWeight: 900, color: colors.title, marginBottom: 6 }}>Bereits platzierte Fahrer</div>
                         <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
                           {selectedIds.map((id, orderIndex) => {
                             const selectedRider = (groupedRace[cat] || []).find((r: any) => String(r.id) === String(id));
@@ -5312,6 +5459,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                           style={smallGhostButtonStyle}
                         >
                           Letzten Fahrer rückgängig
+                        </button>
+                        <button type="button" onClick={() => addRemainingManualResultCategory(cat)} style={smallGhostButtonStyle}>
+                          Rest ans Ende setzen
                         </button>
                         <button type="button" onClick={() => clearManualResultCategory(cat)} style={smallGhostButtonStyle}>
                           Kategorie zurücksetzen
@@ -5574,6 +5724,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     >
       <div style={{ position: "relative", zIndex: 1 }}>
         {renderAppHeader()}
+        {backupWarningBar}
 
         <div style={stickyButtonBarStyle}>
           <div
@@ -5724,6 +5875,27 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           </div>
 
         </div>
+
+        <details style={{ ...basePanelStyle, marginBottom: 16, background: "#fffdf7", borderColor: colors.warningBorder }} open={showEmergencyTools}>
+          <summary
+            onClick={(e) => { e.preventDefault(); setShowEmergencyTools((value) => !value); }}
+            style={{ cursor: "pointer", fontWeight: 950, color: colors.title, fontSize: 16 }}
+          >
+            Notfall / Reparatur
+          </summary>
+          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button type="button" onClick={startManualResultsMode} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : compactPrimaryButtonStyle}>
+              Resultate manuell erstellen
+            </button>
+            <button type="button" onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>
+              Backup / Speichern
+            </button>
+            <button type="button" onClick={resetHeats} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : compactDangerButtonStyle}>
+              Race zurücksetzen
+            </button>
+            <span style={{ color: colors.muted, fontWeight: 800, fontSize: 13 }}>Seltene Notfallaktionen sind hier gebündelt, damit das Rennblatt übersichtlich bleibt.</span>
+          </div>
+        </details>
 
         <div style={sideRaceNavigationStyle}>
           <button
