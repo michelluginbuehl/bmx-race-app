@@ -69,7 +69,7 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.10.0";
+const APP_VERSION = "v1.10.1";
 const APP_NAME = "BMX Race Manager";
 const APP_CHANGE_NOTE = "Teilnehmerdatenbank und manuelle Rangliste vereinfacht";
 
@@ -177,6 +177,8 @@ export default function App() {
     bronzeBorder: "#b87333",
     successBg: "#e8f8ef",
     successBorder: "#91d7aa",
+    greenBg: "#e8f8ef",
+    greenBorder: "#91d7aa",
     warningBg: "#fff7e6",
     warningBorder: "#f0b429",
     dangerBg: "#fff1f1",
