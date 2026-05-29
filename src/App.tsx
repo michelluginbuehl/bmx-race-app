@@ -69,16 +69,17 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.11.4";
+const APP_VERSION = "v1.12.0";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Rennen-Startbereich und Layoutbreite angepasst";
+const APP_CHANGE_NOTE = "Datenprüfung, Reparatur, Speicherstatus und Archiv verbessert";
+const DATA_SCHEMA_VERSION = 4;
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
   const [viewMode, setViewMode] = useState<
     "dashboard" | "participants" | "race" | "overall"
   >("dashboard");
-  const [appShellView, setAppShellView] = useState<"events" | "manager" | "history" | "masterParticipants" | "guide" | "regulations">("events");
+  const [appShellView, setAppShellView] = useState<"events" | "manager" | "history" | "masterParticipants" | "guide" | "regulations" | "dataCheck">("events");
   const [managedEvents, setManagedEvents] = useState<ManagedEvent[]>([]);
   const [currentEventId, setCurrentEventId] = useState<string>("");
 
@@ -145,8 +146,13 @@ export default function App() {
   const [backupMessage, setBackupMessage] = useState("");
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [loadedRace, setLoadedRace] = useState<RaceName | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastIntegrityCheckAt, setLastIntegrityCheckAt] = useState("");
+  const [dataCheckIssues, setDataCheckIssues] = useState<Array<{ level: "info" | "warning" | "error"; title: string; detail: string; repairable?: boolean }>>([]);
+  const [dataCheckRunning, setDataCheckRunning] = useState(false);
+  const [dataRepairMessage, setDataRepairMessage] = useState("");
 
-  const colors = {
+  const colors: Record<string, string> = {
     pageBg: "#eef3f7",
     pageGradient: "linear-gradient(180deg, #eef6ff 0%, #f6f8fb 42%, #eef3f7 100%)",
     cardBg: "#ffffff",
@@ -673,7 +679,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       .map((year) => ({ year, events: groups[year].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))) }));
   };
 
-  const openManagedEvent = (event: ManagedEvent) => {
+  const openManagedEvent = async (event: ManagedEvent) => {
+    if (currentEventId && initialLoaded && hasUnsavedChanges) {
+      await saveCurrentState();
+    }
     setInitialLoaded(false);
     resetCurrentEventState();
     setCurrentEventId(event.id);
@@ -691,6 +700,170 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       const backups = JSON.parse(localStorage.getItem(scopedKeyForEvent(event.id, "bmx_backup_history")) || "[]");
       return { event, logs: Array.isArray(logs) ? logs : [], backups: Array.isArray(backups) ? backups : [] };
     });
+  };
+
+
+  const getEventStoragePrefix = (eventId: string) => `bmx_event_${eventId}_`;
+
+  const getShortEventId = (event?: ManagedEvent | null) => {
+    if (!event?.id) return "-";
+    return String(event.id).slice(0, 8);
+  };
+
+  const getStoredValueForEvent = (eventId: string, key: string, fallback: any = null) => {
+    try {
+      const raw = localStorage.getItem(scopedKeyForEvent(eventId, key));
+      if (raw === null || raw === undefined) return fallback;
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  };
+
+  const getManagedEventProgress = (event: ManagedEvent) => {
+    const raceCount = getManagedEventRaceCount(event.id, event.type);
+    let closed = 0;
+    let withResults = 0;
+    RACES.slice(0, raceCount).forEach((race) => {
+      const prefix = `bmx_${race.toLowerCase().replace(/\s+/g, "_")}`;
+      const isClosed = !!getStoredValueForEvent(event.id, `${prefix}_race_closed`, false);
+      const raceResults = getStoredValueForEvent(event.id, `${prefix}_final_results`, {});
+      const resultCount = raceResults && typeof raceResults === "object"
+        ? Object.values(raceResults).reduce<number>((sum, value: any) => sum + (Array.isArray(value) ? value.length : 0), 0)
+        : 0;
+      if (isClosed) closed += 1;
+      if (resultCount > 0) withResults += 1;
+    });
+    const percent = raceCount > 0 ? Math.round((closed / raceCount) * 100) : 0;
+    return { raceCount, closed, withResults, percent };
+  };
+
+  const runDataIntegrityCheck = async () => {
+    setDataCheckRunning(true);
+    setDataRepairMessage("");
+    try {
+      const events = getRawManagedEvents();
+      const eventIds = new Set(events.map((event) => String(event.id || "")).filter(Boolean));
+      const ridersRaw = await db.table("riders").toArray();
+      const appRows = await db.table("appData").toArray();
+      const issues: Array<{ level: "info" | "warning" | "error"; title: string; detail: string; repairable?: boolean }> = [];
+
+      const duplicateEventIds = events
+        .map((event) => String(event.id || ""))
+        .filter((id, index, array) => id && array.indexOf(id) !== index);
+      if (duplicateEventIds.length) {
+        issues.push({ level: "error", title: "Doppelte Rennen/Rennserien-IDs", detail: `Mehrfach vorhanden: ${Array.from(new Set(duplicateEventIds)).join(", ")}` });
+      }
+
+      events.forEach((event) => {
+        if (!event.id || !event.name || !event.year) {
+          issues.push({ level: "warning", title: "Unvollständige Rennen/Rennserie", detail: `${event.name || "Ohne Name"} hat fehlende Basisdaten.` });
+        }
+        if (event.type === "single") {
+          const count = Number(getStoredValueForEvent(event.id, "bmx_series_race_count", 1));
+          if (count !== 1) {
+            issues.push({ level: "warning", title: "Einzelrennen mit falscher Race-Anzahl", detail: `${event.name}: Race-Anzahl wird auf 1 repariert.`, repairable: true });
+          }
+        }
+      });
+
+      const riderIds = ridersRaw.map((rider: any) => String(rider.id || "")).filter(Boolean);
+      const duplicateRiderIds = riderIds.filter((id, index, array) => array.indexOf(id) !== index);
+      if (duplicateRiderIds.length) {
+        issues.push({ level: "error", title: "Doppelte Teilnehmer-IDs", detail: `Mehrfach vorhanden: ${Array.from(new Set(duplicateRiderIds)).slice(0, 8).join(", ")}` });
+      }
+
+      ridersRaw.forEach((rider: any) => {
+        const eventId = String(rider.eventId || "master");
+        if (!rider.id) issues.push({ level: "error", title: "Teilnehmer ohne ID", detail: `${rider.name || "Unbekannt"} hat keine eindeutige ID.` });
+        if (!rider.name || !rider.plate) issues.push({ level: "warning", title: "Teilnehmer mit fehlenden Pflichtdaten", detail: `${rider.name || "Ohne Name"} / #${rider.plate || "-"}` });
+        if (eventId !== "master" && eventId !== "legacy" && !eventIds.has(eventId)) {
+          issues.push({ level: "warning", title: "Teilnehmer in unbekanntem Rennen", detail: `${rider.name || "Unbekannt"} verweist auf Event ${eventId}.`, repairable: true });
+        }
+      });
+
+      appRows.forEach((row: any) => {
+        const key = String(row.key || "");
+        const match = key.match(/^bmx_event_([^_]+)_/);
+        if (match && !eventIds.has(match[1])) {
+          issues.push({ level: "warning", title: "Verwaiste gespeicherte Renndaten", detail: `Gespeicherter Schlüssel gehört zu keinem aktiven Rennen: ${key}`, repairable: true });
+        }
+      });
+
+      if (!issues.length) {
+        issues.push({ level: "info", title: "Alles in Ordnung", detail: `Geprüft: ${events.length} Rennen/Rennserien, ${ridersRaw.length} Teilnehmer, ${appRows.length} gespeicherte Datensätze.` });
+      }
+      setDataCheckIssues(issues);
+      setLastIntegrityCheckAt(new Date().toISOString());
+    } catch (error: any) {
+      setDataCheckIssues([{ level: "error", title: "Datenprüfung fehlgeschlagen", detail: error?.message || "Unbekannter Fehler" }]);
+    } finally {
+      setDataCheckRunning(false);
+    }
+  };
+
+  const repairDataIntegrity = async () => {
+    if (!window.confirm("Daten automatisch reparieren? Vorher wird ein vollständiges Backup erstellt.")) return;
+    await exportBackup("Sicherheitsbackup vor Datenreparatur");
+    try {
+      const events = getRawManagedEvents();
+      const eventIds = new Set(events.map((event) => String(event.id || "")).filter(Boolean));
+      for (const event of events) {
+        if (event.type === "single") {
+          writeInitialEventValue(event.id, "bmx_series_race_count", 1);
+        }
+      }
+      const ridersRaw = await db.table("riders").toArray();
+      const orphanedRiders = ridersRaw.filter((rider: any) => {
+        const eventId = String(rider.eventId || "master");
+        return eventId !== "master" && eventId !== "legacy" && !eventIds.has(eventId);
+      });
+      if (orphanedRiders.length) {
+        await db.table("riders").bulkPut(orphanedRiders.map((rider: any) => ({ ...rider, eventId: "master", repairedAt: new Date().toISOString() })));
+      }
+      const appRows = await db.table("appData").toArray();
+      const orphanedAppKeys = appRows
+        .filter((row: any) => {
+          const match = String(row.key || "").match(/^bmx_event_([^_]+)_/);
+          return match && !eventIds.has(match[1]);
+        })
+        .map((row: any) => row.key);
+      if (orphanedAppKeys.length) {
+        await db.table("appData").bulkDelete(orphanedAppKeys);
+        orphanedAppKeys.forEach((key: string) => localStorage.removeItem(key));
+      }
+      setDataRepairMessage(`Reparatur abgeschlossen. Teilnehmer verschoben: ${orphanedRiders.length}, verwaiste Datensätze entfernt: ${orphanedAppKeys.length}.`);
+      await loadMasterParticipants();
+      await loadAllRiders();
+      await runDataIntegrityCheck();
+    } catch (error: any) {
+      alert(`Datenreparatur fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+    }
+  };
+
+  const exportManagedEventBackup = async (event: ManagedEvent) => {
+    try {
+      const eventKeyPrefix = getEventStoragePrefix(event.id);
+      const ridersBackup = (await db.table("riders").toArray()).filter((rider: any) => String(rider.eventId || "") === String(event.id));
+      const appDataBackup = (await db.table("appData").toArray()).filter((row: any) => String(row.key || "").startsWith(eventKeyPrefix));
+      const safeName = `${event.name || "Rennen"}-${event.year || ""}`.replace(/[^a-z0-9äöüÄÖÜ_-]+/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      const now = new Date();
+      const pad = (value: number) => String(value).padStart(2, "0");
+      const fileName = `BMX-Race-Manager_${safeName}_${APP_VERSION}_${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.json`;
+      const backup = { app: APP_NAME, version: DATA_SCHEMA_VERSION, scope: "single-event", exportedAt: now.toISOString(), event, riders: ridersBackup, appData: appDataBackup };
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setBackupMessage(`Event exportiert: ${fileName}`);
+      addChangeLog(`Event exportiert: ${event.name}`);
+    } catch (error: any) {
+      alert(`Event-Export fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+    }
   };
 
   const loadMasterParticipants = async () => {
@@ -1408,6 +1581,30 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       loadMasterParticipants();
     }
   }, [appShellView, viewMode, currentEventId]);
+
+  useEffect(() => {
+    if (!initialLoaded || appShellView !== "manager") return;
+    setHasUnsavedChanges(true);
+  }, [
+    allRiders,
+    heats,
+    results,
+    finals,
+    finalResults,
+    overallManualOrder,
+    generatedOverallByCategory,
+    cruiserMergeTarget,
+    participantEventYear,
+    homeEventSeries,
+    eventSeries,
+    eventLocation,
+    eventDate,
+    seriesRaceCount,
+    overallCountingRaces,
+    raceClosed,
+    initialLoaded,
+    appShellView,
+  ]);
 
 
   useEffect(() => {
@@ -2702,7 +2899,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     >
       <button
         type="button"
-        onClick={() => {
+        onClick={async () => {
+          if (appShellView === "manager" && currentEventId && initialLoaded && hasUnsavedChanges) await saveCurrentState();
           setAppShellView("events");
           setViewMode("dashboard");
         }}
@@ -2722,8 +2920,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           {APP_VERSION}
         </div>
       </button>
-      <div style={{ ...chipStyle, background: backupWarningActive ? colors.warningBg : colors.successBg, borderColor: backupWarningActive ? colors.warningBorder : colors.successBorder }}>
-        {backupWarningActive ? "⚠ Backup empfohlen" : "💾 Datenstatus OK"}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div style={{ ...chipStyle, background: hasUnsavedChanges ? colors.warningBg : colors.successBg, borderColor: hasUnsavedChanges ? colors.warningBorder : colors.successBorder }}>
+          {hasUnsavedChanges ? "⚠ Ungespeicherte Änderungen" : "✓ Lokal gespeichert"}
+        </div>
+        <div style={{ ...chipStyle, background: backupWarningActive ? colors.warningBg : colors.successBg, borderColor: backupWarningActive ? colors.warningBorder : colors.successBorder }}>
+          {backupWarningActive ? "⚠ Backup empfohlen" : "💾 Backup OK"}
+        </div>
       </div>
     </div>
   );
@@ -3961,6 +4164,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       await saveBoth("bmx_overall_created_at", overallCreatedAt || "");
       await saveBoth("bmx_change_log", changeLog || []);
       setLastSaveAt(iso);
+      setHasUnsavedChanges(false);
       setBackupMessage(`Gespeichert: ${formatDateTime(iso)}`);
       addChangeLog(`Lokal gespeichert: ${formatDateTime(iso)}`);
     } catch (error: any) {
@@ -3989,7 +4193,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
       const backup = {
         app: APP_NAME,
-        version: 3,
+        version: DATA_SCHEMA_VERSION,
         scope: "full-file",
         exportedAt: new Date().toISOString(),
         reason,
@@ -4067,6 +4271,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         return;
       }
 
+      const backupSchemaVersion = Number(backup.version || 1);
+      const schemaNote = backupSchemaVersion < DATA_SCHEMA_VERSION
+        ? `
+
+Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaVersion}). Nach dem Import wird eine Datenprüfung empfohlen.`
+        : "";
+
       const exportedAt = backup.exportedAt
         ? new Date(backup.exportedAt).toLocaleString("de-CH")
         : "unbekannt";
@@ -4106,7 +4317,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         );
       }
 
-      alert("Backup erfolgreich importiert. Die App wird jetzt neu geladen.");
+      alert("Backup erfolgreich importiert. Nach dem Neuladen bitte einmal 'Daten prüfen' ausführen. Die App wird jetzt neu geladen.");
       window.location.reload();
     } catch (error: any) {
       alert(
@@ -4309,6 +4520,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <button onClick={() => setAppShellView("guide")} style={smallGhostButtonStyle}>Anleitung</button>
               <button onClick={() => setAppShellView("regulations")} style={smallGhostButtonStyle}>Reglement</button>
+              <button onClick={() => { setAppShellView("dataCheck"); setTimeout(() => runDataIntegrityCheck(), 0); }} style={smallGhostButtonStyle}>Daten prüfen</button>
               <button onClick={() => setAppShellView("history")} style={smallGhostButtonStyle}>History / Speicher & Import</button>
             </div>
           </div>
@@ -4400,7 +4612,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                     <div style={{ height: 1, background: colors.cardBorder, flex: 1 }} />
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 18 }}>
-                    {group.events.map((event) => (
+                    {group.events.map((event) => {
+                      const progress = getManagedEventProgress(event);
+                      return (
                       <div
                         key={event.id}
                         onClick={() => openManagedEvent(event)}
@@ -4440,7 +4654,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                             {event.name}
                           </span>
                         </span>
-                        <span style={{ ...getStatusBadgeStyle(event.type === "single" ? "Einzelrennen" : "Rennserie"), justifySelf: "start", fontSize: 11, padding: "3px 8px" }}>{event.type === "single" ? "Einzel" : "Serie"}</span>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={{ ...getStatusBadgeStyle(event.type === "single" ? "Einzelrennen" : "Rennserie"), justifySelf: "start", fontSize: 11, padding: "3px 8px" }}>{event.type === "single" ? "Einzel" : "Serie"}</span>
+                          <span style={{ ...getStatusBadgeStyle("ID"), fontSize: 11, padding: "3px 8px" }}>ID {getShortEventId(event)}</span>
+                        </div>
                         <div style={{ color: colors.title, fontWeight: 900, fontSize: 12, lineHeight: 1.22, display: "grid", gridTemplateColumns: event.type === "series" ? "repeat(2, minmax(0, 1fr))" : "1fr", gap: "2px 10px" }}>
                           {event.type === "series" ? getManagedEventRaceParticipantCounts(event).map((item) => (
                             <span key={`${event.id}-${item.race}`} style={{ whiteSpace: "nowrap" }}>{item.race}: {item.count}</span>
@@ -4448,7 +4665,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                             <span>Teilnehmer: {getManagedEventParticipantCount(event.id)}</span>
                           )}
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, alignItems: "stretch" }}>
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <div style={{ height: 8, borderRadius: 999, background: "#e5edf6", overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${progress.percent}%`, background: colors.greenBtn }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: colors.muted, fontWeight: 900 }}>Fortschritt: {progress.closed}/{progress.raceCount} abgeschlossen · Resultate in {progress.withResults} Race(s)</div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, alignItems: "stretch" }}>
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); renameManagedEvent(event); }}
@@ -4465,6 +4688,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                           </button>
                           <button
                             type="button"
+                            onClick={(e) => { e.stopPropagation(); exportManagedEventBackup(event); }}
+                            style={{ ...smallGhostButtonStyle, width: "100%", minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, padding: "7px 8px", boxSizing: "border-box" }}
+                          >
+                            Export
+                          </button>
+                          <button
+                            type="button"
                             onClick={(e) => { e.stopPropagation(); deleteManagedEvent(event); }}
                             style={{ ...smallGhostButtonStyle, width: "100%", minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, padding: "7px 8px", boxSizing: "border-box", color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}
                           >
@@ -4472,7 +4702,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -4502,6 +4733,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                           {event.name} · {event.year} · {event.type === "single" ? "Einzelrennen" : "Rennserie"} · Teilnehmer: {getManagedEventParticipantCount(event.id)}
                         </button>
                         <button type="button" onClick={() => toggleManagedEventArchive(event, false)} style={smallGhostButtonStyle}>Wieder anzeigen</button>
+                        <button type="button" onClick={() => exportManagedEventBackup(event)} style={smallGhostButtonStyle}>Exportieren</button>
                         <button type="button" onClick={() => deleteManagedEvent(event)} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>Löschen</button>
                       </div>
                     ))}
@@ -4934,6 +5166,71 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     );
   }
 
+
+  if (appShellView === "dataCheck") {
+    const repairableCount = dataCheckIssues.filter((issue) => issue.repairable).length;
+    return (
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
+        {renderAppHeader()}
+        {backupWarningBar}
+        <div style={basePanelStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+            <div>
+              <h2 style={{ margin: 0, color: colors.title }}>Daten prüfen / Reparatur</h2>
+              <div style={{ color: colors.muted, fontWeight: 800, marginTop: 4 }}>
+                Prüft Rennen, Teilnehmer, lokale Datensätze, Event-Zuordnung und Backup-Struktur.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={runDataIntegrityCheck} style={compactPrimaryButtonStyle} disabled={dataCheckRunning}>
+                {dataCheckRunning ? "Prüfung läuft..." : "Daten jetzt prüfen"}
+              </button>
+              <button onClick={repairDataIntegrity} style={repairableCount ? compactSaveButtonStyle : disabledButtonStyle} disabled={!repairableCount}>
+                Automatisch reparieren
+              </button>
+              <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
+            </div>
+          </div>
+          {lastIntegrityCheckAt && (
+            <div style={{ ...chipStyle, display: "inline-flex", marginBottom: 12 }}>
+              Letzte Prüfung: {formatDateTime(lastIntegrityCheckAt)}
+            </div>
+          )}
+          {dataRepairMessage && (
+            <div style={{ ...basePanelStyle, background: colors.successBg, borderColor: colors.successBorder, marginBottom: 12 }}>
+              {dataRepairMessage}
+            </div>
+          )}
+          <div style={{ display: "grid", gap: 10 }}>
+            {dataCheckIssues.length === 0 ? (
+              <div style={{ color: colors.muted, fontWeight: 800 }}>Noch keine Prüfung durchgeführt.</div>
+            ) : dataCheckIssues.map((issue, index) => {
+              const isError = issue.level === "error";
+              const isWarning = issue.level === "warning";
+              return (
+                <div key={`issue-${index}`} style={{
+                  border: `1px solid ${isError ? colors.dangerBorder : isWarning ? colors.warningBorder : colors.successBorder}`,
+                  borderLeft: `6px solid ${isError ? colors.redBtn : isWarning ? colors.warningBorder : colors.successBorder}`,
+                  background: isError ? colors.dangerBg : isWarning ? colors.warningBg : colors.successBg,
+                  borderRadius: 12,
+                  padding: 12,
+                }}>
+                  <div style={{ fontWeight: 950, color: colors.title }}>{isError ? "Fehler" : isWarning ? "Warnung" : "Info"}: {issue.title}</div>
+                  <div style={{ marginTop: 4, color: colors.text, fontWeight: 750 }}>{issue.detail}</div>
+                  {issue.repairable && <div style={{ marginTop: 6, color: colors.muted, fontWeight: 900 }}>Kann automatisch repariert werden.</div>}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 16, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+            Datenstruktur-Version: {DATA_SCHEMA_VERSION}. Vor Reparaturen wird automatisch ein vollständiges Backup erstellt.
+          </div>
+          {versionFooter}
+        </div>
+      </div>
+    );
+  }
+
   if (appShellView === "history") {
     const historyEntries = getEventHistoryEntries();
     return (
@@ -5009,9 +5306,11 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
               <span style={getStatusBadgeStyle(getRaceStatus(selectedRace))}>Status {selectedRace}: {getRaceStatus(selectedRace)}</span>
               <span style={getStatusBadgeStyle("Teilnehmer")}>Teilnehmer: {getRaceParticipantCount(selectedRace)}</span>
               <span style={getStatusBadgeStyle("Speichern")}>Letzte Speicherung: {lastSaveAt ? formatDateTime(lastSaveAt) : "-"}</span>
+              <span style={getStatusBadgeStyle("ID")}>Event-ID: {getShortEventId(getCurrentEvent())}</span>
+              <span style={getStatusBadgeStyle(hasUnsavedChanges ? "Warnung" : "OK")}>{hasUnsavedChanges ? "Ungesicherte Änderungen" : "Keine offenen Änderungen"}</span>
             </div>
           </div>
-          <button onClick={() => setAppShellView("events")} style={{ ...secondaryButtonStyle, minHeight: 46 }}>Zur Startseite</button>
+          <button onClick={async () => { if (currentEventId && initialLoaded && hasUnsavedChanges) await saveCurrentState(); setAppShellView("events"); }} style={{ ...secondaryButtonStyle, minHeight: 46 }}>Zur Startseite</button>
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 14 }}>
@@ -6069,6 +6368,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             </button>
             <button type="button" onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>
               Backup / Speichern
+            </button>
+            <button type="button" onClick={() => { const event = getCurrentEvent(); if (event) exportManagedEventBackup(event); }} style={compactHomeButtonStyle}>
+              Dieses Rennen exportieren
             </button>
             <button type="button" onClick={resetHeats} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : compactDangerButtonStyle}>
               Race zurücksetzen
