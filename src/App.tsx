@@ -69,7 +69,7 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.12.1";
+const APP_VERSION = "v1.12.2";
 const APP_NAME = "BMX Race Manager";
 const APP_CHANGE_NOTE = "Dublettenbestätigung, Moto-Bezeichnungen und Race-Nummerierung verbessert";
 const DATA_SCHEMA_VERSION = 4;
@@ -3379,16 +3379,6 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       doc.text(`Datum: ${eventDate || "-"}`, eventInfoX + 3, 29);
     }
 
-    const pdfStatus = title.toLowerCase().includes("gesamt")
-      ? (overallLocked ? "OFFIZIELL" : "PROVISORISCH")
-      : (raceClosed ? "OFFIZIELL" : "PROVISORISCH");
-    doc.setFillColor(pdfStatus === "OFFIZIELL" ? 232 : 255, pdfStatus === "OFFIZIELL" ? 248 : 247, pdfStatus === "OFFIZIELL" ? 239 : 230);
-    doc.setDrawColor(pdfStatus === "OFFIZIELL" ? 145 : 240, pdfStatus === "OFFIZIELL" ? 215 : 180, pdfStatus === "OFFIZIELL" ? 170 : 41);
-    doc.roundedRect(14, 32, 34, 7, 2, 2, "FD");
-    doc.setFontSize(8);
-    doc.setTextColor(pdfStatus === "OFFIZIELL" ? 22 : 146, pdfStatus === "OFFIZIELL" ? 101 : 64, pdfStatus === "OFFIZIELL" ? 52 : 14);
-    doc.text(pdfStatus, 17, 37);
-
     if (eventLogo) {
       try {
         doc.addImage(eventLogo, "PNG", logoX, logoY, logoSize, logoSize);
@@ -3441,7 +3431,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       doc.text(`${APP_NAME} ${APP_VERSION} · Erstellt ${created}`, 14, pageHeightValue - 7);
       doc.text(
         `Seite ${page} / ${totalPages}`,
-        pageWidth - 32,
+        pageWidth - 38,
         pageHeightValue - 7,
       );
     }
@@ -3474,6 +3464,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
       autoTable(doc, {
         startY: 52,
+        margin: { left: 14, right: 20 },
         head: [
           [
             "Rang",
@@ -3569,7 +3560,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
           autoTable(doc, {
             startY: currentY,
-            margin: { left: 14, right: 14 },
+            margin: { left: 14, right: 20 },
             head: [[heatLabel, "", "", "", "", ""]],
             body: Array.from({ length: 8 }).map((_, pos) => {
               const rider = group.find((r: any) => r.startPos === pos + 1);
@@ -3649,7 +3640,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
         autoTable(doc, {
           startY: currentY,
-          margin: { left: 14, right: 14 },
+          margin: { left: 14, right: 20 },
           head: [[getRoundDisplayName(roundName), "", "", "", ""]],
           body: Array.from({ length: roundName === "Manuelle Rangliste" ? heat.length : 8 }).map((_, pos) => {
             const rider = heat.find((r: any) => r.startPos === pos + 1);
@@ -4474,6 +4465,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
 
       autoTable(doc, {
         startY: 56,
+        margin: { left: 14, right: 20 },
         head: [["Rang", "Name", "Plate", "Jg | B/G", "Club", ...activeRaces.map((_, index) => `R${index + 1}`), "Gesamt", "Streich"]],
         body: items.map((r: any, index: number) => [
           index + 1,
@@ -5155,7 +5147,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
       },
       {
         title: "7. PDFs",
-        text: "PDFs können für Motos, Finals, Resultate und Gesamtwertung erstellt werden. Resultat-PDFs zeigen je nach Status PROVISORISCH oder OFFIZIELL.",
+        text: "PDFs können für Motos, Finals, Resultate und Gesamtwertung erstellt werden. Die PDF-Ausgabe enthält Footer mit Version, Erstellungszeit und Seitenzahl.",
       },
     ];
 
