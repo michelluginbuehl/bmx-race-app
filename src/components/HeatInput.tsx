@@ -25,12 +25,13 @@ type Props = {
   heat: Rider[]
   value?: ResultRow[]
   onSave: (data: ResultRow[]) => void
+  allowUnlimitedSelectedRows?: boolean
 }
 
 const ROW_HEIGHT = 30
 const BOX_MIN_HEIGHT = 8 * ROW_HEIGHT + 34
 
-export default function HeatInput({ heat, value = [], onSave }: Props) {
+export default function HeatInput({ heat, value = [], onSave, allowUnlimitedSelectedRows = false }: Props) {
   const [selected, setSelected] = useState<ResultRow[]>([])
 
   const colors = {
@@ -180,7 +181,7 @@ export default function HeatInput({ heat, value = [], onSave }: Props) {
 
   const listBoxStyle: React.CSSProperties = {
     minHeight: BOX_MIN_HEIGHT,
-    height: BOX_MIN_HEIGHT
+    height: allowUnlimitedSelectedRows ? "auto" : BOX_MIN_HEIGHT
   }
 
   const availableGridStyle: React.CSSProperties = {
@@ -219,12 +220,13 @@ export default function HeatInput({ heat, value = [], onSave }: Props) {
     fontWeight: 700
   }
 
-  const renderEightRows = (
+  const renderResultRows = (
     items: any[],
     renderItem: (item: any, index: number) => React.ReactNode
   ) => {
-    return Array.from({ length: 8 }).map((_, index) => (
-      <div key={index} style={fixedRowStyle}>
+    const rowCount = allowUnlimitedSelectedRows ? Math.max(items.length, 1) : 8
+    return Array.from({ length: rowCount }).map((_, index) => (
+      <div key={index} style={allowUnlimitedSelectedRows ? { ...fixedRowStyle, height: "auto", minHeight: ROW_HEIGHT + 4 } : fixedRowStyle}>
         {items[index] ? renderItem(items[index], index) : <span style={{ color: "#999" }}>-</span>}
       </div>
     ))
@@ -244,7 +246,7 @@ export default function HeatInput({ heat, value = [], onSave }: Props) {
           <div style={{ marginBottom: 8, fontWeight: 700, color: colors.title }}>Ausgewählt</div>
 
           <div style={listBoxStyle}>
-            {renderEightRows(selected, (r, i) => (
+            {renderResultRows(selected, (r, i) => (
               <div
                 style={{
                   width: "100%",
