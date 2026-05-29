@@ -69,9 +69,9 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.11.2";
+const APP_VERSION = "v1.11.3";
 const APP_NAME = "BMX Race Manager";
-const APP_CHANGE_NOTE = "Race-Einstieg auf der Startseite klarer dargestellt";
+const APP_CHANGE_NOTE = "Rennen-Startbereich und Layoutbreite angepasst";
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -4298,7 +4298,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     const activeGroupedEvents = getEventGroupedByYear();
     const archivedGroupedEvents = getArchivedEventGroupedByYear();
     return (
-      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1240, margin: "0 auto" }}>
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
         {renderAppHeader()}
         {backupWarningBar}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
@@ -4535,7 +4535,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     });
     const groups = visibleActiveGroups;
     return (
-      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1240, margin: "0 auto" }}>
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
         {renderAppHeader()}
         {backupWarningBar}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
@@ -4791,7 +4791,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   if (appShellView === "history") {
     const historyEntries = getEventHistoryEntries();
     return (
-      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1240, margin: "0 auto" }}>
+      <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
         {renderAppHeader()}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
@@ -4904,18 +4904,18 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
         <div style={{ ...basePanelStyle, marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
-            <h2 style={{ margin: 0, color: colors.title }}>{isSingleEvent ? "Rennen-Einstellungen" : "Serien-Einstellungen"}</h2>
+            <h2 style={{ margin: 0, color: colors.title }}>{isSingleEvent ? "Renn-Status" : "Serien-Einstellungen"}</h2>
             <span style={getStatusBadgeStyle(seriesLocked ? "Abgeschlossen" : "Offen")}>
               {isSingleEvent ? (seriesLocked ? "Rennen abgeschlossen" : "Rennen offen") : (seriesLocked ? "Serie abgeschlossen" : "Serie offen")}
             </span>
           </div>
           {isSingleEvent ? (
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ ...basePanelStyle, padding: "10px 12px", marginBottom: 0, background: "#f8fafc", minWidth: 220 }}>
+              <div style={{ ...basePanelStyle, padding: "10px 12px", marginBottom: 0, background: "#f8fafc", minWidth: 220, minHeight: 62, display: "grid", alignContent: "center" }}>
                 <div style={{ color: colors.muted, fontSize: 12, fontWeight: 900 }}>Rennformat</div>
                 <div style={{ color: colors.title, fontSize: 16, fontWeight: 900 }}>Einzelrennen · 1 Race</div>
               </div>
-              <button onClick={toggleSeriesLocked} style={seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle}>
+              <button onClick={toggleSeriesLocked} style={{ ...(seriesLocked ? compactDangerButtonStyle : compactHomeButtonStyle), minHeight: 62 }}>
                 {seriesLocked ? "Rennen öffnen" : "Rennen abschliessen"}
               </button>
             </div>
@@ -4958,11 +4958,11 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           </div>
         </div>
 
-        <div style={{ ...basePanelStyle, marginBottom: 14, borderColor: colors.blueBorder, background: "linear-gradient(135deg, #eff6ff 0%, #ffffff 70%)" }}>
+        <div style={{ ...basePanelStyle, marginBottom: 14, borderColor: colors.greenBorder, background: "linear-gradient(135deg, #ecfdf5 0%, #ffffff 70%)" }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
-            <h2 style={{ ...sectionTitleStyle, marginBottom: 0 }}>Rennen öffnen</h2>
+            <h2 style={{ ...sectionTitleStyle, marginBottom: 0 }}>Rennen Starten</h2>
             <span style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-              Wähle ein Race, um Teilnehmer, Läufe oder Resultate zu bearbeiten.
+              Wähle ein Race, um das Rennen zu starten oder weiter zu bearbeiten.
             </span>
           </div>
           <div
@@ -4982,7 +4982,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                   setSelectedRace(race);
                   setViewMode("race");
                 }}
-                title={`${race} öffnen`}
+                title={`${race} starten`}
                 style={{
                   ...compactHomeButtonStyle,
                   flex: "0 0 168px",
@@ -4991,12 +4991,12 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                   display: "grid",
                   alignContent: "center",
                   gap: 5,
-                  borderColor: colors.blueBorder,
-                  background: "linear-gradient(135deg, #ffffff 0%, #dbeafe 100%)",
-                  boxShadow: "0 10px 22px rgba(37, 99, 235, 0.12)",
+                  borderColor: colors.greenBorder,
+                  background: "linear-gradient(135deg, #ffffff 0%, #dcfce7 100%)",
+                  boxShadow: "0 10px 22px rgba(22, 163, 74, 0.14)",
                 }}
               >
-                <span style={{ fontSize: 15, fontWeight: 950, color: colors.blueBtnDark }}>{race} öffnen</span>
+                <span style={{ fontSize: 15, fontWeight: 950, color: colors.greenBtn }}>{race} starten</span>
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
                   <span style={getStatusBadgeStyle(getRaceStatus(race))}>{getRaceStatus(race)}</span>
                   <span style={{ color: colors.muted, fontSize: 12, fontWeight: 900 }}>
