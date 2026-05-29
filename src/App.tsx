@@ -69,7 +69,7 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.9.8";
+const APP_VERSION = "v1.9.9";
 const APP_NAME = "BMX Race Manager";
 const APP_CHANGE_NOTE = "Manuelle Resultaterstellung als Dummy-Heat verbessert";
 
@@ -1839,56 +1839,17 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       return;
     }
     if (!validateSelectedRaceBeforeBuild()) return;
-    if (Object.keys(heats || {}).length > 0 || Object.keys(finals || {}).length > 0 || Object.keys(finalResults || {}).length > 0) {
-      if (!window.confirm("Manuelle Resultaterstellung starten? Bestehende Vorläufe, Finals und Resultate dieses Race werden überschrieben.")) return;
+    if (Object.keys(finalResults || {}).length > 0) {
+      if (!window.confirm("Manuelle Resultaterstellung starten? Bestehende Resultate dieses Race werden beim Erstellen der neuen Resultatliste überschrieben.")) return;
     }
 
-    const sortManualRiders = (items: any[]) =>
-      [...items].sort((a: any, b: any) => {
-        const plateA = Number(String(a.plate || "").replace(/\D/g, ""));
-        const plateB = Number(String(b.plate || "").replace(/\D/g, ""));
-        if (Number.isFinite(plateA) && Number.isFinite(plateB) && plateA !== plateB) return plateA - plateB;
-        return String(a.name || "").localeCompare(String(b.name || ""), "de");
-      });
-
-    const nextHeats: Record<string, any[][]> = {};
-    const nextFinals: Record<string, Record<string, any[]>> = {};
-
-    originalRaceCategories().forEach((cat) => {
-      const categoryRiders = sortManualRiders(groupedRace[cat] || []).map((r: any, index: number) => ({
-        ...r,
-        riderId: String(r.id),
-        startPos: index + 1,
-        rank: index + 1,
-        points: index + 1,
-        status: "",
-        originalCategory: r.category,
-      }));
-      if (categoryRiders.length === 0) return;
-
-      // Dummy-Vorlauf: alle Fahrer der Kategorie in einem einzigen Heat, ohne 8er-Begrenzung.
-      // Dadurch kann die Reihenfolge direkt wie bei einem normalen Heat erfasst werden.
-      nextHeats[cat] = [categoryRiders, [], []];
-
-      const finalCategory = getEffectiveFinalCategory(cat);
-      if (!nextFinals[finalCategory]) nextFinals[finalCategory] = { "A-Final": [] };
-      nextFinals[finalCategory]["A-Final"].push(...categoryRiders);
-    });
-
-    if (Object.keys(nextHeats).length === 0) {
-      window.alert("Es sind keine Teilnehmer für dieses Race vorhanden.");
-      return;
-    }
-
-    setHeats(orderRecordByCategories(nextHeats));
-    setResults({});
-    setFinals(orderRecordByCategories(nextFinals));
-    setFinalResults({});
-    setFinalManualOrder({});
-    setManualResultsMode(false);
+    setManualResultsMode(true);
     setManualResultOrder({});
-    addChangeLog(`${selectedRace}: Dummy-Vorlauf für manuelle Resultate erstellt`);
-    setTimeout(() => scrollToSection("finallaeufe"), 0);
+    addChangeLog(`${selectedRace}: manuelle Resultaterstellung geöffnet`);
+    setTimeout(() => {
+      const el = document.getElementById("manual-results");
+      if (el) el.scrollIntoView({ block: "start" });
+    }, 0);
   };
 
   const toggleManualResultRider = (category: string, rider: any) => {
@@ -5161,12 +5122,12 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         </div>
 
         {manualResultsMode && (
-          <div style={{ ...basePanelStyle, marginBottom: 20, borderColor: colors.blueBtn, background: "#f8fbff" }}>
+          <div id="manual-results" style={{ ...basePanelStyle, marginBottom: 20, borderColor: colors.blueBtn, background: "#f8fbff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
               <div>
                 <h2 style={{ margin: 0, color: colors.title }}>Resultate manuell erstellen</h2>
                 <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4 }}>
-                  Teilnehmer pro Kategorie in der Zielreihenfolge anklicken. Die Klick-Reihenfolge wird als Rangliste übernommen.
+                  Teilnehmer pro Kategorie der Rangfolge nach anklicken. Erst der Button „Resultatliste erstellen“ übernimmt diese Reihenfolge als Schlussrangliste.
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
