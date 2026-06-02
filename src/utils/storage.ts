@@ -14,7 +14,7 @@ export function encodeStorageValue<T>(data: T, schemaVersion = 1): string {
   return JSON.stringify(value);
 }
 
-function decodeStorageValue<T>(raw: string | null): T | null {
+export function decodeStorageValue<T>(raw: string | null): T | null {
   if (!raw) return null;
 
   try {
@@ -55,6 +55,30 @@ export const appStorage = {
 
   exists(key: string): boolean {
     return localStorage.getItem(key) !== null;
+  },
+
+  // localStorage-kompatible Methoden, weil App.tsx diese direkt erwartet.
+  getItem(key: string): string | null {
+    return localStorage.getItem(key);
+  },
+
+  setItem(key: string, value: string): void {
+    localStorage.setItem(key, value);
+  },
+
+  removeItem(key: string): void {
+    localStorage.removeItem(key);
+  },
+
+  keys(): string[] {
+    const result: string[] = [];
+
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key) result.push(key);
+    }
+
+    return result;
   },
 };
 

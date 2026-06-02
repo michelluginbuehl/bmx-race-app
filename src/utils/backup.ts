@@ -3,14 +3,30 @@ import { APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION } from "../config/appConfig"
 export type BackupEnvelope<T = unknown> = {
   appName: string;
   appVersion: string;
+  backupVersion: string;
   schemaVersion: number;
+  dataSchemaVersion: number;
+  schemaNote: string;
   createdAt: string;
+  exportedAt: string;
   data: T;
 };
 
 export type BackupValidationResult = {
+  ok: boolean;
   valid: boolean;
+  message: string;
   errors: string[];
+};
+
+export type BackupSummary = {
+  schemaNote: string;
+  exportedAt: string;
+  eventCount: number;
+  riderCount: number;
+  appDataCount: number;
+  backupVersion: string;
+  dataSchemaVersion: number;
 };
 
 function sanitizeFileName(value: string): string {
@@ -27,30 +43,102 @@ function sanitizeFileName(value: string): string {
     .replace(/^_|_$/g, "");
 }
 
+function countRidersInUnknownData(data: unknown): number {
+  if (!data || typeof data !== "object") return 0;
+
+  const root = data as Record<string, unknown>;
+
+  if (Array.isArray(root.riders)) {
+    return root.riders.length;
+  }
+
+  if (Array.isArray(root.managedEvents)) {
+    return root.managedEvents.reduce((total, event) => {
+      if (!event || typeof event !== "object") return total;
+      const eventRecord = event as Record<string, unknown>;
+      return total + (Array.isArray(eventRecord.riders) ? eventRecord.riders.length : 0);
+    }, 0);
+  }
+
+  if (Array.isArray(root.events)) {
+    return root.events.reduce((total, event) => {
+      if (!event || typeof event !== "object") return total;
+      const eventRecord = event as Record<string, unknown>;
+      return total + (Array.isArray(eventRecord.riders) ? eventRecord.riders.length : 0);
+    }, 0);
+  }
+
+  return 0;
+}
+
+function countEventsInUnknownData(data: unknown): number {
+  if (!data || typeof data !== "object") return 0;
+
+  const root = data as Record<string, unknown>;
+
+  if (Array.isArray(root.managedEvents)) {
+    return root.managedEvents.length;
+  }
+
+  if (Array.isArray(root.events)) {
+    return root.events.length;
+  }
+
+  return 0;
+}
+
 export function createBackupEnvelope<T>(data: T): BackupEnvelope<T> {
+  const exportedAt = new Date().toISOString();
+
   return {
     appName: APP_NAME,
     appVersion: APP_VERSION,
+    backupVersion: APP_VERSION,
     schemaVersion: DATA_SCHEMA_VERSION,
-    createdAt: new Date().toISOString(),
+    dataSchemaVersion: DATA_SCHEMA_VERSION,
+    schemaNote: `BMX Race Manager Datenschema ${DATA_SCHEMA_VERSION}`,
+    createdAt: exportedAt,
+    exportedAt,
     data,
   };
 }
 
-export function getBackupSummary(backup: unknown): string {
-  if (!backup || typeof backup !== "object") {
-    return "Ungültiges Backup";
-  }
+export function getBackupSummary(backup: unknown): BackupSummary {
+  const item =
+    backup && typeof backup === "object"
+      ? (backup as Partial<BackupEnvelope>)
+      : {};
 
-  const item = backup as Partial<BackupEnvelope>;
+  const data = item.data ?? backup;
 
-  const appName = item.appName ?? "Unbekannte App";
-  const appVersion = item.appVersion ?? "unbekannte Version";
-  const createdAt = item.createdAt
-    ? new Date(item.createdAt).toLocaleString()
-    : "unbekanntes Datum";
-
-  return `${appName} ${appVersion} – erstellt am ${createdAt}`;
+  return {
+    schemaNote:
+      typeof item.schemaNote === "string"
+        ? item.schemaNote
+        : `BMX Race Manager Datenschema ${DATA_SCHEMA_VERSION}`,
+    exportedAt:
+      typeof item.exportedAt === "string"
+        ? item.exportedAt
+        : typeof item.createdAt === "string"
+          ? item.createdAt
+          : "",
+    eventCount: countEventsInUnknownData(data),
+    riderCount: countRidersInUnknownData(data),
+    appDataCount:
+      data && typeof data === "object" ? Object.keys(data as Record<string, unknown>).length : 0,
+    backupVersion:
+      typeof item.backupVersion === "string"
+        ? item.backupVersion
+        : typeof item.appVersion === "string"
+          ? item.appVersion
+          : APP_VERSION,
+    dataSchemaVersion:
+      typeof item.dataSchemaVersion === "number"
+        ? item.dataSchemaVersion
+        : typeof item.schemaVersion === "number"
+          ? item.schemaVersion
+          : DATA_SCHEMA_VERSION,
+  };
 }
 
 export function validateBackupStructure(backup: unknown): BackupValidationResult {
@@ -58,35 +146,36 @@ export function validateBackupStructure(backup: unknown): BackupValidationResult
 
   if (!backup || typeof backup !== "object") {
     return {
+      ok: false,
       valid: false,
+      message: "Backup ist kein gültiges Objekt.",
       errors: ["Backup ist kein gültiges Objekt."],
     };
   }
 
   const item = backup as Partial<BackupEnvelope>;
 
-  if (!item.appName) {
-    errors.push("Backup enthält keinen App-Namen.");
-  }
-
-  if (!item.appVersion) {
-    errors.push("Backup enthält keine App-Version.");
-  }
-
-  if (!item.schemaVersion) {
-    errors.push("Backup enthält keine Schema-Version.");
-  }
-
-  if (!item.createdAt) {
-    errors.push("Backup enthält kein Erstellungsdatum.");
-  }
-
   if (!("data" in item)) {
     errors.push("Backup enthält keine Daten.");
   }
 
+  const hasVersion =
+    typeof item.appVersion === "string" ||
+    typeof item.backupVersion === "string" ||
+    typeof item.schemaVersion === "number" ||
+    typeof item.dataSchemaVersion === "number";
+
+  if (!hasVersion) {
+    errors.push("Backup enthält keine Versionsinformationen.");
+  }
+
   return {
+    ok: errors.length === 0,
     valid: errors.length === 0,
+    message:
+      errors.length === 0
+        ? "Backup ist gültig."
+        : errors.join("\n"),
     errors,
   };
 }
