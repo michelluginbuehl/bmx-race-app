@@ -3,10 +3,14 @@ import { db } from "./db";
 import RiderForm from "./components/RiderForm";
 import { generateCategoryHeats, generateFinals } from "./race";
 import HeatInput from "./components/HeatInput";
+import AppHeader from "./components/AppHeader";
+import ReleaseNotes from "./components/ReleaseNotes";
+import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KEYS } from "./config/appConfig";
+import { appStorage, encodeStorageValue } from "./utils/storage";
+import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
-import headerBannerImage from "./assets/header-banner.jpg";
 
 const ROW_HEIGHT = 30;
 const BOX_MIN_HEIGHT = 8 * ROW_HEIGHT + 34;
@@ -22,6 +26,7 @@ type ManagedEvent = {
   updatedAt?: string;
   archived?: boolean;
   archivedAt?: string;
+  dataVersion?: number;
 };
 
 const BMX_AGE_CATEGORIES = [
@@ -70,86 +75,8 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.12.9";
-const APP_NAME = "BMX Race Manager";
-const HEADER_BANNER_IMAGE = headerBannerImage;
-const APP_CHANGE_NOTE = "Versionshistorie als Release Notes auf der History / Speicher & Import Seite ergänzt";
-const DATA_SCHEMA_VERSION = 4;
+const EVENT_LIST_KEY = STORAGE_KEYS.managedEvents;
 
-const APP_RELEASE_NOTES = [
-  {
-    version: "v1.12.9",
-    date: "02.06.2026",
-    title: "Release Notes auf History-Seite",
-    items: [
-      "Versionshistorie auf der Seite History / Speicher & Import ergänzt",
-      "Release Notes im Stil einer Software-History sichtbar gemacht",
-      "Keine Änderung an Speicherlogik, Import/Export, Rennen oder bestehenden Daten",
-    ],
-  },
-  {
-    version: "v1.12.8",
-    date: "02.06.2026",
-    title: "Rennblatt-Buttons bereinigt",
-    items: [
-      "Button Resultate manuell erstellen in Results manuell umbenannt",
-      "Button Speichern im Rennblatt entfernt",
-      "Keine Änderung an Rennlogik oder Backup-System",
-    ],
-  },
-  {
-    version: "v1.12.7",
-    date: "02.06.2026",
-    title: "iPad-Bedienung optisch verbessert",
-    items: [
-      "Buttons vergrössert und Touch-Flächen verbessert",
-      "Abstände zwischen Bedienelementen erhöht",
-      "Kritische Aktionen farblich klarer markiert",
-      "Rennstatus-Anzeigen sichtbarer gemacht",
-    ],
-  },
-  {
-    version: "v1.12.6",
-    date: "02.06.2026",
-    title: "Header-Banner ausgelagert und responsiver gemacht",
-    items: [
-      "Banner aus App.tsx in src/assets/header-banner.jpg ausgelagert",
-      "Header-Kachel responsiver gemacht",
-      "Logo im Banner wird weniger stark zugeschnitten",
-    ],
-  },
-  {
-    version: "v1.12.5",
-    date: "02.06.2026",
-    title: "Header-Höhe nachjustiert",
-    items: [
-      "Kopf-Kachel nochmals höher gemacht",
-      "Banner-Zuschnitt reduziert, damit das Logo besser sichtbar ist",
-    ],
-  },
-  {
-    version: "v1.12.4",
-    date: "02.06.2026",
-    title: "Header-Kachel erhöht",
-    items: [
-      "Kopf-Kachel oben höher gemacht",
-      "Banner-Hintergrund beibehalten",
-    ],
-  },
-  {
-    version: "v1.12.3",
-    date: "02.06.2026",
-    title: "Neuer Header-Banner",
-    items: [
-      "Neuer Banner als Hintergrund der Kopf-Kachel eingebaut",
-      "App-Name im Header entfernt",
-      "Zielflaggen-Emoji links entfernt",
-      "Versionsnummer sichtbar gelassen",
-      "Gespeichert-/Backup-Kachel kleiner und unten ausgerichtet",
-      "Klick auf Kopf-Kachel führt zurück zur Startseite",
-    ],
-  },
-] as const;
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -575,7 +502,7 @@ export default function App() {
   const markMasterParticipantDuplicateOk = (key: string) => {
     const next = Array.from(new Set([...duplicateOkKeys, key]));
     setDuplicateOkKeys(next);
-    localStorage.setItem("bmx_duplicate_ok_keys_v1", JSON.stringify(next));
+    appStorage.setItem(STORAGE_KEYS.duplicateOkKeys, JSON.stringify(next));
   };
 
   const getDuplicateMasterParticipantKeys = (items: any[]) => getDuplicateMasterParticipantInfo(items).keys;
@@ -589,11 +516,9 @@ export default function App() {
   }, [allRiders, globalSearch]);
 
 
-  const EVENT_LIST_KEY = "bmx_managed_events_v1";
-
   const getRawManagedEvents = (): ManagedEvent[] => {
     try {
-      const parsed = JSON.parse(localStorage.getItem(EVENT_LIST_KEY) || "[]");
+      const parsed = JSON.parse(appStorage.getItem(EVENT_LIST_KEY) || "[]");
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
@@ -601,8 +526,9 @@ export default function App() {
   };
 
   const saveManagedEvents = (events: ManagedEvent[]) => {
-    const sorted = [...events].sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || (b.year || 0) - (a.year || 0) || String(b.createdAt).localeCompare(String(a.createdAt)));
-    localStorage.setItem(EVENT_LIST_KEY, JSON.stringify(sorted));
+    const versionedEvents = normalizeManagedEventsForSchema(events);
+    const sorted = [...versionedEvents].sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || (b.year || 0) - (a.year || 0) || String(b.createdAt).localeCompare(String(a.createdAt)));
+    appStorage.setItem(EVENT_LIST_KEY, JSON.stringify(sorted));
     setManagedEvents(sorted);
   };
 
@@ -649,10 +575,7 @@ export default function App() {
 
   const writeInitialEventValue = (eventId: string, key: string, value: any) => {
     const storageKey = scopedKeyForEvent(eventId, key);
-    localStorage.setItem(
-      storageKey,
-      typeof value === "string" ? value : JSON.stringify(value),
-    );
+    appStorage.setItem(storageKey, encodeStorageValue(value));
   };
 
   const initializeManagedEventStorage = (event: ManagedEvent) => {
@@ -703,7 +626,7 @@ export default function App() {
     const year = Math.max(2000, Math.min(2100, Number(yearValue) || new Date().getFullYear()));
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
-    const nextEvent: ManagedEvent = { id, type: selectedType, name: name.trim(), year, createdAt, updatedAt: createdAt };
+    const nextEvent: ManagedEvent = { id, type: selectedType, name: name.trim(), year, createdAt, updatedAt: createdAt, dataVersion: DATA_SCHEMA_VERSION };
     initializeManagedEventStorage(nextEvent);
     const nextEvents = [...managedEvents, nextEvent];
     saveManagedEvents(nextEvents);
@@ -717,7 +640,7 @@ export default function App() {
       item.id === event.id ? { ...item, name: nextName.trim(), updatedAt: new Date().toISOString() } : item,
     );
     saveManagedEvents(nextEvents);
-    localStorage.setItem(scopedKeyForEvent(event.id, "bmx_home_event_series"), JSON.stringify(nextName.trim()));
+    appStorage.setItem(scopedKeyForEvent(event.id, "bmx_home_event_series"), JSON.stringify(nextName.trim()));
     if (currentEventId === event.id) setHomeEventSeries(nextName.trim());
   };
 
@@ -772,8 +695,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         await db.table("appData").bulkDelete(appDataKeysToDelete);
       }
 
-      Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith(eventKeyPrefix)) localStorage.removeItem(key);
+      appStorage.keys().forEach((key) => {
+        if (key.startsWith(eventKeyPrefix)) appStorage.removeItem(key);
       });
     } catch (error: any) {
       window.alert(`Rennen wurde aus der Startliste entfernt, aber beim Bereinigen der lokalen Daten ist ein Fehler aufgetreten: ${error?.message || "Unbekannter Fehler"}`);
@@ -833,8 +756,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   const getEventHistoryEntries = () => {
     return managedEvents.map((event) => {
-      const logs = JSON.parse(localStorage.getItem(scopedKeyForEvent(event.id, "bmx_change_log")) || "[]");
-      const backups = JSON.parse(localStorage.getItem(scopedKeyForEvent(event.id, "bmx_backup_history")) || "[]");
+      const logs = JSON.parse(appStorage.getItem(scopedKeyForEvent(event.id, "bmx_change_log")) || "[]");
+      const backups = JSON.parse(appStorage.getItem(scopedKeyForEvent(event.id, "bmx_backup_history")) || "[]");
       return { event, logs: Array.isArray(logs) ? logs : [], backups: Array.isArray(backups) ? backups : [] };
     });
   };
@@ -849,7 +772,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   const getStoredValueForEvent = (eventId: string, key: string, fallback: any = null) => {
     try {
-      const raw = localStorage.getItem(scopedKeyForEvent(eventId, key));
+      const raw = appStorage.getItem(scopedKeyForEvent(eventId, key));
       if (raw === null || raw === undefined) return fallback;
       return JSON.parse(raw);
     } catch {
@@ -967,7 +890,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         .map((row: any) => row.key);
       if (orphanedAppKeys.length) {
         await db.table("appData").bulkDelete(orphanedAppKeys);
-        orphanedAppKeys.forEach((key: string) => localStorage.removeItem(key));
+        orphanedAppKeys.forEach((key: string) => appStorage.removeItem(key));
       }
       setDataRepairMessage(`Reparatur abgeschlossen. Teilnehmer verschoben: ${orphanedRiders.length}, verwaiste Datensätze entfernt: ${orphanedAppKeys.length}.`);
       await loadMasterParticipants();
@@ -987,7 +910,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       const now = new Date();
       const pad = (value: number) => String(value).padStart(2, "0");
       const fileName = `BMX-Race-Manager_${safeName}_${APP_VERSION}_${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.json`;
-      const backup = { app: APP_NAME, version: DATA_SCHEMA_VERSION, scope: "single-event", exportedAt: now.toISOString(), event, riders: ridersBackup, appData: appDataBackup };
+      const backup = { app: APP_NAME, appName: APP_NAME, appVersion: APP_VERSION, backupVersion: 2, dataSchemaVersion: DATA_SCHEMA_VERSION, version: DATA_SCHEMA_VERSION, scope: "single-event", exportedAt: now.toISOString(), event: { ...event, dataVersion: event.dataVersion || DATA_SCHEMA_VERSION }, managedEvents: [{ ...event, dataVersion: event.dataVersion || DATA_SCHEMA_VERSION }], riders: ridersBackup, appData: appDataBackup };
       const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
       const a = document.createElement("a");
       a.href = url;
@@ -1243,7 +1166,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   const readScopedEventValue = <T,>(eventId: string, key: string, fallback: T): T => {
     try {
       const storageKey = scopedKeyForEvent(eventId || "legacy", key);
-      const value = localStorage.getItem(storageKey);
+      const value = appStorage.getItem(storageKey);
       if (value === null) return fallback;
       return JSON.parse(value) as T;
     } catch {
@@ -1333,7 +1256,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     if (race === selectedRace && key === "finals") return finals;
     if (race === selectedRace && key === "final_results") return finalResults;
     try {
-      return JSON.parse(localStorage.getItem(getRaceStorageKey(race, key)) || JSON.stringify(fallback));
+      return JSON.parse(appStorage.getItem(getRaceStorageKey(race, key)) || JSON.stringify(fallback));
     } catch {
       return fallback;
     }
@@ -1485,7 +1408,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     if (saved && Object.prototype.hasOwnProperty.call(saved, "value"))
       return saved.value as T;
 
-    const localValue = localStorage.getItem(storageKey);
+    const localValue = appStorage.getItem(storageKey);
     if (localValue === null) return fallback;
 
     try {
@@ -1497,10 +1420,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   const saveBoth = async (key: string, value: any) => {
     const storageKey = scopedKey(key);
-    localStorage.setItem(
-      storageKey,
-      typeof value === "string" ? value : JSON.stringify(value),
-    );
+    appStorage.setItem(storageKey, encodeStorageValue(value));
     await saveAppData(key, value);
   };
 
@@ -1527,7 +1447,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("bmx_duplicate_ok_keys_v1");
+      const saved = appStorage.getItem(STORAGE_KEYS.duplicateOkKeys);
       if (saved) setDuplicateOkKeys(JSON.parse(saved));
     } catch {
       setDuplicateOkKeys([]);
@@ -1566,10 +1486,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       const allSavedAppData = await db.table("appData").toArray();
       allSavedAppData.forEach((row: any) => {
         if (!row?.key) return;
-        localStorage.setItem(
-          row.key,
-          typeof row.value === "string" ? row.value : JSON.stringify(row.value),
-        );
+        appStorage.setItem(row.key, encodeStorageValue(row.value));
       });
 
       const savedRace = await loadAppData<string>(
@@ -2124,26 +2041,26 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       race === selectedRace
         ? heats
         : JSON.parse(
-            localStorage.getItem(getRaceStorageKey(race, "heats")) || "{}",
+            appStorage.getItem(getRaceStorageKey(race, "heats")) || "{}",
           );
     const finalData =
       race === selectedRace
         ? finals
         : JSON.parse(
-            localStorage.getItem(getRaceStorageKey(race, "finals")) || "{}",
+            appStorage.getItem(getRaceStorageKey(race, "finals")) || "{}",
           );
     const finalResultData =
       race === selectedRace
         ? finalResults
         : JSON.parse(
-            localStorage.getItem(getRaceStorageKey(race, "final_results")) ||
+            appStorage.getItem(getRaceStorageKey(race, "final_results")) ||
               "{}",
           );
     const closed =
       race === selectedRace
         ? raceClosed
         : JSON.parse(
-            localStorage.getItem(getRaceStorageKey(race, "race_closed")) ||
+            appStorage.getItem(getRaceStorageKey(race, "race_closed")) ||
               "false",
           );
 
@@ -2637,7 +2554,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   const getRaceClosedValue = (race: RaceName) => {
     if (race === selectedRace) return !!raceClosed;
     try {
-      return JSON.parse(localStorage.getItem(getRaceStorageKey(race, "race_closed")) || "false");
+      return JSON.parse(appStorage.getItem(getRaceStorageKey(race, "race_closed")) || "false");
     } catch {
       return false;
     }
@@ -3093,91 +3010,17 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   const renderAppHeader = () => (
-    <button
-      type="button"
-      onClick={async () => {
+    <AppHeader
+      onHomeClick={async () => {
         if (appShellView === "manager" && currentEventId && initialLoaded && hasUnsavedChanges) await saveCurrentState();
         setAppShellView("events");
         setViewMode("dashboard");
       }}
-      title="Zur Startseite"
-      style={{
-        width: "100%",
-        minHeight: "clamp(220px, 19.5vw, 276px)",
-        display: "flex",
-        alignItems: "flex-end",
-        justifyContent: "space-between",
-        gap: 12,
-        marginBottom: 18,
-        padding: "14px 16px 12px 16px",
-        borderRadius: 20,
-        backgroundColor: "#f8fbff",
-        backgroundImage: `linear-gradient(90deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 55%, rgba(255,255,255,0.22) 100%), url(${HEADER_BANNER_IMAGE})`,
-        backgroundSize: "contain",
-        backgroundPosition: "center center",
-        backgroundRepeat: "no-repeat",
-        boxSizing: "border-box",
-        overflow: "hidden",
-        border: `1px solid ${colors.cardBorder}`,
-        boxShadow: "0 14px 32px rgba(23,32,51,0.12)",
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-    >
-      <div
-        style={{
-          alignSelf: "flex-end",
-          padding: "4px 8px",
-          borderRadius: 10,
-          background: "rgba(255,255,255,0.78)",
-          border: "1px solid rgba(255,255,255,0.72)",
-          color: colors.title,
-          fontWeight: 950,
-          fontSize: 13,
-          boxShadow: "0 4px 12px rgba(17,24,39,0.08)",
-        }}
-      >
-        {APP_VERSION}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          justifyContent: "flex-end",
-          alignItems: "flex-end",
-          alignSelf: "flex-end",
-          marginTop: "auto",
-        }}
-      >
-        <div
-          style={{
-            ...chipStyle,
-            minHeight: 28,
-            padding: "5px 10px",
-            fontSize: 12,
-            background: hasUnsavedChanges ? colors.warningBg : colors.successBg,
-            borderColor: hasUnsavedChanges ? colors.warningBorder : colors.successBorder,
-            boxShadow: "0 4px 12px rgba(17,24,39,0.10)",
-          }}
-        >
-          {hasUnsavedChanges ? "⚠ Ungespeichert" : "✓ Gespeichert"}
-        </div>
-        <div
-          style={{
-            ...chipStyle,
-            minHeight: 28,
-            padding: "5px 10px",
-            fontSize: 12,
-            background: backupWarningActive ? colors.warningBg : colors.successBg,
-            borderColor: backupWarningActive ? colors.warningBorder : colors.successBorder,
-            boxShadow: "0 4px 12px rgba(17,24,39,0.10)",
-          }}
-        >
-          {backupWarningActive ? "⚠ Backup empfohlen" : "💾 Backup OK"}
-        </div>
-      </div>
-    </button>
+      colors={colors}
+      chipStyle={chipStyle}
+      hasUnsavedChanges={hasUnsavedChanges}
+      backupWarningActive={backupWarningActive}
+    />
   );
 
   const versionFooter = (
@@ -3913,7 +3756,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   const loadFinalResultsForRace = (race: RaceName) => {
-    const raw = localStorage.getItem(getRaceStorageKey(race, "final_results"));
+    const raw = appStorage.getItem(getRaceStorageKey(race, "final_results"));
     try {
       return JSON.parse(raw || "{}");
     } catch {
@@ -3922,7 +3765,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   const loadFinalManualOrderForRace = (race: RaceName) => {
-    const raw = localStorage.getItem(
+    const raw = appStorage.getItem(
       getRaceStorageKey(race, "final_manual_order"),
     );
     try {
@@ -3944,7 +3787,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     const finalResultData = getStoredRaceData(race, "final_results", {});
     const closed = race === selectedRace
       ? raceClosed
-      : JSON.parse(localStorage.getItem(getRaceStorageKey(race, "race_closed")) || "false");
+      : JSON.parse(appStorage.getItem(getRaceStorageKey(race, "race_closed")) || "false");
     return !!closed || Object.keys(heatData || {}).length > 0 || Object.keys(finalData || {}).length > 0 || Object.values(finalResultData || {}).some((value: any) => Array.isArray(value) && value.length > 0);
   };
 
@@ -4431,17 +4274,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       const appDataBackup = await db.table("appData").toArray();
       const eventsBackup = getRawManagedEvents();
 
-      const backup = {
-        app: APP_NAME,
-        version: DATA_SCHEMA_VERSION,
-        scope: "full-file",
-        exportedAt: new Date().toISOString(),
+      const backup = createBackupEnvelope({
         reason,
         lastSaveAt,
-        managedEvents: eventsBackup,
+        managedEvents: normalizeManagedEventsForSchema(eventsBackup),
         riders: ridersBackup,
         appData: appDataBackup,
-      };
+      });
 
       const fileName = buildBackupFileName();
       const blob = new Blob([JSON.stringify(backup, null, 2)], {
@@ -4483,46 +4322,18 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       const text = await file.text();
       const backup = JSON.parse(text);
 
-      if (
-        !backup ||
-        !Array.isArray(backup.riders) ||
-        !Array.isArray(backup.appData)
-      ) {
-        alert(
-          "Ungültige Backup-Datei. Bitte eine JSON-Backup-Datei des BMX Race Manager auswählen.",
-        );
+      const validation = validateBackupStructure(backup);
+      if (!validation.ok) {
+        alert(validation.message || "Die Backup-Datei ist unvollständig oder beschädigt.");
         event.target.value = "";
         return;
       }
 
-      const invalidAppData = backup.appData.some(
-        (row: any) =>
-          !row ||
-          typeof row.key !== "string" ||
-          !Object.prototype.hasOwnProperty.call(row, "value"),
-      );
-      const invalidRiders = backup.riders.some(
-        (rider: any) => !rider || typeof rider.id === "undefined",
-      );
-
-      if (invalidAppData || invalidRiders) {
-        alert("Die Backup-Datei ist unvollständig oder beschädigt.");
-        event.target.value = "";
-        return;
-      }
-
-      const backupSchemaVersion = Number(backup.version || 1);
-      const schemaNote = backupSchemaVersion < DATA_SCHEMA_VERSION
-        ? `
-
-Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaVersion}). Nach dem Import wird eine Datenprüfung empfohlen.`
-        : "";
-
-      const exportedAt = backup.exportedAt
-        ? new Date(backup.exportedAt).toLocaleString("de-CH")
-        : "unbekannt";
+      const backupSummary = getBackupSummary(backup);
+      const schemaNote = backupSummary.schemaNote;
+      const exportedAt = backupSummary.exportedAt;
       const ok = window.confirm(
-        `Komplettes Backup importieren?\n\nDatei: ${file.name}\nErstellt: ${exportedAt}\nRennen/Rennserien: ${(backup.managedEvents || []).length}\nTeilnehmer: ${backup.riders.length}\nGespeicherte App-Daten: ${backup.appData.length}\n\nAchtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig überschrieben.`,
+        `Komplettes Backup importieren?\n\nDatei: ${file.name}\nErstellt: ${exportedAt}\nRennen/Rennserien: ${backupSummary.eventCount}\nTeilnehmer: ${backupSummary.riderCount}\nGespeicherte App-Daten: ${backupSummary.appDataCount}\nBackup-Version: ${backupSummary.backupVersion}\nDatenstruktur-Version: ${backupSummary.dataSchemaVersion}${schemaNote}\n\nAchtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig überschrieben.`,
       );
 
       if (!ok) {
@@ -4544,17 +4355,14 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
         },
       );
 
-      Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith("bmx_")) localStorage.removeItem(key);
+      appStorage.keys().forEach((key) => {
+        if (key.startsWith("bmx_")) appStorage.removeItem(key);
       });
 
-      const eventsToRestore = Array.isArray(backup.managedEvents) ? backup.managedEvents : getRawManagedEvents();
-      localStorage.setItem(EVENT_LIST_KEY, JSON.stringify(eventsToRestore));
+      const eventsToRestore = normalizeManagedEventsForSchema(Array.isArray(backup.managedEvents) ? backup.managedEvents : getRawManagedEvents());
+      appStorage.setItem(EVENT_LIST_KEY, JSON.stringify(eventsToRestore));
       for (const row of backup.appData) {
-        localStorage.setItem(
-          row.key,
-          typeof row.value === "string" ? row.value : JSON.stringify(row.value),
-        );
+        appStorage.setItem(row.key, encodeStorageValue(row.value));
       }
 
       alert("Backup erfolgreich importiert. Nach dem Neuladen bitte einmal 'Daten prüfen' ausführen. Die App wird jetzt neu geladen.");
@@ -5502,32 +5310,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
         </div>
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>App Versions-History / Release Notes</h2>
-          <div style={{ display: "grid", gap: 12 }}>
-            {APP_RELEASE_NOTES.map((release) => (
-              <div
-                key={release.version}
-                style={{
-                  border: `1px solid ${release.version === APP_VERSION ? colors.blueBorder : colors.cardBorder}`,
-                  background: release.version === APP_VERSION ? "linear-gradient(135deg, #eef6ff 0%, #ffffff 100%)" : colors.cardSoftBg,
-                  borderRadius: 16,
-                  padding: 14,
-                  boxShadow: release.version === APP_VERSION ? "0 10px 22px rgba(37, 99, 235, 0.12)" : "none",
-                }}
-              >
-                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-                  <span style={getStatusBadgeStyle(release.version === APP_VERSION ? "offiziell" : "ID")}>{release.version}</span>
-                  {release.version === APP_VERSION && <span style={getStatusBadgeStyle("Speichern")}>Aktuelle Version</span>}
-                  <strong style={{ color: colors.title, fontSize: 17 }}>{release.title}</strong>
-                  <span style={{ color: colors.muted, fontWeight: 850 }}>{release.date}</span>
-                </div>
-                <ul style={{ margin: "8px 0 0 22px", padding: 0, color: colors.text, fontWeight: 760, lineHeight: 1.55 }}>
-                  {release.items.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+          <ReleaseNotes colors={colors} getStatusBadgeStyle={getStatusBadgeStyle} />
         </div>
         <div style={{ ...basePanelStyle }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Änderungshistory / Speicher- und Import-History</h2>
