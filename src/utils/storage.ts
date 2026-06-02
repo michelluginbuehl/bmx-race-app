@@ -1,36 +1,75 @@
-import { APP_CONFIG } from "../config/appConfig";
+export type StorageValue<T> = {
+  schemaVersion: number;
+  savedAt: string;
+  data: T;
+};
 
-export function saveToStorage<T>(data: T): void {
-  try {
-    localStorage.setItem(APP_CONFIG.storageKey, JSON.stringify(data));
-  } catch (error) {
-    console.error("Daten konnten nicht gespeichert werden:", error);
-  }
+export function encodeStorageValue<T>(data: T, schemaVersion = 1): string {
+  const value: StorageValue<T> = {
+    schemaVersion,
+    savedAt: new Date().toISOString(),
+    data,
+  };
+
+  return JSON.stringify(value);
 }
 
-export function loadFromStorage<T>(): T | null {
-  try {
-    const raw = localStorage.getItem(APP_CONFIG.storageKey);
+function decodeStorageValue<T>(raw: string | null): T | null {
+  if (!raw) return null;
 
-    if (!raw) {
-      return null;
+  try {
+    const parsed = JSON.parse(raw);
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "data" in parsed &&
+      "schemaVersion" in parsed
+    ) {
+      return parsed.data as T;
     }
 
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    console.error("Daten konnten nicht geladen werden:", error);
+    return parsed as T;
+  } catch {
     return null;
   }
 }
 
-export function clearStorage(): void {
-  try {
-    localStorage.removeItem(APP_CONFIG.storageKey);
-  } catch (error) {
-    console.error("Daten konnten nicht gelöscht werden:", error);
-  }
+export const appStorage = {
+  get<T>(key: string, fallbackValue: T): T {
+    const decoded = decodeStorageValue<T>(localStorage.getItem(key));
+    return decoded ?? fallbackValue;
+  },
+
+  set<T>(key: string, value: T): void {
+    localStorage.setItem(key, encodeStorageValue(value));
+  },
+
+  remove(key: string): void {
+    localStorage.removeItem(key);
+  },
+
+  clear(): void {
+    localStorage.clear();
+  },
+
+  exists(key: string): boolean {
+    return localStorage.getItem(key) !== null;
+  },
+};
+
+export function saveToStorage<T>(key: string, data: T): void {
+  appStorage.set(key, data);
 }
 
-export function storageExists(): boolean {
-  return localStorage.getItem(APP_CONFIG.storageKey) !== null;
+export function loadFromStorage<T>(key: string, fallbackValue: T): T {
+  return appStorage.get(key, fallbackValue);
+}
+
+export function clearStorage(key: string): void {
+  appStorage.remove(key);
+}
+
+export function storageExists(key: string): boolean {
+  return appStorage.exists(key);
 }
