@@ -1,29 +1,20 @@
-export const appStorage = {
-  getItem(key: string): string | null {
-    return window.localStorage.getItem(key);
-  },
-  setItem(key: string, value: string): void {
-    window.localStorage.setItem(key, value);
-  },
-  removeItem(key: string): void {
-    window.localStorage.removeItem(key);
-  },
-  keys(): string[] {
-    return Object.keys(window.localStorage);
-  },
-  readJson<T>(key: string, fallback: T): T {
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (raw === null) return fallback;
-      return JSON.parse(raw) as T;
-    } catch {
-      return fallback;
-    }
-  },
-  writeJson(key: string, value: unknown): void {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  },
-};
+import { APP_CONFIG } from "../config/appConfig";
 
-export const encodeStorageValue = (value: unknown): string =>
-  typeof value === "string" ? value : JSON.stringify(value);
+export function saveToStorage<T>(data: T): void {
+  localStorage.setItem(APP_CONFIG.storageKey, JSON.stringify(data));
+}
+
+export function loadFromStorage<T>(): T | null {
+  const raw = localStorage.getItem(APP_CONFIG.storageKey);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function clearStorage(): void {
+  localStorage.removeItem(APP_CONFIG.storageKey);
+}
