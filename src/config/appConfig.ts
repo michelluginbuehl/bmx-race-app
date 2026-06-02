@@ -1,12 +1,12 @@
 export const APP_NAME = "BMX Race Manager";
-export const APP_VERSION = "1.2.1";
+export const APP_VERSION = "1.2.2";
 export const APP_CHANGE_NOTE =
-  "Version 1.2.1: Stabilisierung der Startseite, lokale Datenspeicherung und Backup-Kompatibilität.";
+  "Version 1.2.2: Stabilisierung von Teilnehmeransicht, Startseite und lokaler Datenspeicherung.";
 export const DATA_SCHEMA_VERSION = 1;
 
 /**
  * Wichtig:
- * Diese Keys dürfen nachträglich möglichst nicht mehr geändert werden,
+ * Diese Keys dürfen möglichst nicht mehr geändert werden,
  * sonst findet die App bereits gespeicherte Rennen nicht mehr.
  */
 export const STORAGE_KEYS = {

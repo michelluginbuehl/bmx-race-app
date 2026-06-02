@@ -15,6 +15,17 @@ function withItems(note: Omit<AppReleaseNote, "items">): AppReleaseNote {
 
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
   withItems({
+    version: "1.2.2",
+    date: "2026-06-02",
+    title: "Stabilisierung Teilnehmeransicht",
+    changes: [
+      "Teilnehmeransicht robuster gemacht.",
+      "Lokale Speicherung kompatibler mit App.tsx gemacht.",
+      "Startseiten-Navigation stabilisiert.",
+      "Bestehende gespeicherte Daten werden beim Lesen automatisch entpackt.",
+    ],
+  }),
+  withItems({
     version: "1.2.1",
     date: "2026-06-02",
     title: "Stabilisierung Startseite und Datenspeicherung",
