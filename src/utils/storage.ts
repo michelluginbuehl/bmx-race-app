@@ -1,3 +1,5 @@
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../config/appConfig";
+
 export type StorageValue<T> = {
   schemaVersion: number;
   savedAt: string;
@@ -5,13 +7,11 @@ export type StorageValue<T> = {
 };
 
 export function encodeStorageValue<T>(data: T, schemaVersion = 1): string {
-  const value: StorageValue<T> = {
+  return JSON.stringify({
     schemaVersion,
     savedAt: new Date().toISOString(),
     data,
-  };
-
-  return JSON.stringify(value);
+  });
 }
 
 export function decodeStorageValue<T>(raw: string | null): T | null {
@@ -35,18 +35,70 @@ export function decodeStorageValue<T>(raw: string | null): T | null {
   }
 }
 
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function candidateKeysFor(key: string): string[] {
+  if (key === STORAGE_KEYS.managedEvents) {
+    return unique([key, ...LEGACY_STORAGE_KEYS.managedEvents]);
+  }
+
+  if (key === STORAGE_KEYS.activeEventId) {
+    return unique([key, ...LEGACY_STORAGE_KEYS.activeEventId]);
+  }
+
+  if (key === STORAGE_KEYS.appSettings) {
+    return unique([key, ...LEGACY_STORAGE_KEYS.appSettings]);
+  }
+
+  if (key === STORAGE_KEYS.duplicateOkKeys) {
+    return unique([key, ...LEGACY_STORAGE_KEYS.duplicateOkKeys]);
+  }
+
+  return [key];
+}
+
+function getFirstExistingRawValue(key: string): string | null {
+  for (const candidate of candidateKeysFor(key)) {
+    const value = localStorage.getItem(candidate);
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function mirrorToLegacyKeys(key: string, value: string): void {
+  // Nur die wichtigsten Daten spiegeln. So bleiben alte App-Stände lesbar.
+  for (const candidate of candidateKeysFor(key)) {
+    try {
+      localStorage.setItem(candidate, value);
+    } catch {
+      // Einzelne fehlgeschlagene Spiegelungen sollen die App nicht blockieren.
+    }
+  }
+}
+
 export const appStorage = {
   get<T>(key: string, fallbackValue: T): T {
-    const decoded = decodeStorageValue<T>(localStorage.getItem(key));
+    const raw = getFirstExistingRawValue(key);
+    const decoded = decodeStorageValue<T>(raw);
     return decoded ?? fallbackValue;
   },
 
   set<T>(key: string, value: T): void {
-    localStorage.setItem(key, encodeStorageValue(value));
+    // Bewusst als normaler JSON-Wert speichern. Das vermeidet verschachtelte
+    // Speicherformate und ist kompatibler mit bestehendem App-Code.
+    const raw = JSON.stringify(value);
+    mirrorToLegacyKeys(key, raw);
   },
 
   remove(key: string): void {
-    localStorage.removeItem(key);
+    for (const candidate of candidateKeysFor(key)) {
+      localStorage.removeItem(candidate);
+    }
   },
 
   clear(): void {
@@ -54,20 +106,19 @@ export const appStorage = {
   },
 
   exists(key: string): boolean {
-    return localStorage.getItem(key) !== null;
+    return getFirstExistingRawValue(key) !== null;
   },
 
-  // localStorage-kompatible Methoden, weil App.tsx diese direkt erwartet.
   getItem(key: string): string | null {
-    return localStorage.getItem(key);
+    return getFirstExistingRawValue(key);
   },
 
   setItem(key: string, value: string): void {
-    localStorage.setItem(key, value);
+    mirrorToLegacyKeys(key, value);
   },
 
   removeItem(key: string): void {
-    localStorage.removeItem(key);
+    this.remove(key);
   },
 
   keys(): string[] {

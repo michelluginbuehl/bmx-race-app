@@ -43,10 +43,21 @@ function sanitizeFileName(value: string): string {
     .replace(/^_|_$/g, "");
 }
 
-function countRidersInUnknownData(data: unknown): number {
-  if (!data || typeof data !== "object") return 0;
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  return value as Record<string, unknown>;
+}
 
-  const root = data as Record<string, unknown>;
+function unwrapData(value: unknown): unknown {
+  const record = asRecord(value);
+  if (record && "data" in record) return record.data;
+  return value;
+}
+
+function countRidersInUnknownData(data: unknown): number {
+  const unwrapped = unwrapData(data);
+  const root = asRecord(unwrapped);
+  if (!root) return 0;
 
   if (Array.isArray(root.riders)) {
     return root.riders.length;
@@ -54,17 +65,15 @@ function countRidersInUnknownData(data: unknown): number {
 
   if (Array.isArray(root.managedEvents)) {
     return root.managedEvents.reduce((total, event) => {
-      if (!event || typeof event !== "object") return total;
-      const eventRecord = event as Record<string, unknown>;
-      return total + (Array.isArray(eventRecord.riders) ? eventRecord.riders.length : 0);
+      const eventRecord = asRecord(event);
+      return total + (Array.isArray(eventRecord?.riders) ? eventRecord.riders.length : 0);
     }, 0);
   }
 
   if (Array.isArray(root.events)) {
     return root.events.reduce((total, event) => {
-      if (!event || typeof event !== "object") return total;
-      const eventRecord = event as Record<string, unknown>;
-      return total + (Array.isArray(eventRecord.riders) ? eventRecord.riders.length : 0);
+      const eventRecord = asRecord(event);
+      return total + (Array.isArray(eventRecord?.riders) ? eventRecord.riders.length : 0);
     }, 0);
   }
 
@@ -72,17 +81,13 @@ function countRidersInUnknownData(data: unknown): number {
 }
 
 function countEventsInUnknownData(data: unknown): number {
-  if (!data || typeof data !== "object") return 0;
+  const unwrapped = unwrapData(data);
+  const root = asRecord(unwrapped);
+  if (!root) return 0;
 
-  const root = data as Record<string, unknown>;
-
-  if (Array.isArray(root.managedEvents)) {
-    return root.managedEvents.length;
-  }
-
-  if (Array.isArray(root.events)) {
-    return root.events.length;
-  }
+  if (Array.isArray(root.managedEvents)) return root.managedEvents.length;
+  if (Array.isArray(root.events)) return root.events.length;
+  if (Array.isArray(unwrapped)) return unwrapped.length;
 
   return 0;
 }
@@ -104,12 +109,8 @@ export function createBackupEnvelope<T>(data: T): BackupEnvelope<T> {
 }
 
 export function getBackupSummary(backup: unknown): BackupSummary {
-  const item =
-    backup && typeof backup === "object"
-      ? (backup as Partial<BackupEnvelope>)
-      : {};
-
-  const data = item.data ?? backup;
+  const item = asRecord(backup) ?? {};
+  const data = "data" in item ? item.data : backup;
 
   return {
     schemaNote:
@@ -143,8 +144,9 @@ export function getBackupSummary(backup: unknown): BackupSummary {
 
 export function validateBackupStructure(backup: unknown): BackupValidationResult {
   const errors: string[] = [];
+  const item = asRecord(backup);
 
-  if (!backup || typeof backup !== "object") {
+  if (!item) {
     return {
       ok: false,
       valid: false,
@@ -153,36 +155,27 @@ export function validateBackupStructure(backup: unknown): BackupValidationResult
     };
   }
 
-  const item = backup as Partial<BackupEnvelope>;
+  // Alte Exporte ohne Envelope erlauben, sofern sie wie App-Daten aussehen.
+  const hasEnvelopeData = "data" in item;
+  const looksLikeRawAppData =
+    "managedEvents" in item ||
+    "events" in item ||
+    "riders" in item ||
+    "appSettings" in item;
 
-  if (!("data" in item)) {
-    errors.push("Backup enthält keine Daten.");
-  }
-
-  const hasVersion =
-    typeof item.appVersion === "string" ||
-    typeof item.backupVersion === "string" ||
-    typeof item.schemaVersion === "number" ||
-    typeof item.dataSchemaVersion === "number";
-
-  if (!hasVersion) {
-    errors.push("Backup enthält keine Versionsinformationen.");
+  if (!hasEnvelopeData && !looksLikeRawAppData) {
+    errors.push("Backup enthält keine erkennbaren App-Daten.");
   }
 
   return {
     ok: errors.length === 0,
     valid: errors.length === 0,
-    message:
-      errors.length === 0
-        ? "Backup ist gültig."
-        : errors.join("\n"),
+    message: errors.length === 0 ? "Backup ist gültig." : errors.join("\n"),
     errors,
   };
 }
 
 export function normalizeManagedEventsForSchema<T>(managedEvents: T): T {
-  // Aktuell keine Migration nötig. Diese Funktion bleibt bewusst als stabile
-  // Schnittstelle bestehen, falls spätere Datenversionen angepasst werden müssen.
   return managedEvents;
 }
 
