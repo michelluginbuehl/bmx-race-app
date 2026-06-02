@@ -3,7 +3,7 @@ import { APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION } from "../config/appConfig"
 export type BackupEnvelope<T = unknown> = {
   appName: string;
   appVersion: string;
-  backupVersion: string;
+  backupVersion: string | number;
   schemaVersion: number;
   dataSchemaVersion: number;
   schemaNote: string;
@@ -25,7 +25,7 @@ export type BackupSummary = {
   eventCount: number;
   riderCount: number;
   appDataCount: number;
-  backupVersion: string;
+  backupVersion: string | number;
   dataSchemaVersion: number;
 };
 
@@ -59,9 +59,7 @@ function countRidersInUnknownData(data: unknown): number {
   const root = asRecord(unwrapped);
   if (!root) return 0;
 
-  if (Array.isArray(root.riders)) {
-    return root.riders.length;
-  }
+  if (Array.isArray(root.riders)) return root.riders.length;
 
   if (Array.isArray(root.managedEvents)) {
     return root.managedEvents.reduce((total, event) => {
@@ -83,11 +81,10 @@ function countRidersInUnknownData(data: unknown): number {
 function countEventsInUnknownData(data: unknown): number {
   const unwrapped = unwrapData(data);
   const root = asRecord(unwrapped);
-  if (!root) return 0;
+  if (!root) return Array.isArray(unwrapped) ? unwrapped.length : 0;
 
   if (Array.isArray(root.managedEvents)) return root.managedEvents.length;
   if (Array.isArray(root.events)) return root.events.length;
-  if (Array.isArray(unwrapped)) return unwrapped.length;
 
   return 0;
 }
@@ -128,7 +125,7 @@ export function getBackupSummary(backup: unknown): BackupSummary {
     appDataCount:
       data && typeof data === "object" ? Object.keys(data as Record<string, unknown>).length : 0,
     backupVersion:
-      typeof item.backupVersion === "string"
+      typeof item.backupVersion === "string" || typeof item.backupVersion === "number"
         ? item.backupVersion
         : typeof item.appVersion === "string"
           ? item.appVersion
@@ -155,13 +152,13 @@ export function validateBackupStructure(backup: unknown): BackupValidationResult
     };
   }
 
-  // Alte Exporte ohne Envelope erlauben, sofern sie wie App-Daten aussehen.
   const hasEnvelopeData = "data" in item;
   const looksLikeRawAppData =
     "managedEvents" in item ||
     "events" in item ||
     "riders" in item ||
-    "appSettings" in item;
+    "appSettings" in item ||
+    "appData" in item;
 
   if (!hasEnvelopeData && !looksLikeRawAppData) {
     errors.push("Backup enthält keine erkennbaren App-Daten.");

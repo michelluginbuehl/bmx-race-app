@@ -6,6 +6,60 @@ export type StorageValue<T> = {
   data: T;
 };
 
+function isStorageEnvelope(value: unknown): value is StorageValue<unknown> {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "data" in value &&
+    "schemaVersion" in value &&
+    "savedAt" in value
+  );
+}
+
+function tryParseJson(raw: string | null): unknown {
+  if (raw === null) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function unwrapStorageEnvelope(value: unknown): unknown {
+  let current = value;
+
+  // Mehrfach entpacken, falls alte Versionen versehentlich verschachtelt gespeichert haben.
+  for (let index = 0; index < 5; index += 1) {
+    if (typeof current === "string") {
+      const parsed = tryParseJson(current);
+      if (parsed === current) return current;
+      current = parsed;
+      continue;
+    }
+
+    if (isStorageEnvelope(current)) {
+      current = current.data;
+      continue;
+    }
+
+    return current;
+  }
+
+  return current;
+}
+
+function toPlainStorageString(value: string): string {
+  const parsed = tryParseJson(value);
+  const unwrapped = unwrapStorageEnvelope(parsed);
+
+  if (typeof unwrapped === "string") {
+    return JSON.stringify(unwrapped);
+  }
+
+  return JSON.stringify(unwrapped);
+}
+
 export function encodeStorageValue<T>(data: T, schemaVersion = 1): string {
   return JSON.stringify({
     schemaVersion,
@@ -17,22 +71,12 @@ export function encodeStorageValue<T>(data: T, schemaVersion = 1): string {
 export function decodeStorageValue<T>(raw: string | null): T | null {
   if (!raw) return null;
 
-  try {
-    const parsed = JSON.parse(raw);
+  const parsed = tryParseJson(raw);
+  const unwrapped = unwrapStorageEnvelope(parsed);
 
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "data" in parsed &&
-      "schemaVersion" in parsed
-    ) {
-      return parsed.data as T;
-    }
+  if (unwrapped === null || unwrapped === undefined) return null;
 
-    return parsed as T;
-  } catch {
-    return null;
-  }
+  return unwrapped as T;
 }
 
 function unique(values: string[]): string[] {
@@ -70,11 +114,12 @@ function getFirstExistingRawValue(key: string): string | null {
   return null;
 }
 
-function mirrorToLegacyKeys(key: string, value: string): void {
-  // Nur die wichtigsten Daten spiegeln. So bleiben alte App-Stände lesbar.
+function mirrorToCandidateKeys(key: string, value: string): void {
+  const plain = toPlainStorageString(value);
+
   for (const candidate of candidateKeysFor(key)) {
     try {
-      localStorage.setItem(candidate, value);
+      localStorage.setItem(candidate, plain);
     } catch {
       // Einzelne fehlgeschlagene Spiegelungen sollen die App nicht blockieren.
     }
@@ -83,16 +128,12 @@ function mirrorToLegacyKeys(key: string, value: string): void {
 
 export const appStorage = {
   get<T>(key: string, fallbackValue: T): T {
-    const raw = getFirstExistingRawValue(key);
-    const decoded = decodeStorageValue<T>(raw);
+    const decoded = decodeStorageValue<T>(getFirstExistingRawValue(key));
     return decoded ?? fallbackValue;
   },
 
   set<T>(key: string, value: T): void {
-    // Bewusst als normaler JSON-Wert speichern. Das vermeidet verschachtelte
-    // Speicherformate und ist kompatibler mit bestehendem App-Code.
-    const raw = JSON.stringify(value);
-    mirrorToLegacyKeys(key, raw);
+    mirrorToCandidateKeys(key, JSON.stringify(value));
   },
 
   remove(key: string): void {
@@ -109,12 +150,31 @@ export const appStorage = {
     return getFirstExistingRawValue(key) !== null;
   },
 
+  /**
+   * localStorage-kompatibel:
+   * App.tsx verwendet getItem() oft direkt mit JSON.parse(...).
+   * Deshalb gibt getItem() immer den eigentlichen gespeicherten Wert zurück,
+   * nicht den technischen Envelope von encodeStorageValue().
+   */
   getItem(key: string): string | null {
-    return getFirstExistingRawValue(key);
+    const raw = getFirstExistingRawValue(key);
+    if (raw === null) return null;
+
+    const decoded = decodeStorageValue<unknown>(raw);
+
+    if (decoded === null || decoded === undefined) return null;
+
+    return JSON.stringify(decoded);
   },
 
+  /**
+   * localStorage-kompatibel:
+   * Wenn App.tsx einen mit encodeStorageValue() erzeugten String speichert,
+   * wird dieser hier sofort entpackt. Dadurch funktionieren spätere
+   * JSON.parse(appStorage.getItem(...)) Aufrufe wieder stabil.
+   */
   setItem(key: string, value: string): void {
-    mirrorToLegacyKeys(key, value);
+    mirrorToCandidateKeys(key, value);
   },
 
   removeItem(key: string): void {
