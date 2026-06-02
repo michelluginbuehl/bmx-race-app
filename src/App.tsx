@@ -70,11 +70,86 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.12.8";
+const APP_VERSION = "v1.12.9";
 const APP_NAME = "BMX Race Manager";
 const HEADER_BANNER_IMAGE = headerBannerImage;
-const APP_CHANGE_NOTE = "Optische iPad-Bedienung verbessert: grössere Buttons, mehr Abstand, klare Aktionsfarben und sichtbarer Rennstatus";
+const APP_CHANGE_NOTE = "Versionshistorie als Release Notes auf der History / Speicher & Import Seite ergänzt";
 const DATA_SCHEMA_VERSION = 4;
+
+const APP_RELEASE_NOTES = [
+  {
+    version: "v1.12.9",
+    date: "02.06.2026",
+    title: "Release Notes auf History-Seite",
+    items: [
+      "Versionshistorie auf der Seite History / Speicher & Import ergänzt",
+      "Release Notes im Stil einer Software-History sichtbar gemacht",
+      "Keine Änderung an Speicherlogik, Import/Export, Rennen oder bestehenden Daten",
+    ],
+  },
+  {
+    version: "v1.12.8",
+    date: "02.06.2026",
+    title: "Rennblatt-Buttons bereinigt",
+    items: [
+      "Button Resultate manuell erstellen in Results manuell umbenannt",
+      "Button Speichern im Rennblatt entfernt",
+      "Keine Änderung an Rennlogik oder Backup-System",
+    ],
+  },
+  {
+    version: "v1.12.7",
+    date: "02.06.2026",
+    title: "iPad-Bedienung optisch verbessert",
+    items: [
+      "Buttons vergrössert und Touch-Flächen verbessert",
+      "Abstände zwischen Bedienelementen erhöht",
+      "Kritische Aktionen farblich klarer markiert",
+      "Rennstatus-Anzeigen sichtbarer gemacht",
+    ],
+  },
+  {
+    version: "v1.12.6",
+    date: "02.06.2026",
+    title: "Header-Banner ausgelagert und responsiver gemacht",
+    items: [
+      "Banner aus App.tsx in src/assets/header-banner.jpg ausgelagert",
+      "Header-Kachel responsiver gemacht",
+      "Logo im Banner wird weniger stark zugeschnitten",
+    ],
+  },
+  {
+    version: "v1.12.5",
+    date: "02.06.2026",
+    title: "Header-Höhe nachjustiert",
+    items: [
+      "Kopf-Kachel nochmals höher gemacht",
+      "Banner-Zuschnitt reduziert, damit das Logo besser sichtbar ist",
+    ],
+  },
+  {
+    version: "v1.12.4",
+    date: "02.06.2026",
+    title: "Header-Kachel erhöht",
+    items: [
+      "Kopf-Kachel oben höher gemacht",
+      "Banner-Hintergrund beibehalten",
+    ],
+  },
+  {
+    version: "v1.12.3",
+    date: "02.06.2026",
+    title: "Neuer Header-Banner",
+    items: [
+      "Neuer Banner als Hintergrund der Kopf-Kachel eingebaut",
+      "App-Name im Header entfernt",
+      "Zielflaggen-Emoji links entfernt",
+      "Versionsnummer sichtbar gelassen",
+      "Gespeichert-/Backup-Kachel kleiner und unten ausgerichtet",
+      "Klick auf Kopf-Kachel führt zurück zur Startseite",
+    ],
+  },
+] as const;
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -5424,6 +5499,35 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
         {renderAppHeader()}
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
+        </div>
+        <div style={{ ...basePanelStyle, marginBottom: 16 }}>
+          <h2 style={{ marginTop: 0, color: colors.title }}>App Versions-History / Release Notes</h2>
+          <div style={{ display: "grid", gap: 12 }}>
+            {APP_RELEASE_NOTES.map((release) => (
+              <div
+                key={release.version}
+                style={{
+                  border: `1px solid ${release.version === APP_VERSION ? colors.blueBorder : colors.cardBorder}`,
+                  background: release.version === APP_VERSION ? "linear-gradient(135deg, #eef6ff 0%, #ffffff 100%)" : colors.cardSoftBg,
+                  borderRadius: 16,
+                  padding: 14,
+                  boxShadow: release.version === APP_VERSION ? "0 10px 22px rgba(37, 99, 235, 0.12)" : "none",
+                }}
+              >
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                  <span style={getStatusBadgeStyle(release.version === APP_VERSION ? "offiziell" : "ID")}>{release.version}</span>
+                  {release.version === APP_VERSION && <span style={getStatusBadgeStyle("Speichern")}>Aktuelle Version</span>}
+                  <strong style={{ color: colors.title, fontSize: 17 }}>{release.title}</strong>
+                  <span style={{ color: colors.muted, fontWeight: 850 }}>{release.date}</span>
+                </div>
+                <ul style={{ margin: "8px 0 0 22px", padding: 0, color: colors.text, fontWeight: 760, lineHeight: 1.55 }}>
+                  {release.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         </div>
         <div style={{ ...basePanelStyle }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Änderungshistory / Speicher- und Import-History</h2>
