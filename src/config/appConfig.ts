@@ -1,11 +1,7 @@
-export const APP_VERSION = "v1.13.0";
-export const APP_NAME = "BMX Race Manager";
-export const APP_CHANGE_NOTE = "Technische Grundstruktur ausgelagert, Backup-Prüfung verbessert und Datenmodell versioniert";
-
-export const DATA_SCHEMA_VERSION = 5;
-export const BACKUP_VERSION = 2;
-
-export const STORAGE_KEYS = {
-  managedEvents: "bmx_managed_events_v1",
-  duplicateOkKeys: "bmx_duplicate_ok_keys_v1",
-} as const;
+export const APP_CONFIG = {
+  appName: "BMX Race Manager",
+  version: "1.2.0",
+  releaseDate: "2026-06-02",
+  storageKey: "bmx-race-manager-data",
+  backupPrefix: "bmx-race-backup",
+};
