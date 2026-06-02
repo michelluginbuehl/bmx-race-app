@@ -1097,8 +1097,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   ].filter(Boolean).join(" ").toLowerCase();
 
   const getMasterParticipantSuggestions = () => {
-    const query = eventParticipantSearch.trim().toLowerCase();
-    const existingKeys = new Set(allRiders.map((rider: any) => getMasterParticipantKey(rider)));
+    const query = String(eventParticipantSearch || "").trim().toLowerCase();
+    const currentRiders = Array.isArray(allRiders) ? allRiders : [];
+    const existingKeys = new Set(currentRiders.map((rider: any) => getMasterParticipantKey(rider)));
     const groups = getMasterParticipantGroups().filter((participant: any) => !existingKeys.has(participant.key));
     if (!query) return groups;
     const parts = query.split(/\s+/).filter(Boolean);
@@ -1108,38 +1109,64 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     });
   };
 
+  const getSafeMasterParticipantSuggestions = () => {
+    try {
+      const suggestions = getMasterParticipantSuggestions();
+      return Array.isArray(suggestions) ? suggestions : [];
+    } catch (error: any) {
+      console.error("Teilnehmer-Vorschläge konnten nicht geladen werden:", error);
+      return [];
+    }
+  };
+
   const addMasterParticipantToCurrentEvent = async (participant: any) => {
-    if (!currentEventId) {
-      window.alert("Bitte zuerst ein Rennen oder eine Rennserie öffnen.");
-      return;
+    try {
+      if (!currentEventId) {
+        window.alert("Bitte zuerst ein Rennen oder eine Rennserie öffnen.");
+        return;
+      }
+
+      const source = participant?.raw || participant || {};
+      const current = (await db.table("riders").toArray())
+        .map(normalizeRider)
+        .filter((rider: any) => !rider.deletedAt)
+        .filter(belongsToCurrentEvent);
+      const key = getMasterParticipantKey(source);
+      const alreadyExists = current.some((rider: any) => getMasterParticipantKey(rider) === key);
+
+      if (alreadyExists) {
+        window.alert("Dieser Teilnehmer ist in diesem Rennen / dieser Rennserie bereits vorhanden.");
+        return;
+      }
+
+      const newId = typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `rider_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+      await db.table("riders").add({
+        id: newId,
+        masterId: participant?.masterId || source.masterId || source.id || "",
+        name: source.name || participant?.name || "",
+        plate: source.plate || participant?.plate || "",
+        birthYear: Number(source.birthYear || source.jahrgang || participant?.birthYear) || undefined,
+        jahrgang: Number(source.birthYear || source.jahrgang || participant?.birthYear) || undefined,
+        gender: source.gender || source.geschlecht || participant?.gender || "",
+        geschlecht: source.gender || source.geschlecht || participant?.gender || "",
+        club: source.club || participant?.club || "",
+        cruiser: !!(source.cruiser || source.isCruiser || participant?.cruiser),
+        isCruiser: !!(source.cruiser || source.isCruiser || participant?.cruiser),
+        eventId: currentEventId || "legacy",
+        ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false])),
+      });
+
+      await loadAllRiders();
+      await loadRaceRiders();
+      setSelectedMasterParticipantKeys((prev) => prev.filter((keyValue) => keyValue !== participant?.key));
+      addChangeLog(`Teilnehmer aus Hauptdatenbank hinzugefügt: ${source.name || participant?.name || "Unbekannt"}`);
+    } catch (error: any) {
+      console.error("Teilnehmer konnte nicht hinzugefügt werden:", error);
+      window.alert(`Teilnehmer konnte nicht hinzugefügt werden: ${error?.message || "Unbekannter Fehler"}`);
     }
-    const current = (await db.table("riders").toArray()).map(normalizeRider).filter(belongsToCurrentEvent);
-    const key = getMasterParticipantKey(participant.raw || participant);
-    const alreadyExists = current.some((rider: any) => getMasterParticipantKey(rider) === key);
-    if (alreadyExists) {
-      window.alert("Dieser Teilnehmer ist in diesem Rennen / dieser Rennserie bereits vorhanden.");
-      return;
-    }
-    const source = participant.raw || participant;
-    const newId = crypto.randomUUID();
-    await db.table("riders").add({
-      id: newId,
-      masterId: participant.masterId || source.masterId || source.id || "",
-      name: source.name || participant.name || "",
-      plate: source.plate || participant.plate || "",
-      birthYear: Number(source.birthYear || source.jahrgang || participant.birthYear) || undefined,
-      jahrgang: Number(source.birthYear || source.jahrgang || participant.birthYear) || undefined,
-      gender: source.gender || source.geschlecht || participant.gender || "",
-      geschlecht: source.gender || source.geschlecht || participant.gender || "",
-      club: source.club || participant.club || "",
-      cruiser: !!(source.cruiser || source.isCruiser || participant.cruiser),
-      isCruiser: !!(source.cruiser || source.isCruiser || participant.cruiser),
-      eventId: currentEventId || "legacy",
-      ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false])),
-    });
-    await loadAllRiders();
-    await loadRaceRiders();
-    addChangeLog(`Teilnehmer aus Hauptdatenbank hinzugefügt: ${source.name || participant.name}`);
   };
 
 
@@ -1150,7 +1177,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   const addSelectedMasterParticipantsToCurrentEvent = async () => {
-    const suggestions = getMasterParticipantSuggestions();
+    const suggestions = getSafeMasterParticipantSuggestions();
     const selected = suggestions.filter((participant: any) => selectedMasterParticipantKeys.includes(participant.key));
     if (selected.length === 0) {
       window.alert("Bitte zuerst Teilnehmer auswählen.");
@@ -5868,7 +5895,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             />
             <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-                {getMasterParticipantSuggestions().length} Teilnehmer angezeigt · {selectedMasterParticipantKeys.length} ausgewählt
+                {getSafeMasterParticipantSuggestions().length} Teilnehmer angezeigt · {selectedMasterParticipantKeys.length} ausgewählt
               </div>
               <button
                 type="button"
@@ -5880,10 +5907,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
               </button>
             </div>
             <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflowY: "auto", overflowX: "hidden", background: "#fff", maxHeight: 360 }}>
-              {getMasterParticipantSuggestions().length === 0 ? (
+              {getSafeMasterParticipantSuggestions().length === 0 ? (
                 <div style={{ padding: 10, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden.</div>
               ) : (
-                getMasterParticipantSuggestions().map((participant: any) => {
+                getSafeMasterParticipantSuggestions().map((participant: any) => {
                   const checked = selectedMasterParticipantKeys.includes(participant.key);
                   return (
                     <div
