@@ -70,10 +70,10 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.12.6";
+const APP_VERSION = "v1.12.7";
 const APP_NAME = "BMX Race Manager";
 const HEADER_BANNER_IMAGE = headerBannerImage;
-const APP_CHANGE_NOTE = "Header-Banner als Asset ausgelagert und Header responsiv so angepasst, dass das Logo vollständig sichtbar bleibt";
+const APP_CHANGE_NOTE = "Optische iPad-Bedienung verbessert: grössere Buttons, mehr Abstand, klare Aktionsfarben und sichtbarer Rennstatus";
 const DATA_SCHEMA_VERSION = 4;
 
 export default function App() {
@@ -349,9 +349,9 @@ export default function App() {
       alignItems: "center",
       justifyContent: "center",
       borderRadius: 999,
-      padding: "5px 10px",
-      fontSize: 12,
-      fontWeight: 900,
+      padding: "7px 12px",
+      fontSize: 13,
+      fontWeight: 950,
       border: "1px solid transparent",
       whiteSpace: "nowrap",
       letterSpacing: "0.01em",
@@ -2587,9 +2587,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       display: "inline-flex",
       alignItems: "center",
       borderRadius: 999,
-      padding: "5px 10px",
-      fontSize: 12,
-      fontWeight: 900,
+      padding: "7px 12px",
+      fontSize: 13,
+      fontWeight: 950,
       background,
       color,
       border: `1px solid ${borderColor}`,
@@ -2635,12 +2635,12 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: colors.blueBtn,
     color: "#fff",
     border: "none",
-    borderRadius: 11,
-    padding: "12px 18px",
-    minHeight: 46,
+    borderRadius: 14,
+    padding: "14px 22px",
+    minHeight: 54,
     cursor: "pointer",
-    fontWeight: 900,
-    fontSize: 15,
+    fontWeight: 950,
+    fontSize: 16,
     boxShadow: "0 6px 14px rgba(37,99,235,0.20)",
   };
 
@@ -2648,24 +2648,24 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: colors.grayBtn,
     color: colors.grayBtnText,
     border: `1px solid ${colors.cardBorder}`,
-    borderRadius: 11,
-    padding: "12px 18px",
-    minHeight: 46,
+    borderRadius: 14,
+    padding: "14px 22px",
+    minHeight: 54,
     cursor: "pointer",
-    fontWeight: 850,
-    fontSize: 15,
+    fontWeight: 900,
+    fontSize: 16,
   };
 
   const homeButtonStyle: React.CSSProperties = {
     background: colors.title,
     color: "#fff",
     border: "2px solid #111827",
-    borderRadius: 11,
-    padding: "12px 20px",
-    minHeight: 46,
+    borderRadius: 14,
+    padding: "14px 24px",
+    minHeight: 54,
     cursor: "pointer",
-    fontWeight: 900,
-    fontSize: 15,
+    fontWeight: 950,
+    fontSize: 16,
     boxShadow: "0 7px 16px rgba(17,24,39,0.20)",
   };
 
@@ -2673,12 +2673,12 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: colors.grayBtn,
     color: colors.grayBtnText,
     border: `1px solid ${colors.cardBorder}`,
-    borderRadius: 10,
-    padding: "7px 10px",
-    minHeight: 36,
+    borderRadius: 12,
+    padding: "10px 14px",
+    minHeight: 44,
     cursor: "pointer",
-    fontWeight: 850,
-    fontSize: 12,
+    fontWeight: 900,
+    fontSize: 13,
     whiteSpace: "nowrap",
   };
 
@@ -2686,12 +2686,12 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: colors.blueBtn,
     color: "#fff",
     border: "none",
-    borderRadius: 10,
-    padding: "7px 10px",
-    minHeight: 36,
+    borderRadius: 12,
+    padding: "10px 14px",
+    minHeight: 44,
     cursor: "pointer",
-    fontWeight: 900,
-    fontSize: 12,
+    fontWeight: 950,
+    fontSize: 13,
     whiteSpace: "nowrap",
     boxShadow: "0 4px 10px rgba(37,99,235,0.16)",
   };
@@ -2720,11 +2720,11 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: "#d8e0e6",
     color: "#7b8794",
     border: "1px solid #c5ced8",
-    borderRadius: 8,
-    padding: "8px 10px",
-    minHeight: 38,
+    borderRadius: 12,
+    padding: "10px 14px",
+    minHeight: 44,
     cursor: "not-allowed",
-    fontWeight: 800,
+    fontWeight: 900,
     fontSize: 13,
     opacity: 0.75,
     whiteSpace: "nowrap",
@@ -2734,25 +2734,73 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: "#fff",
     color: colors.grayBtnText,
     border: "1px solid #d3dbe3",
-    borderRadius: 8,
-    padding: "6px 8px",
-    minHeight: 30,
+    borderRadius: 12,
+    padding: "10px 14px",
+    minHeight: 44,
     cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 12,
+    fontWeight: 900,
+    fontSize: 13,
     whiteSpace: "nowrap",
   };
+
+  const actionSaveButtonStyle: React.CSSProperties = {
+    ...compactPrimaryButtonStyle,
+    background: colors.greenBtn,
+    boxShadow: "0 6px 14px rgba(22,163,74,0.22)",
+  };
+
+  const actionWarningButtonStyle: React.CSSProperties = {
+    ...compactPrimaryButtonStyle,
+    background: colors.orangeBtn,
+    color: "#1f2937",
+    border: "1px solid #d97706",
+    boxShadow: "0 6px 14px rgba(245,158,11,0.22)",
+  };
+
+  const actionDangerButtonStyle: React.CSSProperties = {
+    ...compactPrimaryButtonStyle,
+    background: colors.redBtn,
+    boxShadow: "0 6px 14px rgba(220,38,38,0.20)",
+  };
+
+  const getRaceStatusPanelStyle = (closed: boolean, hasHeats: boolean, hasFinals: boolean): React.CSSProperties => ({
+    ...basePanelStyle,
+    marginBottom: 18,
+    borderColor: closed ? colors.redBtn : hasFinals ? "#c4b5fd" : hasHeats ? colors.blueBorder : colors.greenBorder,
+    borderLeft: `8px solid ${closed ? colors.redBtn : hasFinals ? "#8b5cf6" : hasHeats ? colors.blueBtn : colors.greenBtn}`,
+    background: closed
+      ? "linear-gradient(135deg, #fff1f1 0%, #ffffff 72%)"
+      : hasFinals
+        ? "linear-gradient(135deg, #f3e8ff 0%, #ffffff 72%)"
+        : hasHeats
+          ? "linear-gradient(135deg, #eef4ff 0%, #ffffff 72%)"
+          : "linear-gradient(135deg, #ecfdf5 0%, #ffffff 72%)",
+    boxShadow: "0 14px 32px rgba(23,32,51,0.12)",
+  });
+
+  const raceStatusStepStyle = (active: boolean, done: boolean): React.CSSProperties => ({
+    display: "grid",
+    gap: 4,
+    alignContent: "center",
+    minHeight: 58,
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: `1px solid ${done ? colors.successBorder : active ? colors.blueBorder : colors.cardBorder}`,
+    background: done ? colors.successBg : active ? "#eef4ff" : "#f8fafc",
+    color: done ? "#166534" : active ? colors.blueBtnDark : colors.muted,
+    fontWeight: 950,
+  });
 
   const disabledButtonStyle: React.CSSProperties = {
     background: "#d8e0e6",
     color: "#7b8794",
     border: "1px solid #c5ced8",
-    borderRadius: 8,
-    padding: "12px 18px",
-    minHeight: 46,
+    borderRadius: 12,
+    padding: "14px 22px",
+    minHeight: 54,
     cursor: "not-allowed",
-    fontWeight: 800,
-    fontSize: 15,
+    fontWeight: 900,
+    fontSize: 16,
     opacity: 0.75,
   };
 
@@ -2760,66 +2808,69 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     background: colors.blueBtn,
     color: "#fff",
     border: "none",
-    borderRadius: 8,
-    padding: "12px 18px",
-    minHeight: 46,
+    borderRadius: 12,
+    padding: "14px 22px",
+    minHeight: 54,
     cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 15,
+    fontWeight: 950,
+    fontSize: 16,
   };
 
   const inactiveRaceButtonStyle: React.CSSProperties = {
     background: "#ffffff",
     color: colors.grayBtnText,
     border: "1px solid #d3dbe3",
-    borderRadius: 8,
-    padding: "12px 18px",
-    minHeight: 46,
+    borderRadius: 12,
+    padding: "14px 22px",
+    minHeight: 54,
     cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 15,
+    fontWeight: 950,
+    fontSize: 16,
   };
 
   const dangerButtonStyle: React.CSSProperties = {
     background: colors.redBtn,
     color: "#fff",
     border: "none",
-    borderRadius: 8,
-    padding: "12px 18px",
-    minHeight: 46,
+    borderRadius: 12,
+    padding: "14px 22px",
+    minHeight: 54,
     cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 15,
+    fontWeight: 950,
+    fontSize: 16,
   };
 
   const smallDeleteButtonStyle: React.CSSProperties = {
     background: "#fff1f1",
     color: colors.redBtn,
     border: `1px solid #f2bcbc`,
-    borderRadius: 6,
-    padding: "5px 8px",
+    borderRadius: 10,
+    padding: "8px 12px",
+    minHeight: 40,
     cursor: "pointer",
-    fontWeight: 600,
+    fontWeight: 850,
   };
 
   const editButtonStyle: React.CSSProperties = {
     background: "#eef4ff",
     color: colors.blueBtn,
     border: "1px solid #bfd2ff",
-    borderRadius: 6,
-    padding: "5px 8px",
+    borderRadius: 10,
+    padding: "8px 12px",
+    minHeight: 40,
     cursor: "pointer",
-    fontWeight: 600,
+    fontWeight: 850,
   };
 
   const moveButtonStyle: React.CSSProperties = {
     background: "#eef4ff",
     color: colors.blueBtn,
     border: "1px solid #bfd2ff",
-    borderRadius: 6,
-    padding: "4px 7px",
+    borderRadius: 10,
+    padding: "8px 11px",
+    minHeight: 38,
     cursor: "pointer",
-    fontWeight: 700,
+    fontWeight: 850,
   };
 
   const inputStyle: React.CSSProperties = {
@@ -2908,12 +2959,12 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
 
   const stickyButtonBarStyle: React.CSSProperties = {
     ...basePanelStyle,
-    padding: 9,
+    padding: 12,
     position: "sticky",
     top: 0,
     zIndex: 20,
-    marginBottom: 20,
-    borderRadius: "0 0 18px 18px",
+    marginBottom: 22,
+    borderRadius: "0 0 22px 22px",
     background: "rgba(255,255,255,0.96)",
     backdropFilter: "blur(8px)",
     boxShadow: "0 10px 24px rgba(23,32,51,0.14)",
@@ -2927,8 +2978,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     display: "flex",
     flexDirection: "column",
     alignItems: "stretch",
-    gap: 8,
-    width: 104,
+    gap: 10,
+    width: 118,
   };
 
   const sideRaceNavigationButtonStyle: React.CSSProperties = {
@@ -2936,9 +2987,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     color: "#fff",
     border: "1px solid #111827",
     borderRadius: 999,
-    padding: "8px 7px",
-    minHeight: 42,
-    width: 42,
+    padding: "10px 8px",
+    minHeight: 52,
+    width: 52,
     alignSelf: "flex-end",
     cursor: "pointer",
     fontWeight: 900,
@@ -2952,8 +3003,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     color: colors.grayBtnText,
     border: `1px solid ${colors.cardBorder}`,
     borderRadius: 10,
-    padding: "8px 7px",
-    minHeight: 32,
+    padding: "10px 8px",
+    minHeight: 40,
     cursor: "pointer",
     fontWeight: 900,
     fontSize: 11,
@@ -5573,7 +5624,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
             style={{
               display: "flex",
               alignItems: "stretch",
-              gap: 8,
+              gap: 12,
               flexWrap: "nowrap",
               overflowX: "auto",
               paddingBottom: 2,
@@ -5589,8 +5640,8 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                 title={`${race} starten`}
                 style={{
                   ...compactHomeButtonStyle,
-                  flex: "0 0 168px",
-                  minHeight: 68,
+                  flex: "0 0 190px",
+                  minHeight: 82,
                   textAlign: "left",
                   display: "grid",
                   alignContent: "center",
@@ -5600,7 +5651,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
                   boxShadow: "0 10px 22px rgba(22, 163, 74, 0.14)",
                 }}
               >
-                <span style={{ fontSize: 15, fontWeight: 950, color: colors.greenBtn }}>{race} starten</span>
+                <span style={{ fontSize: 17, fontWeight: 950, color: colors.greenBtn }}>{race} starten</span>
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
                   <span style={getStatusBadgeStyle(getRaceStatus(race))}>{getRaceStatus(race)}</span>
                   <span style={{ color: colors.muted, fontSize: 12, fontWeight: 900 }}>
@@ -5612,7 +5663,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
             {!isSingleEvent && (
               <button
                 onClick={() => setViewMode("overall")}
-                style={{ ...compactHomeButtonStyle, marginLeft: "auto", flex: "0 0 140px", minHeight: 68, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                style={{ ...compactPrimaryButtonStyle, marginLeft: "auto", flex: "0 0 170px", minHeight: 82, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
               >
                 Gesamtwertung
               </button>
@@ -6344,7 +6395,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
           <div
             style={{
               display: "flex",
-              gap: 6,
+              gap: 10,
               flexWrap: "nowrap",
               alignItems: "center",
               overflowX: "auto",
@@ -6353,7 +6404,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
           >
             <button
               onClick={() => setViewMode("dashboard")}
-              style={compactHomeHighlightButtonStyle}
+              style={{ ...compactHomeHighlightButtonStyle, minHeight: 52 }}
             >
               Home
             </button>
@@ -6363,7 +6414,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
               style={
                 heatsCreated || raceClosed
                   ? compactDisabledButtonStyle
-                  : compactPrimaryButtonStyle
+                  : { ...compactPrimaryButtonStyle, minHeight: 52 }
               }
               title={
                 heatsCreated
@@ -6376,12 +6427,12 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
             <button
               onClick={startManualResultsMode}
               disabled={raceClosed}
-              style={raceClosed ? compactDisabledButtonStyle : compactPrimaryButtonStyle}
+              style={raceClosed ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 52 }}
               title="Resultatliste direkt manuell aus Teilnehmern erstellen"
             >
               Resultate manuell erstellen
             </button>
-            <button onClick={exportHeatsStartPdf} style={compactHomeButtonStyle}>
+            <button onClick={exportHeatsStartPdf} style={{ ...compactHomeButtonStyle, minHeight: 52 }}>
               Motos PDF
             </button>
             <button
@@ -6390,7 +6441,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
               style={
                 !heatsCreated || finalsCreated || raceClosed
                   ? compactDisabledButtonStyle
-                  : compactPrimaryButtonStyle
+                  : { ...compactPrimaryButtonStyle, minHeight: 52 }
               }
               title={
                 !heatsCreated
@@ -6402,47 +6453,72 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
             >
               Finals erstellen
             </button>
-            <button onClick={exportFinalsStartPdf} style={compactHomeButtonStyle}>
+            <button onClick={exportFinalsStartPdf} style={{ ...compactHomeButtonStyle, minHeight: 52 }}>
               Finals PDF
             </button>
             <button
               onClick={toggleRaceClosed}
-              style={raceClosed ? compactDangerButtonStyle : compactHomeButtonStyle}
+              style={raceClosed ? { ...actionWarningButtonStyle, minHeight: 52 } : { ...actionSaveButtonStyle, minHeight: 52 }}
             >
               {raceClosed ? "Race wieder öffnen" : "Race abschliessen"}
             </button>
-            <button onClick={exportFinalsPdf} style={compactPrimaryButtonStyle}>
+            <button onClick={exportFinalsPdf} style={{ ...compactPrimaryButtonStyle, minHeight: 52 }}>
               Resultate PDF
             </button>
-            <button onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>
+            <button onClick={saveAndExportFullBackup} style={{ ...actionSaveButtonStyle, minHeight: 52 }}>
               Speichern
             </button>
             <button
               onClick={resetHeats}
               disabled={raceClosed}
-              style={raceClosed ? compactDisabledButtonStyle : compactDangerButtonStyle}
+              style={raceClosed ? compactDisabledButtonStyle : { ...actionDangerButtonStyle, minHeight: 52 }}
             >
               Reset
             </button>
           </div>
         </div>
 
-        <div style={{ ...basePanelStyle, marginBottom: 20 }}>
+        <div style={getRaceStatusPanelStyle(raceClosed, heatsCreated, finalsCreated)}>
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              gap: 12,
-              marginBottom: 14,
+              gap: 14,
+              marginBottom: 16,
+              flexWrap: "wrap",
             }}
           >
-            <h2 style={{ margin: 0, color: colors.title }}>
-              Renninformationen – {selectedRace}
-            </h2>
-            <span style={getStatusBadgeStyle(getRaceStatus(selectedRace))}>
+            <div>
+              <h2 style={{ margin: 0, color: colors.title, fontSize: 24 }}>
+                Rennstatus – {selectedRace}
+              </h2>
+              <div style={{ marginTop: 5, color: colors.muted, fontSize: 14, fontWeight: 850 }}>
+                Teilnehmer: {riders.length} · Motos: {heatsCreated ? "erstellt" : "offen"} · Finals: {finalsCreated ? "erstellt" : "offen"}
+              </div>
+            </div>
+            <span style={{ ...getStatusBadgeStyle(getRaceStatus(selectedRace)), fontSize: 15, padding: "9px 14px" }}>
               Status: {getRaceStatus(selectedRace)}
             </span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
+            <div style={raceStatusStepStyle(true, riders.length > 0)}>
+              <span>1 · Teilnehmer</span>
+              <span style={{ fontSize: 12, fontWeight: 850 }}>{riders.length} erfasst</span>
+            </div>
+            <div style={raceStatusStepStyle(!heatsCreated && !raceClosed, heatsCreated)}>
+              <span>2 · Motos</span>
+              <span style={{ fontSize: 12, fontWeight: 850 }}>{heatsCreated ? "erstellt" : "noch offen"}</span>
+            </div>
+            <div style={raceStatusStepStyle(heatsCreated && !finalsCreated && !raceClosed, finalsCreated)}>
+              <span>3 · Finals</span>
+              <span style={{ fontSize: 12, fontWeight: 850 }}>{finalsCreated ? "erstellt" : "noch offen"}</span>
+            </div>
+            <div style={raceStatusStepStyle(finalsCreated && !raceClosed, raceClosed)}>
+              <span>4 · Abschluss</span>
+              <span style={{ fontSize: 12, fontWeight: 850 }}>{raceClosed ? "gesperrt" : "offen"}</span>
+            </div>
           </div>
 
           {(!homeEventSeries.trim() || !eventLocation.trim() || !eventDate.trim()) && (
@@ -6498,16 +6574,16 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
             Notfall / Reparatur
           </summary>
           <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <button type="button" onClick={startManualResultsMode} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : compactPrimaryButtonStyle}>
+            <button type="button" onClick={startManualResultsMode} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 52 }}>
               Resultate manuell erstellen
             </button>
-            <button type="button" onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>
+            <button type="button" onClick={saveAndExportFullBackup} style={actionSaveButtonStyle}>
               Backup / Speichern
             </button>
             <button type="button" onClick={() => { const event = getCurrentEvent(); if (event) exportManagedEventBackup(event); }} style={compactHomeButtonStyle}>
               Dieses Rennen exportieren
             </button>
-            <button type="button" onClick={resetHeats} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : compactDangerButtonStyle}>
+            <button type="button" onClick={resetHeats} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : actionDangerButtonStyle}>
               Race zurücksetzen
             </button>
             <span style={{ color: colors.muted, fontWeight: 800, fontSize: 13 }}>Seltene Notfallaktionen sind hier gebündelt, damit das Rennblatt übersichtlich bleibt.</span>
