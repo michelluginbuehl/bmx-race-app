@@ -1429,20 +1429,50 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     await db.table("appData").put({ key: storageKey, value });
   };
 
+  const unwrapStoredAppValue = (value: any): any => {
+    let current = value;
+
+    for (let index = 0; index < 8; index += 1) {
+      if (typeof current === "string") {
+        try {
+          const parsed = JSON.parse(current);
+          current = parsed;
+          continue;
+        } catch {
+          return current;
+        }
+      }
+
+      if (
+        current &&
+        typeof current === "object" &&
+        "data" in current &&
+        ("schemaVersion" in current || "savedAt" in current)
+      ) {
+        current = current.data;
+        continue;
+      }
+
+      return current;
+    }
+
+    return current;
+  };
+
   const loadAppData = async <T,>(key: string, fallback: T): Promise<T> => {
     const storageKey = scopedKey(key);
     const saved = await db.table("appData").get(storageKey);
-    if (saved && Object.prototype.hasOwnProperty.call(saved, "value"))
-      return saved.value as T;
+
+    if (saved && Object.prototype.hasOwnProperty.call(saved, "value")) {
+      const unwrapped = unwrapStoredAppValue(saved.value);
+      return (unwrapped === undefined || unwrapped === null ? fallback : unwrapped) as T;
+    }
 
     const localValue = appStorage.getItem(storageKey);
     if (localValue === null) return fallback;
 
-    try {
-      return JSON.parse(localValue) as T;
-    } catch {
-      return localValue as T;
-    }
+    const unwrapped = unwrapStoredAppValue(localValue);
+    return (unwrapped === undefined || unwrapped === null ? fallback : unwrapped) as T;
   };
 
   const saveBoth = async (key: string, value: any) => {
@@ -1475,7 +1505,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   useEffect(() => {
     try {
       const saved = appStorage.getItem(STORAGE_KEYS.duplicateOkKeys);
-      if (saved) setDuplicateOkKeys(JSON.parse(saved));
+      if (!saved) {
+        setDuplicateOkKeys([]);
+        return;
+      }
+
+      const parsed = unwrapStoredAppValue(saved);
+      setDuplicateOkKeys(Array.isArray(parsed) ? parsed : []);
     } catch {
       setDuplicateOkKeys([]);
     }
@@ -1555,16 +1591,26 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       setHomeEventSeries(savedHomeEventSeries || eventForLoad?.name || "");
       setSeriesRaceCount(normalizedRaceCount);
       setOverallCountingRaces(normalizedCountingRaces);
-      setEventLogo(savedGlobalEventLogo || "");
+      setEventLogo(typeof savedGlobalEventLogo === "string" ? savedGlobalEventLogo : "");
       setBackupHistory(Array.isArray(savedBackupHistory) ? savedBackupHistory : []);
-      setLastSaveAt(savedLastSaveAt || "");
-      setChangeLog(savedChangeLog || []);
+      setLastSaveAt(typeof savedLastSaveAt === "string" ? savedLastSaveAt : "");
+      setChangeLog(Array.isArray(savedChangeLog) ? savedChangeLog : []);
       setOverallLocked(!!savedOverallLocked);
-      setOverallCreatedAt(savedOverallCreatedAt || "");
-      setOverallManualOrder(savedOverallOrder || {});
-      setGeneratedOverallByCategory(savedGeneratedOverall || {});
+      setOverallCreatedAt(typeof savedOverallCreatedAt === "string" ? savedOverallCreatedAt : "");
+      setOverallManualOrder(
+        savedOverallOrder && typeof savedOverallOrder === "object" && !Array.isArray(savedOverallOrder)
+          ? savedOverallOrder
+          : {},
+      );
+      setGeneratedOverallByCategory(
+        savedGeneratedOverall && typeof savedGeneratedOverall === "object" && !Array.isArray(savedGeneratedOverall)
+          ? savedGeneratedOverall
+          : {},
+      );
       setParticipantEventYear(
-        savedParticipantEventYear || String(new Date().getFullYear()),
+        typeof savedParticipantEventYear === "string" || typeof savedParticipantEventYear === "number"
+          ? String(savedParticipantEventYear)
+          : String(new Date().getFullYear()),
       );
       setInitialLoaded(true);
     };
