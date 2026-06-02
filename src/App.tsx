@@ -70,7 +70,7 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
-const APP_VERSION = "v1.12.7";
+const APP_VERSION = "v1.12.8";
 const APP_NAME = "BMX Race Manager";
 const HEADER_BANNER_IMAGE = headerBannerImage;
 const APP_CHANGE_NOTE = "Optische iPad-Bedienung verbessert: grössere Buttons, mehr Abstand, klare Aktionsfarben und sichtbarer Rennstatus";
@@ -6430,7 +6430,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
               style={raceClosed ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 52 }}
               title="Resultatliste direkt manuell aus Teilnehmern erstellen"
             >
-              Resultate manuell erstellen
+              Results manuell
             </button>
             <button onClick={exportHeatsStartPdf} style={{ ...compactHomeButtonStyle, minHeight: 52 }}>
               Motos PDF
@@ -6464,9 +6464,6 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
             </button>
             <button onClick={exportFinalsPdf} style={{ ...compactPrimaryButtonStyle, minHeight: 52 }}>
               Resultate PDF
-            </button>
-            <button onClick={saveAndExportFullBackup} style={{ ...actionSaveButtonStyle, minHeight: 52 }}>
-              Speichern
             </button>
             <button
               onClick={resetHeats}
@@ -6575,7 +6572,7 @@ Hinweis: Dieses Backup stammt aus einer älteren Datenstruktur (v${backupSchemaV
           </summary>
           <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <button type="button" onClick={startManualResultsMode} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 52 }}>
-              Resultate manuell erstellen
+              Results manuell
             </button>
             <button type="button" onClick={saveAndExportFullBackup} style={actionSaveButtonStyle}>
               Backup / Speichern
