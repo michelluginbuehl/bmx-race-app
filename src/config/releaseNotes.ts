@@ -3,6 +3,7 @@ export type AppReleaseNote = {
   date: string;
   title: string;
   changes: string[];
+  items: string[];
 };
 
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
@@ -11,6 +12,13 @@ export const APP_RELEASE_NOTES: AppReleaseNote[] = [
     date: "2026-06-02",
     title: "Resultate, Finals und Race-Abschluss",
     changes: [
+      "Technische Grundlage für Resultateingabe vorbereitet.",
+      "Technische Grundlage für DNS, DNF und DSQ vorbereitet.",
+      "Technische Grundlage für Finalvorschau vorbereitet.",
+      "Technische Grundlage für Race-Abschluss mit Schreibschutz vorbereitet.",
+      "Kartenlayout für bessere Bedienung auf dem iPad vorbereitet.",
+    ],
+    items: [
       "Technische Grundlage für Resultateingabe vorbereitet.",
       "Technische Grundlage für DNS, DNF und DSQ vorbereitet.",
       "Technische Grundlage für Finalvorschau vorbereitet.",
@@ -28,12 +36,23 @@ export const APP_RELEASE_NOTES: AppReleaseNote[] = [
       "Saubere PDF-Dateinamen vorbereitet.",
       "App-Version und Release Notes ergänzt.",
     ],
+    items: [
+      "Backup- und Restore-Funktionen vorbereitet.",
+      "CSV-Import-Prüfung vorbereitet.",
+      "Saubere PDF-Dateinamen vorbereitet.",
+      "App-Version und Release Notes ergänzt.",
+    ],
   },
   {
     version: "1.0.0",
     date: "2026-06-02",
     title: "Grundversion",
     changes: [
+      "Grundfunktionen für BMX-Rennverwaltung.",
+      "Fahrer, Kategorien, Vorläufe und Finalstruktur.",
+      "PDF-Export vorbereitet.",
+    ],
+    items: [
       "Grundfunktionen für BMX-Rennverwaltung.",
       "Fahrer, Kategorien, Vorläufe und Finalstruktur.",
       "PDF-Export vorbereitet.",

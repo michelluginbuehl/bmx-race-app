@@ -1,6 +1,7 @@
 export const APP_NAME = "BMX Race Manager";
 export const APP_VERSION = "1.2.0";
-export const APP_CHANGE_NOTE = "Version 1.2.0: technische Vorbereitung für Backup, Restore, Release Notes und stabile Datenspeicherung.";
+export const APP_CHANGE_NOTE =
+  "Version 1.2.0: technische Vorbereitung für Backup, Restore, Release Notes und stabile Datenspeicherung.";
 export const DATA_SCHEMA_VERSION = 1;
 
 export const STORAGE_KEYS = {
@@ -8,6 +9,7 @@ export const STORAGE_KEYS = {
   activeEventId: "bmx-race-manager-active-event-id",
   appSettings: "bmx-race-manager-app-settings",
   backup: "bmx-race-manager-backup",
+  duplicateOkKeys: "bmx-race-manager-duplicate-ok-keys",
 };
 
 export const APP_CONFIG = {
