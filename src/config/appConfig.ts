@@ -1,6 +1,6 @@
-export const APP_VERSION = "v1.13.4";
+export const APP_VERSION = "v1.13.5";
 export const APP_NAME = "BMX Race Manager";
-export const APP_CHANGE_NOTE = "Stabiles Löschen von Rennen und Teilnehmerdaten";
+export const APP_CHANGE_NOTE = "Stabiles Rennen-Löschen und Papierkorb leeren";
 
 export const DATA_SCHEMA_VERSION = 5;
 export const BACKUP_VERSION = 2;

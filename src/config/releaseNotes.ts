@@ -8,10 +8,22 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.13.5",
+    title: "Stabiles Rennen-Löschen und Papierkorb leeren",
+    date: "2026-06-09",
+    current: true,
+    items: [
+      "Löschen von Rennen/Rennserien weiter stabilisiert: Die Oberfläche wird zuerst vom geöffneten Rennen entkoppelt, bevor lokale Daten gelöscht werden.",
+      "Beim Löschen des aktuell geöffneten Rennens wird die Event-ID geleert und zur Startseite gewechselt, damit kein Render mehr auf entfernte Race-Daten zugreift.",
+      "Bereinigung von Teilnehmer-, AppData- und localStorage-Daten erfolgt gemeinsam und robuster.",
+      "Im Papierkorb gibt es neu den Button Papierkorb leeren, um alle gelöschten Teilnehmer auf einmal endgültig zu entfernen.",
+      "Vor dem Leeren des Papierkorbs wird automatisch ein komplettes Sicherheitsbackup erstellt.",
+    ],
+  },
+  {
     version: "v1.13.4",
     title: "Stabiles Löschen von Rennen und Teilnehmerdaten",
     date: "2026-06-09",
-    current: true,
     items: [
       "Löschen von Rennen/Rennserien stabilisiert, damit nach dem ersten Klick nicht mehr auf bereits entfernte Daten zugegriffen wird.",
       "Beim Löschen des aktuell geöffneten Rennens wird der Rennstatus zuerst sicher zurückgesetzt und danach zur Startseite gewechselt.",
