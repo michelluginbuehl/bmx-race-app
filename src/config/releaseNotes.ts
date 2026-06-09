@@ -8,10 +8,33 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.13.3",
+    title: "Import/Export als komplettes App-Backup",
+    date: "2026-06-09",
+    current: true,
+    items: [
+      "Speichern und Backup exportieren immer die komplette App-Datei mit allen Rennen, Rennserien, Teilnehmern, Resultaten und Einstellungen.",
+      "Import/Export wird nur auf der Startseite angezeigt.",
+      "Auf Rennseiten gibt es wieder einen Speichern-Button mit derselben kompletten Backup-Export-Funktion.",
+      "Ein Import ersetzt die lokalen Daten auf dem Gerät vollständig, damit danach nur die importierten Daten sichtbar sind.",
+      "Einzelrennen-/Event-Export-Buttons wurden aus der Oberfläche entfernt, um unvollständige Import-Dateien zu vermeiden.",
+    ],
+  },
+  {
+    version: "v1.13.2",
+    title: "Alle Teilnehmer gesammelt löschen",
+    date: "2026-06-09",
+    items: [
+      "Teilnehmer-Hauptdatenbank erhält eine Funktion, um alle aktiven Teilnehmer gesammelt in den Papierkorb zu verschieben.",
+      "Vor dem Sammellöschen wird automatisch ein Sicherheitsbackup erstellt.",
+      "Die Löschung ist bewusst als Papierkorb-Aktion umgesetzt, damit Teilnehmer wiederhergestellt werden können.",
+      "Rennlogik, Resultate und Gesamtwertung werden nicht verändert.",
+    ],
+  },
+  {
     version: "v1.13.1",
     title: "Stabile Teilnehmerbearbeitung und Kategorie-Zusammenlegung",
     date: "2026-06-09",
-    current: true,
     items: [
       "Beim Bearbeiten von Teilnehmern wird automatisch nach oben zum Eingabefeld gescrollt.",
       "Race-Zuordnungen bleiben beim Bearbeiten erhalten.",
