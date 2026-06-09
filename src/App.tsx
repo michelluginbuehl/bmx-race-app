@@ -969,7 +969,8 @@ export default function App() {
         groups.set(key, {
           key,
           raw: rider,
-          masterId: rider.eventId === "master" ? rider.id : rider.masterId || rider.id,
+          masterId: rider.participantId || rider.masterId || rider.id,
+          participantId: rider.participantId || rider.masterId || rider.id,
           name: rider.name || "",
           plate: rider.plate || "",
           birthYear: rider.birthYear || rider.jahrgang || "",
@@ -982,7 +983,8 @@ export default function App() {
       const group = groups.get(key);
       if (rider.eventId === "master") {
         group.raw = rider;
-        group.masterId = rider.id;
+        group.masterId = rider.participantId || rider.masterId || rider.id;
+        group.participantId = rider.participantId || rider.masterId || rider.id;
         group.name = rider.name || group.name;
         group.plate = rider.plate || group.plate;
         group.birthYear = rider.birthYear || rider.jahrgang || group.birthYear;
@@ -1330,69 +1332,162 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     ) || null;
   };
 
-  const migrateRiderIdInStoredRows = (rows: any, oldId: string, newId: string, updatedRider: any) => {
-    if (!oldId || !newId || oldId === newId) return rows;
-    const patchRow = (row: any) => {
-      if (!row || typeof row !== "object") return row;
-      const rowId = String(row.riderId ?? row.id ?? "");
-      if (rowId !== oldId) return row;
+  const getParticipantStableId = (rider: any) => String(rider?.participantId || rider?.masterId || rider?.id || "").trim();
+
+  const getRiderSharedDataPatch = (rider: any) => {
+    const birthYear = getRiderBirthYear(rider) || "";
+    const gender = getRiderGenderCode(rider) || "";
+    const base = {
+      name: rider?.name || "",
+      plate: rider?.plate || "",
+      birthYear,
+      jahrgang: birthYear,
+      gender,
+      geschlecht: gender,
+      club: rider?.club || "",
+      cruiser: !!(rider?.cruiser || rider?.isCruiser),
+      isCruiser: !!(rider?.cruiser || rider?.isCruiser),
+    };
+    return {
+      ...base,
+      category: getDerivedCategory({ ...rider, ...base }),
+    };
+  };
+
+  const shouldPatchStoredRiderRow = (row: any, linkedIds: Set<string>, stableId: string) => {
+    if (!row || typeof row !== "object") return false;
+    const rowId = String(row.riderId ?? row.id ?? "");
+    const rowStableId = String(row.participantId || row.masterId || "");
+    return (!!rowId && linkedIds.has(rowId)) || (!!stableId && rowStableId === stableId);
+  };
+
+  const patchStoredRiderDataDeep = (value: any, linkedIds: Set<string>, stableId: string, updatedRider: any, idReplacement?: { oldId: string; newId: string }) => {
+    const patch = getRiderSharedDataPatch(updatedRider);
+    const visit = (node: any): any => {
+      if (Array.isArray(node)) return node.map(visit);
+      if (!node || typeof node !== "object") return node;
+
+      const patchedChildren: any = {};
+      Object.keys(node).forEach((key) => {
+        patchedChildren[key] = visit(node[key]);
+      });
+
+      if (!shouldPatchStoredRiderRow(node, linkedIds, stableId)) return patchedChildren;
+
+      const next: any = {
+        ...patchedChildren,
+        ...patch,
+        participantId: stableId || patchedChildren.participantId,
+        masterId: stableId || patchedChildren.masterId,
+      };
+      if (idReplacement?.oldId && idReplacement?.newId) {
+        if (String(next.id || "") === idReplacement.oldId) next.id = idReplacement.newId;
+        if (String(next.riderId || "") === idReplacement.oldId) next.riderId = idReplacement.newId;
+      }
+      return next;
+    };
+    return visit(value);
+  };
+
+  const saveEventRaceValue = async (eventId: string, race: RaceName, suffix: string, value: any) => {
+    const baseKey = `bmx_${race.toLowerCase().replace(/\s+/g, "_")}_${suffix}`;
+    const storageKey = scopedKeyForEvent(eventId, baseKey);
+    appStorage.setItem(storageKey, encodeStorageValue(value));
+    await db.table("appData").put({ key: storageKey, value });
+  };
+
+  const syncRiderSharedDataToAllReferences = async (original: any, edited: any) => {
+    const stableId = getParticipantStableId(original) || getParticipantStableId(edited);
+    if (!stableId) return;
+
+    const allRows = (await db.table("riders").toArray()).map(normalizeRider);
+    const linkedRowsBefore = allRows.filter((row: any) => {
+      const rowStable = getParticipantStableId(row);
+      return rowStable === stableId || String(row.id || "") === String(original?.id || "") || String(row.id || "") === String(edited?.id || "");
+    });
+    const linkedIds = new Set<string>(linkedRowsBefore.map((row: any) => String(row.id || "")).filter(Boolean));
+    if (original?.id) linkedIds.add(String(original.id));
+    if (edited?.id) linkedIds.add(String(edited.id));
+
+    const patch = getRiderSharedDataPatch(edited);
+    const editedId = String(edited?.id || "");
+    const originalId = String(original?.id || "");
+    const assignmentPatch = originalId === editedId ? getRaceAssignmentPatch(edited) : getRaceAssignmentPatch(original);
+    const updatedRows = linkedRowsBefore.map((row: any) => {
+      const isEditedRow = editedId && String(row.id || "") === editedId;
       return {
         ...row,
-        id: row.id !== undefined ? newId : row.id,
-        riderId: row.riderId !== undefined ? newId : row.riderId,
-        name: updatedRider?.name ?? row.name,
-        plate: updatedRider?.plate ?? row.plate,
-        club: updatedRider?.club ?? row.club,
-        birthYear: updatedRider?.birthYear ?? row.birthYear,
-        jahrgang: updatedRider?.jahrgang ?? row.jahrgang,
-        gender: updatedRider?.gender ?? row.gender,
-        geschlecht: updatedRider?.geschlecht ?? row.geschlecht,
+        ...patch,
+        ...(isEditedRow ? assignmentPatch : {}),
+        participantId: stableId,
+        masterId: stableId,
+        eventId: row.eventId || (String(row.id || "") === editedId ? (edited.eventId || original.eventId || currentEventId || "legacy") : "master"),
       };
-    };
-    if (Array.isArray(rows)) return rows.map(patchRow);
-    if (rows && typeof rows === "object") {
-      let changed = false;
-      const next: any = {};
-      Object.keys(rows).forEach((key) => {
-        const value = rows[key];
-        const nextValue = Array.isArray(value) ? value.map(patchRow) : value;
-        if (nextValue !== value) changed = true;
-        next[key] = nextValue;
-      });
-      return changed ? next : rows;
+    });
+    if (updatedRows.length) await db.table("riders").bulkPut(updatedRows);
+
+    const idReplacement = originalId && editedId && originalId !== editedId ? { oldId: originalId, newId: editedId } : undefined;
+    const eventsToPatch = getRawManagedEvents();
+    const allEvents = eventsToPatch.length ? eventsToPatch : [{ id: currentEventId || "legacy", type: "series" } as any];
+
+    for (const event of allEvents) {
+      for (const race of RACES) {
+        for (const suffix of ["heats", "results", "finals", "final_results"] as const) {
+          const storageKey = scopedKeyForEvent(String(event.id || "legacy"), `bmx_${race.toLowerCase().replace(/\s+/g, "_")}_${suffix}`);
+          const raw = appStorage.getItem(storageKey);
+          if (raw === null) continue;
+          try {
+            const parsed = JSON.parse(raw || "{}");
+            const patched = patchStoredRiderDataDeep(parsed, linkedIds, stableId, edited, idReplacement);
+            await saveEventRaceValue(String(event.id || "legacy"), race, suffix, patched);
+            if (String(event.id || "legacy") === String(currentEventId || "legacy") && race === selectedRace) {
+              if (suffix === "heats") setHeats(patched);
+              if (suffix === "results") setResults(patched);
+              if (suffix === "finals") setFinals(patched);
+              if (suffix === "final_results") setFinalResults(patched);
+            }
+          } catch {
+            // Defekte alte Storage-Einträge beim Synchronisieren überspringen.
+          }
+        }
+      }
+
+      const overallKey = scopedKeyForEvent(String(event.id || "legacy"), "bmx_generated_overall");
+      const rawOverall = appStorage.getItem(overallKey);
+      if (rawOverall !== null) {
+        try {
+          const parsedOverall = JSON.parse(rawOverall || "{}");
+          const patchedOverall = patchStoredRiderDataDeep(parsedOverall, linkedIds, stableId, edited, idReplacement);
+          appStorage.setItem(overallKey, encodeStorageValue(patchedOverall));
+          await db.table("appData").put({ key: overallKey, value: patchedOverall });
+          if (String(event.id || "legacy") === String(currentEventId || "legacy")) setGeneratedOverallByCategory(patchedOverall);
+        } catch {
+          // Defekte Gesamtwertungsdaten überspringen.
+        }
+      }
     }
-    return rows;
   };
 
   const preserveEditedRiderLinks = async (original: any) => {
     if (!original?.id) return "";
     const originalId = String(original.id);
     const originalIdentity = getRiderIdentityPatch(original);
-    const assignmentPatch = getRaceAssignmentPatch(original);
     const allAfter = (await db.table("riders").toArray()).map(normalizeRider).filter((rider: any) => !rider.deletedAt);
     const edited = findEditedRiderAfterSave(allAfter, original);
     if (!edited?.id) return originalId;
 
     const editedId = String(edited.id);
+    const stableId = String(originalIdentity.participantId || originalIdentity.masterId || originalId);
     await db.table("riders").update(editedId, {
-      ...assignmentPatch,
-      participantId: originalIdentity.participantId,
-      masterId: originalIdentity.masterId,
+      participantId: stableId,
+      masterId: stableId,
       eventId: edited.eventId || original.eventId || currentEventId || "legacy",
     });
 
-    if (editedId !== originalId) {
-      const nextHeats = migrateRiderIdInStoredRows(heats, originalId, editedId, edited);
-      const nextResults = migrateRiderIdInStoredRows(results, originalId, editedId, edited);
-      const nextFinals = migrateRiderIdInStoredRows(finals, originalId, editedId, edited);
-      const nextFinalResults = migrateRiderIdInStoredRows(finalResults, originalId, editedId, edited);
-      setHeats(nextHeats);
-      setResults(nextResults);
-      setFinals(nextFinals);
-      setFinalResults(nextFinalResults);
-      addChangeLog("Teilnehmer-ID bei Bearbeitung stabilisiert");
-    }
-    return editedId;
+    await syncRiderSharedDataToAllReferences(original, { ...edited, participantId: stableId, masterId: stableId });
+    if (editedId !== originalId) addChangeLog("Teilnehmer-ID bei Bearbeitung stabilisiert");
+    addChangeLog("Teilnehmerdaten überall synchronisiert");
+    return editedId || originalId;
   };
 
   const handleRiderFormChange = async () => {
@@ -1645,7 +1740,8 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
           whiteSpace: "nowrap",
         }}
       >
-        {r.name}
+        <div>{r.name}</div>
+        <div style={{ color: colors.muted, fontSize: 11, fontFamily: "monospace" }}>ID: {getParticipantStableId(r).slice(0, 8) || "-"}</div>
       </div>
       <div>{getRiderMetaLabel(r)}</div>
       <div
@@ -1724,14 +1820,16 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   }, []);
 
   useEffect(() => {
-    if (!editingRider || viewMode !== "participants") return;
+    if (!editingRider) return;
+    const shouldScrollToForm = viewMode === "participants" || appShellView === "masterParticipants";
+    if (!shouldScrollToForm) return;
     window.setTimeout(() => {
       participantFormRef.current?.scrollIntoView({
         behavior: "auto",
         block: "start",
       });
     }, 60);
-  }, [editingRider?.id, viewMode]);
+  }, [editingRider?.id, viewMode, appShellView]);
 
   useEffect(() => {
     const existing = getRawManagedEvents();
@@ -5210,7 +5308,12 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
               ⚠ Mögliche Dubletten erkannt: {masterDuplicateKeys.size} Einträge in {masterDuplicateInfo.groupCount} Gruppe(n). Ähnliche Teilnehmer sind jeweils gleichfarbig markiert. Mit „Teilnehmer OK“ bestätigte Einträge werden nicht mehr als Dublette angezeigt.
             </div>
           )}
-          <div style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
+          <div ref={participantFormRef} style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
+            {editingRider && (
+              <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 10, background: colors.greenBg, border: `1px solid ${colors.greenBorder}`, color: colors.title, fontWeight: 800 }}>
+                Bearbeitung aktiv · Teilnehmer-ID: {getParticipantStableId(editingRider) || "wird beim Speichern erstellt"}
+              </div>
+            )}
             <RiderForm
               onChange={handleRiderFormChange}
               editingRider={editingRider}
@@ -5227,6 +5330,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                 <thead>
                   <tr style={{ background: "#eef3f8" }}>
+                    <th style={tableHeaderStyle}>Teilnehmer-ID</th>
                     <th style={tableHeaderStyle}>Name</th>
                     <th style={tableHeaderStyle}>Plate</th>
                     <th style={tableHeaderStyle}>Jg | B/G</th>
@@ -5248,6 +5352,9 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
                       title="Teilnehmerdetails anzeigen"
                       style={{ borderBottom: `1px solid ${duplicateStyle?.border || colors.cardBorder}`, cursor: "pointer", background: rowBackground }}
                     >
+                      <td style={{ ...tableCellStyle, fontFamily: "monospace", fontSize: 12, color: colors.muted }} title={String(participant.participantId || participant.masterId || participant.raw?.id || "")}>
+                        {String(participant.participantId || participant.masterId || participant.raw?.id || "-").slice(0, 8)}
+                      </td>
                       <td style={tableCellStyle}>
                         <strong>{participant.name}</strong>{participant.cruiser ? " · Cruiser" : ""}
                         {duplicateStyle && (
