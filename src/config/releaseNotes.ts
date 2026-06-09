@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.13.6",
+    title: "Zentrale Teilnehmer-ID und Daten-Synchronisierung",
+    date: "2026-06-09",
+    current: true,
+    items: [
+      "Teilnehmerdaten werden beim Bearbeiten über die stabile Teilnehmer-ID synchronisiert.",
+      "Änderungen an Name, Startnummer, Jahrgang, Geschlecht, Verein oder Cruiser-Status werden in Hauptdatenbank, Rennen, Motos, Resultaten, Finals und Gesamtwertung übernommen.",
+      "Beim Bearbeiten auf der Teilnehmer-Hauptseite und auf der Renn-Teilnehmerseite wird automatisch zum Eingabeformular gescrollt.",
+      "Die stabile Teilnehmer-ID wird in der Teilnehmer-Hauptdatenbank und in der Renn-Teilnehmerliste sichtbar angezeigt.",
+      "Interne Race-Zuordnungen und Resultat-Verknüpfungen bleiben erhalten, damit bestehende Ranglisten stabil bleiben.",
+    ],
+  },
+  {
     version: "v1.13.5",
     title: "Stabiles Rennen-Löschen und Papierkorb leeren",
     date: "2026-06-09",
-    current: true,
+    
     items: [
       "Löschen von Rennen/Rennserien weiter stabilisiert: Die Oberfläche wird zuerst vom geöffneten Rennen entkoppelt, bevor lokale Daten gelöscht werden.",
       "Beim Löschen des aktuell geöffneten Rennens wird die Event-ID geleert und zur Startseite gewechselt, damit kein Render mehr auf entfernte Race-Daten zugreift.",
