@@ -1119,6 +1119,34 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     await loadMasterParticipants();
   };
 
+  const deleteAllMasterParticipants = async () => {
+    const all = (await db.table("riders").toArray()).map(normalizeRider);
+    const activeIds = all.filter((rider: any) => !rider.deletedAt).map((rider: any) => rider.id).filter(Boolean);
+    if (activeIds.length === 0) {
+      window.alert("Es sind keine aktiven Teilnehmer zum Löschen vorhanden.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Alle aktiven Teilnehmer (${activeIds.length}) in den Papierkorb verschieben?\n\nVorher wird automatisch ein komplettes Sicherheitsbackup erstellt. Resultate und Gesamtwertung werden nicht gelöscht.`,
+      )
+    ) return;
+
+    await exportBackup("Sicherheitsbackup vor Alle-Teilnehmer-Papierkorb");
+    const deletedAt = new Date().toISOString();
+    for (const id of activeIds) {
+      await db.table("riders").update(id, { deletedAt });
+    }
+    setSelectedMasterParticipant(null);
+    setEditingRider(null);
+    setLastEditedMasterParticipantId("");
+    await loadMasterParticipants();
+    await loadAllRiders();
+    await loadRaceRiders();
+    setBackupMessage(`Alle aktiven Teilnehmer wurden in den Papierkorb verschoben: ${activeIds.length}`);
+    addChangeLog(`Alle aktiven Teilnehmer in Papierkorb verschoben (${activeIds.length})`);
+  };
+
   const getMasterParticipantKey = (rider: any) => [
     String(rider.name || "").trim().toLowerCase().replace(/\s+/g, " "),
     rider.birthYear || rider.jahrgang || "",
@@ -4553,7 +4581,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         appStorage.setItem(row.key, encodeStorageValue(row.value));
       }
 
-      alert("Backup erfolgreich importiert. Nach dem Neuladen bitte einmal 'Daten prüfen' ausführen. Die App wird jetzt neu geladen.");
+      alert("Backup erfolgreich importiert. Die bisherigen lokalen Daten auf diesem Gerät wurden vollständig ersetzt. Die App wird jetzt neu geladen.");
       window.location.reload();
     } catch (error: any) {
       alert(
@@ -4737,7 +4765,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       flexWrap: "wrap",
     }}>
       <span>{backupAgeMinutes === null ? "⚠ Noch kein Backup erstellt." : `⚠ Letztes Backup vor ${backupAgeMinutes} Minuten.`}</span>
-      <button type="button" onClick={() => exportBackup("Manuelles Backup über Warnbalken")} style={compactSaveButtonStyle}>Backup jetzt erstellen</button>
+      <button type="button" onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>Backup jetzt erstellen</button>
     </div>
   ) : null;
 
@@ -4814,7 +4842,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             <button onClick={saveAndExportFullBackup} style={{ ...compactSaveButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               Speichern
             </button>
-            <button onClick={() => exportBackup("Manuelles komplettes Backup")} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <button onClick={saveAndExportFullBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               Backup erstellen
             </button>
             <label style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
@@ -4828,7 +4856,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             </label>
           </div>
           <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-            Speichern und Backup umfassen immer die komplette Datei mit allen Rennen, Rennserien, Teilnehmern, Resultaten und Einstellungen.
+            Speichern und Backup exportieren immer die komplette App-Datei mit allen Rennen, Rennserien, Teilnehmern, Resultaten und Einstellungen. Beim Import werden die lokalen Daten auf diesem Gerät vollständig durch die Import-Datei ersetzt.
           </div>
           {backupMessage && (
             <div style={{ marginTop: 10, color: colors.muted }}>
@@ -4908,7 +4936,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                           </div>
                           <div style={{ fontSize: 11, color: colors.muted, fontWeight: 900 }}>Fortschritt: {progress.closed}/{progress.raceCount} abgeschlossen · Resultate in {progress.withResults} Race(s)</div>
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, alignItems: "stretch" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, alignItems: "stretch" }}>
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); renameManagedEvent(event); }}
@@ -4922,13 +4950,6 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                             style={{ ...smallGhostButtonStyle, width: "100%", minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, padding: "7px 8px", boxSizing: "border-box" }}
                           >
                             Archivieren
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); exportManagedEventBackup(event); }}
-                            style={{ ...smallGhostButtonStyle, width: "100%", minHeight: 36, display: "inline-flex", alignItems: "center", justifyContent: "center", textAlign: "center", fontSize: 12, padding: "7px 8px", boxSizing: "border-box" }}
-                          >
-                            Export
                           </button>
                           <button
                             type="button"
@@ -4970,7 +4991,6 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                           {event.name} · {event.year} · {event.type === "single" ? "Einzelrennen" : "Rennserie"} · Teilnehmer: {getManagedEventParticipantCount(event.id)}
                         </button>
                         <button type="button" onClick={() => toggleManagedEventArchive(event, false)} style={smallGhostButtonStyle}>Wieder anzeigen</button>
-                        <button type="button" onClick={() => exportManagedEventBackup(event)} style={smallGhostButtonStyle}>Exportieren</button>
                         <button type="button" onClick={() => deleteManagedEvent(event)} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>Löschen</button>
                       </div>
                     ))}
@@ -5046,7 +5066,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                 style={inputStyle}
               />
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
               {[
                 ["active", "Aktiv"],
                 ["trash", "Papierkorb"],
@@ -5061,6 +5081,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                   {label}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={deleteAllMasterParticipants}
+                style={{ ...compactHomeButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}
+              >
+                Alle Teilnehmer löschen
+              </button>
             </div>
           </div>
           {masterDuplicateKeys.size > 0 && masterParticipantFilter !== "trash" && (
@@ -6497,6 +6524,14 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
               Home
             </button>
             <button
+              type="button"
+              onClick={saveAndExportFullBackup}
+              style={{ ...actionSaveButtonStyle, minHeight: 52 }}
+              title="Speichert lokal und exportiert ein komplettes App-Backup"
+            >
+              Speichern
+            </button>
+            <button
               onClick={createHeats}
               disabled={heatsCreated || raceClosed}
               style={
@@ -6664,9 +6699,6 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
             </button>
             <button type="button" onClick={saveAndExportFullBackup} style={actionSaveButtonStyle}>
               Backup / Speichern
-            </button>
-            <button type="button" onClick={() => { const event = getCurrentEvent(); if (event) exportManagedEventBackup(event); }} style={compactHomeButtonStyle}>
-              Dieses Rennen exportieren
             </button>
             <button type="button" onClick={resetHeats} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : actionDangerButtonStyle}>
               Race zurücksetzen
