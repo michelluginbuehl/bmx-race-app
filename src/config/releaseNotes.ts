@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.13.4",
+    title: "Stabiles Löschen von Rennen und Teilnehmerdaten",
+    date: "2026-06-09",
+    current: true,
+    items: [
+      "Löschen von Rennen/Rennserien stabilisiert, damit nach dem ersten Klick nicht mehr auf bereits entfernte Daten zugegriffen wird.",
+      "Beim Löschen des aktuell geöffneten Rennens wird der Rennstatus zuerst sicher zurückgesetzt und danach zur Startseite gewechselt.",
+      "Alle Teilnehmer löschen entfernt Teilnehmer nun endgültig inklusive Papierkorb-Einträgen und zugehörigen Motos, Resultaten, Finals und Gesamtwertungsdaten.",
+      "Alte Teilnehmerdaten werden dadurch nicht mehr als bereits vorhanden erkannt, wenn später Teilnehmer importiert oder neu hinzugefügt werden.",
+      "Vor dem vollständigen Löschen wird weiterhin automatisch ein komplettes Sicherheitsbackup erstellt.",
+    ],
+  },
+  {
     version: "v1.13.3",
     title: "Import/Export als komplettes App-Backup",
     date: "2026-06-09",
-    current: true,
+    
     items: [
       "Speichern und Backup exportieren immer die komplette App-Datei mit allen Rennen, Rennserien, Teilnehmern, Resultaten und Einstellungen.",
       "Import/Export wird nur auf der Startseite angezeigt.",
