@@ -110,6 +110,7 @@ export default function App() {
     Record<string, string[]>
   >({});
   const [cruiserMergeTarget, setCruiserMergeTarget] = useState<string>("");
+  const [categoryMergeTargets, setCategoryMergeTargets] = useState<Record<string, string>>({});
   const [participantEventYear, setParticipantEventYear] = useState<string>(
     String(new Date().getFullYear()),
   );
@@ -289,6 +290,7 @@ export default function App() {
 
   const normalizeRider = (rider: any) => ({
     ...rider,
+    ...getRiderIdentityPatch(rider),
     birthYear: getRiderBirthYear(rider) || rider?.birthYear || "",
     gender: getRiderGenderCode(rider) || rider?.gender || "",
     category: getDerivedCategory(rider),
@@ -558,6 +560,7 @@ export default function App() {
     setGeneratedOverallByCategory({});
     setFinalManualOrder({});
     setCruiserMergeTarget("");
+    setCategoryMergeTargets({});
     setRaceClosed(false);
     setSelectedRiderInfo(null);
     setRaceNavigationOpen(false);
@@ -607,6 +610,7 @@ export default function App() {
       writeInitialEventValue(event.id, `${racePrefix}_final_results`, {});
       writeInitialEventValue(event.id, `${racePrefix}_final_manual_order`, {});
       writeInitialEventValue(event.id, `${racePrefix}_cruiser_merge_target`, "");
+      writeInitialEventValue(event.id, `${racePrefix}_category_merge_targets`, {});
       writeInitialEventValue(event.id, `${racePrefix}_race_closed`, false);
     });
   };
@@ -836,6 +840,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       ridersRaw.forEach((rider: any) => {
         const eventId = String(rider.eventId || "master");
         if (!rider.id) issues.push({ level: "error", title: "Teilnehmer ohne ID", detail: `${rider.name || "Unbekannt"} hat keine eindeutige ID.` });
+        if (!rider.participantId || !rider.masterId) issues.push({ level: "warning", title: "Teilnehmer ohne stabile Teilnehmer-ID", detail: `${rider.name || "Unbekannt"} wird mit einer stabilen Teilnehmer-ID ergänzt.`, repairable: true });
         if (!rider.name || !rider.plate) issues.push({ level: "warning", title: "Teilnehmer mit fehlenden Pflichtdaten", detail: `${rider.name || "Ohne Name"} / #${rider.plate || "-"}` });
         if (eventId !== "master" && eventId !== "legacy" && !eventIds.has(eventId)) {
           issues.push({ level: "warning", title: "Teilnehmer in unbekanntem Rennen", detail: `${rider.name || "Unbekannt"} verweist auf Event ${eventId}.`, repairable: true });
@@ -874,6 +879,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         }
       }
       const ridersRaw = await db.table("riders").toArray();
+      const identityUpdates = ridersRaw
+        .filter((rider: any) => !rider.participantId || !rider.masterId)
+        .map((rider: any) => ({ ...rider, ...getRiderIdentityPatch(rider) }));
+      if (identityUpdates.length) await db.table("riders").bulkPut(identityUpdates);
       const orphanedRiders = ridersRaw.filter((rider: any) => {
         const eventId = String(rider.eventId || "master");
         return eventId !== "master" && eventId !== "legacy" && !eventIds.has(eventId);
@@ -892,7 +901,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         await db.table("appData").bulkDelete(orphanedAppKeys);
         orphanedAppKeys.forEach((key: string) => appStorage.removeItem(key));
       }
-      setDataRepairMessage(`Reparatur abgeschlossen. Teilnehmer verschoben: ${orphanedRiders.length}, verwaiste Datensätze entfernt: ${orphanedAppKeys.length}.`);
+      setDataRepairMessage(`Reparatur abgeschlossen. Teilnehmer-IDs ergänzt: ${identityUpdates.length}, Teilnehmer verschoben: ${orphanedRiders.length}, verwaiste Datensätze entfernt: ${orphanedAppKeys.length}.`);
       await loadMasterParticipants();
       await loadAllRiders();
       await runDataIntegrityCheck();
@@ -980,6 +989,34 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   const normalizeEventIdForCount = (value: any) => String(value || "legacy");
 
   const getRiderCountId = (rider: any) => String(rider?.id || `${rider?.name || ""}-${rider?.plate || ""}-${rider?.birthYear || rider?.jahrgang || ""}-${rider?.gender || rider?.geschlecht || ""}`);
+  const getStableParticipantId = (rider: any) => {
+    const existing = String(rider?.participantId || rider?.masterId || rider?.id || "").trim();
+    return existing || crypto.randomUUID();
+  };
+
+  const getRiderIdentityPatch = (rider: any) => {
+    const stableId = getStableParticipantId(rider);
+    return {
+      participantId: String(rider?.participantId || stableId),
+      masterId: String(rider?.masterId || stableId),
+    };
+  };
+
+  const ensureCurrentEventRiderIdentities = async () => {
+    const all = await db.table("riders").toArray();
+    const current = all.filter((rider: any) => !rider.deletedAt).filter(belongsToCurrentEvent);
+    const updates = current
+      .filter((rider: any) => !rider.participantId || !rider.masterId)
+      .map((rider: any) => ({ ...rider, ...getRiderIdentityPatch(rider) }));
+    if (updates.length > 0) {
+      await db.table("riders").bulkPut(updates);
+    }
+    return updates.length;
+  };
+
+  const getRaceAssignmentPatch = (rider: any) =>
+    Object.fromEntries(RACES.map((race) => [raceKeyMap[race], !!rider?.[raceKeyMap[race]]])) as Record<string, boolean>;
+
 
   const getManagedEventParticipantCount = (eventId: string) => {
     const normalizedEventId = normalizeEventIdForCount(eventId);
@@ -1097,9 +1134,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   ].filter(Boolean).join(" ").toLowerCase();
 
   const getMasterParticipantSuggestions = () => {
-    const query = String(eventParticipantSearch || "").trim().toLowerCase();
-    const currentRiders = Array.isArray(allRiders) ? allRiders : [];
-    const existingKeys = new Set(currentRiders.map((rider: any) => getMasterParticipantKey(rider)));
+    const query = eventParticipantSearch.trim().toLowerCase();
+    const existingKeys = new Set(allRiders.map((rider: any) => getMasterParticipantKey(rider)));
     const groups = getMasterParticipantGroups().filter((participant: any) => !existingKeys.has(participant.key));
     if (!query) return groups;
     const parts = query.split(/\s+/).filter(Boolean);
@@ -1109,63 +1145,137 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     });
   };
 
-  const getSafeMasterParticipantSuggestions = () => {
-    try {
-      const suggestions = getMasterParticipantSuggestions();
-      return Array.isArray(suggestions) ? suggestions : [];
-    } catch (error: any) {
-      console.error("Teilnehmer-Vorschläge konnten nicht geladen werden:", error);
-      return [];
+  const addMasterParticipantToCurrentEvent = async (participant: any) => {
+    if (!currentEventId) {
+      window.alert("Bitte zuerst ein Rennen oder eine Rennserie öffnen.");
+      return;
     }
+    const current = (await db.table("riders").toArray()).map(normalizeRider).filter(belongsToCurrentEvent);
+    const key = getMasterParticipantKey(participant.raw || participant);
+    const source = participant.raw || participant;
+    const stableId = String(participant.masterId || source.participantId || source.masterId || source.id || crypto.randomUUID());
+    const alreadyExists = current.some((rider: any) => getMasterParticipantKey(rider) === key || String(rider.participantId || rider.masterId || "") === stableId);
+    if (alreadyExists) {
+      window.alert("Dieser Teilnehmer ist in diesem Rennen / dieser Rennserie bereits vorhanden.");
+      return;
+    }
+    const newId = crypto.randomUUID();
+    await db.table("riders").add({
+      id: newId,
+      participantId: stableId,
+      masterId: stableId,
+      name: source.name || participant.name || "",
+      plate: source.plate || participant.plate || "",
+      birthYear: Number(source.birthYear || source.jahrgang || participant.birthYear) || undefined,
+      jahrgang: Number(source.birthYear || source.jahrgang || participant.birthYear) || undefined,
+      gender: source.gender || source.geschlecht || participant.gender || "",
+      geschlecht: source.gender || source.geschlecht || participant.gender || "",
+      club: source.club || participant.club || "",
+      cruiser: !!(source.cruiser || source.isCruiser || participant.cruiser),
+      isCruiser: !!(source.cruiser || source.isCruiser || participant.cruiser),
+      eventId: currentEventId || "legacy",
+      ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false])),
+    });
+    await loadAllRiders();
+    await loadRaceRiders();
+    addChangeLog(`Teilnehmer aus Hauptdatenbank hinzugefügt: ${source.name || participant.name}`);
   };
 
-  const addMasterParticipantToCurrentEvent = async (participant: any) => {
-    try {
-      if (!currentEventId) {
-        window.alert("Bitte zuerst ein Rennen oder eine Rennserie öffnen.");
-        return;
-      }
+  const findEditedRiderAfterSave = (items: any[], original: any) => {
+    const originalId = String(original?.id || "");
+    const originalStableId = String(original?.participantId || original?.masterId || original?.id || "");
+    const byId = items.find((item: any) => originalId && String(item.id || "") === originalId);
+    if (byId) return byId;
+    const byStableId = items.find((item: any) => originalStableId && String(item.participantId || item.masterId || "") === originalStableId);
+    if (byStableId) return byStableId;
+    const originalPlate = String(original?.plate || "").trim();
+    const originalBirthYear = String(original?.birthYear || original?.jahrgang || "").trim();
+    const originalGender = String(original?.gender || original?.geschlecht || "").trim().toLowerCase();
+    return items.find((item: any) =>
+      String(item.plate || "").trim() === originalPlate &&
+      String(item.birthYear || item.jahrgang || "").trim() === originalBirthYear &&
+      String(item.gender || item.geschlecht || "").trim().toLowerCase() === originalGender
+    ) || null;
+  };
 
-      const source = participant?.raw || participant || {};
-      const current = (await db.table("riders").toArray())
-        .map(normalizeRider)
-        .filter((rider: any) => !rider.deletedAt)
-        .filter(belongsToCurrentEvent);
-      const key = getMasterParticipantKey(source);
-      const alreadyExists = current.some((rider: any) => getMasterParticipantKey(rider) === key);
-
-      if (alreadyExists) {
-        window.alert("Dieser Teilnehmer ist in diesem Rennen / dieser Rennserie bereits vorhanden.");
-        return;
-      }
-
-      const newId = typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `rider_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-      await db.table("riders").add({
-        id: newId,
-        masterId: participant?.masterId || source.masterId || source.id || "",
-        name: source.name || participant?.name || "",
-        plate: source.plate || participant?.plate || "",
-        birthYear: Number(source.birthYear || source.jahrgang || participant?.birthYear) || undefined,
-        jahrgang: Number(source.birthYear || source.jahrgang || participant?.birthYear) || undefined,
-        gender: source.gender || source.geschlecht || participant?.gender || "",
-        geschlecht: source.gender || source.geschlecht || participant?.gender || "",
-        club: source.club || participant?.club || "",
-        cruiser: !!(source.cruiser || source.isCruiser || participant?.cruiser),
-        isCruiser: !!(source.cruiser || source.isCruiser || participant?.cruiser),
-        eventId: currentEventId || "legacy",
-        ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false])),
+  const migrateRiderIdInStoredRows = (rows: any, oldId: string, newId: string, updatedRider: any) => {
+    if (!oldId || !newId || oldId === newId) return rows;
+    const patchRow = (row: any) => {
+      if (!row || typeof row !== "object") return row;
+      const rowId = String(row.riderId ?? row.id ?? "");
+      if (rowId !== oldId) return row;
+      return {
+        ...row,
+        id: row.id !== undefined ? newId : row.id,
+        riderId: row.riderId !== undefined ? newId : row.riderId,
+        name: updatedRider?.name ?? row.name,
+        plate: updatedRider?.plate ?? row.plate,
+        club: updatedRider?.club ?? row.club,
+        birthYear: updatedRider?.birthYear ?? row.birthYear,
+        jahrgang: updatedRider?.jahrgang ?? row.jahrgang,
+        gender: updatedRider?.gender ?? row.gender,
+        geschlecht: updatedRider?.geschlecht ?? row.geschlecht,
+      };
+    };
+    if (Array.isArray(rows)) return rows.map(patchRow);
+    if (rows && typeof rows === "object") {
+      let changed = false;
+      const next: any = {};
+      Object.keys(rows).forEach((key) => {
+        const value = rows[key];
+        const nextValue = Array.isArray(value) ? value.map(patchRow) : value;
+        if (nextValue !== value) changed = true;
+        next[key] = nextValue;
       });
+      return changed ? next : rows;
+    }
+    return rows;
+  };
 
-      await loadAllRiders();
-      await loadRaceRiders();
-      setSelectedMasterParticipantKeys((prev) => prev.filter((keyValue) => keyValue !== participant?.key));
-      addChangeLog(`Teilnehmer aus Hauptdatenbank hinzugefügt: ${source.name || participant?.name || "Unbekannt"}`);
-    } catch (error: any) {
-      console.error("Teilnehmer konnte nicht hinzugefügt werden:", error);
-      window.alert(`Teilnehmer konnte nicht hinzugefügt werden: ${error?.message || "Unbekannter Fehler"}`);
+  const preserveEditedRiderLinks = async (original: any) => {
+    if (!original?.id) return "";
+    const originalId = String(original.id);
+    const originalIdentity = getRiderIdentityPatch(original);
+    const assignmentPatch = getRaceAssignmentPatch(original);
+    const allAfter = (await db.table("riders").toArray()).map(normalizeRider).filter((rider: any) => !rider.deletedAt);
+    const edited = findEditedRiderAfterSave(allAfter, original);
+    if (!edited?.id) return originalId;
+
+    const editedId = String(edited.id);
+    await db.table("riders").update(editedId, {
+      ...assignmentPatch,
+      participantId: originalIdentity.participantId,
+      masterId: originalIdentity.masterId,
+      eventId: edited.eventId || original.eventId || currentEventId || "legacy",
+    });
+
+    if (editedId !== originalId) {
+      const nextHeats = migrateRiderIdInStoredRows(heats, originalId, editedId, edited);
+      const nextResults = migrateRiderIdInStoredRows(results, originalId, editedId, edited);
+      const nextFinals = migrateRiderIdInStoredRows(finals, originalId, editedId, edited);
+      const nextFinalResults = migrateRiderIdInStoredRows(finalResults, originalId, editedId, edited);
+      setHeats(nextHeats);
+      setResults(nextResults);
+      setFinals(nextFinals);
+      setFinalResults(nextFinalResults);
+      addChangeLog("Teilnehmer-ID bei Bearbeitung stabilisiert");
+    }
+    return editedId;
+  };
+
+  const handleRiderFormChange = async () => {
+    const original = editingRider ? { ...editingRider } : null;
+    const editedId = original ? await preserveEditedRiderLinks(original) : String(lastEditedMasterParticipantId || "");
+    setEditingRider(null);
+    await ensureCurrentEventRiderIdentities();
+    await loadMasterParticipants();
+    await loadAllRiders();
+    await loadRaceRiders();
+    if (editedId) {
+      setLastEditedMasterParticipantId(editedId);
+      window.setTimeout(() => {
+        (participantRowRefs.current[String(editedId)] || participantRowRefs.current[`master-${String(editedId)}`])?.scrollIntoView({ behavior: "auto", block: "center" });
+      }, 0);
     }
   };
 
@@ -1177,7 +1287,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   const addSelectedMasterParticipantsToCurrentEvent = async () => {
-    const suggestions = getSafeMasterParticipantSuggestions();
+    const suggestions = getMasterParticipantSuggestions();
     const selected = suggestions.filter((participant: any) => selectedMasterParticipantKeys.includes(participant.key));
     if (selected.length === 0) {
       window.alert("Bitte zuerst Teilnehmer auswählen.");
@@ -1429,50 +1539,20 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     await db.table("appData").put({ key: storageKey, value });
   };
 
-  const unwrapStoredAppValue = (value: any): any => {
-    let current = value;
-
-    for (let index = 0; index < 8; index += 1) {
-      if (typeof current === "string") {
-        try {
-          const parsed = JSON.parse(current);
-          current = parsed;
-          continue;
-        } catch {
-          return current;
-        }
-      }
-
-      if (
-        current &&
-        typeof current === "object" &&
-        "data" in current &&
-        ("schemaVersion" in current || "savedAt" in current)
-      ) {
-        current = current.data;
-        continue;
-      }
-
-      return current;
-    }
-
-    return current;
-  };
-
   const loadAppData = async <T,>(key: string, fallback: T): Promise<T> => {
     const storageKey = scopedKey(key);
     const saved = await db.table("appData").get(storageKey);
-
-    if (saved && Object.prototype.hasOwnProperty.call(saved, "value")) {
-      const unwrapped = unwrapStoredAppValue(saved.value);
-      return (unwrapped === undefined || unwrapped === null ? fallback : unwrapped) as T;
-    }
+    if (saved && Object.prototype.hasOwnProperty.call(saved, "value"))
+      return saved.value as T;
 
     const localValue = appStorage.getItem(storageKey);
     if (localValue === null) return fallback;
 
-    const unwrapped = unwrapStoredAppValue(localValue);
-    return (unwrapped === undefined || unwrapped === null ? fallback : unwrapped) as T;
+    try {
+      return JSON.parse(localValue) as T;
+    } catch {
+      return localValue as T;
+    }
   };
 
   const saveBoth = async (key: string, value: any) => {
@@ -1505,13 +1585,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   useEffect(() => {
     try {
       const saved = appStorage.getItem(STORAGE_KEYS.duplicateOkKeys);
-      if (!saved) {
-        setDuplicateOkKeys([]);
-        return;
-      }
-
-      const parsed = unwrapStoredAppValue(saved);
-      setDuplicateOkKeys(Array.isArray(parsed) ? parsed : []);
+      if (saved) setDuplicateOkKeys(JSON.parse(saved));
     } catch {
       setDuplicateOkKeys([]);
     }
@@ -1591,26 +1665,16 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       setHomeEventSeries(savedHomeEventSeries || eventForLoad?.name || "");
       setSeriesRaceCount(normalizedRaceCount);
       setOverallCountingRaces(normalizedCountingRaces);
-      setEventLogo(typeof savedGlobalEventLogo === "string" ? savedGlobalEventLogo : "");
+      setEventLogo(savedGlobalEventLogo || "");
       setBackupHistory(Array.isArray(savedBackupHistory) ? savedBackupHistory : []);
-      setLastSaveAt(typeof savedLastSaveAt === "string" ? savedLastSaveAt : "");
-      setChangeLog(Array.isArray(savedChangeLog) ? savedChangeLog : []);
+      setLastSaveAt(savedLastSaveAt || "");
+      setChangeLog(savedChangeLog || []);
       setOverallLocked(!!savedOverallLocked);
-      setOverallCreatedAt(typeof savedOverallCreatedAt === "string" ? savedOverallCreatedAt : "");
-      setOverallManualOrder(
-        savedOverallOrder && typeof savedOverallOrder === "object" && !Array.isArray(savedOverallOrder)
-          ? savedOverallOrder
-          : {},
-      );
-      setGeneratedOverallByCategory(
-        savedGeneratedOverall && typeof savedGeneratedOverall === "object" && !Array.isArray(savedGeneratedOverall)
-          ? savedGeneratedOverall
-          : {},
-      );
+      setOverallCreatedAt(savedOverallCreatedAt || "");
+      setOverallManualOrder(savedOverallOrder || {});
+      setGeneratedOverallByCategory(savedGeneratedOverall || {});
       setParticipantEventYear(
-        typeof savedParticipantEventYear === "string" || typeof savedParticipantEventYear === "number"
-          ? String(savedParticipantEventYear)
-          : String(new Date().getFullYear()),
+        savedParticipantEventYear || String(new Date().getFullYear()),
       );
       setInitialLoaded(true);
     };
@@ -1730,6 +1794,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     overallManualOrder,
     generatedOverallByCategory,
     cruiserMergeTarget,
+    categoryMergeTargets,
     participantEventYear,
     homeEventSeries,
     eventSeries,
@@ -1749,6 +1814,17 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     loadAllRiders();
     loadRaceRiders();
   }, [participantEventYear, initialLoaded]);
+
+  useEffect(() => {
+    if (!initialLoaded || !currentEventId) return;
+    ensureCurrentEventRiderIdentities().then((changed) => {
+      if (changed > 0) {
+        loadMasterParticipants();
+        loadAllRiders();
+        loadRaceRiders();
+      }
+    });
+  }, [initialLoaded, currentEventId]);
 
   useEffect(() => {
     if (!initialLoaded) return;
@@ -1789,6 +1865,10 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         getStorageKey("cruiser_merge_target"),
         "",
       );
+      const nextCategoryMergeTargets = await loadAppData<Record<string, string>>(
+        getStorageKey("category_merge_targets"),
+        {},
+      );
       const nextRaceClosed = await loadAppData<boolean>(
         getStorageKey("race_closed"),
         false,
@@ -1806,6 +1886,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       setFinalResults(nextFinalResults || {});
       setFinalManualOrder(nextFinalManualOrder || {});
       setCruiserMergeTarget(nextCruiserMergeTarget || "");
+      setCategoryMergeTargets(nextCategoryMergeTargets && typeof nextCategoryMergeTargets === "object" ? nextCategoryMergeTargets : {});
       setRaceClosed(!!nextRaceClosed);
       setSelectedRiderInfo(null);
       setLoadedRace(selectedRace);
@@ -1869,6 +1950,11 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     if (!canSaveRaceData) return;
     saveBoth(getStorageKey("cruiser_merge_target"), cruiserMergeTarget);
   }, [cruiserMergeTarget, selectedRace, canSaveRaceData]);
+
+  useEffect(() => {
+    if (!canSaveRaceData) return;
+    saveBoth(getStorageKey("category_merge_targets"), categoryMergeTargets);
+  }, [categoryMergeTargets, selectedRace, canSaveRaceData]);
 
   useEffect(() => {
     if (!canSaveRaceData) return;
@@ -1948,11 +2034,29 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     return originalRaceCategories().filter((cat) => !isCruiserCategory(cat));
   }, [riders]);
 
+  const getMergeableTargetsForCategory = (category: string) =>
+    originalRaceCategories().filter((cat) => cat !== category);
+
+  const getCategoryMergeTarget = (category: string) => {
+    const generalTarget = String(categoryMergeTargets[category] || "");
+    const legacyCruiserTarget = isCruiserCategory(category) ? String(cruiserMergeTarget || "") : "";
+    const target = generalTarget || legacyCruiserTarget;
+    return getMergeableTargetsForCategory(category).includes(target) ? target : "";
+  };
+
+  const setCategoryMergeTarget = (category: string, target: string) => {
+    setCategoryMergeTargets((prev) => {
+      const next = { ...prev };
+      if (target) next[category] = target;
+      else delete next[category];
+      return next;
+    });
+    if (isCruiserCategory(category)) setCruiserMergeTarget(target);
+  };
+
   const getEffectiveHeatCategory = (category: string) => {
-    if (!isCruiserCategory(category)) return category;
-    if (!cruiserMergeTarget) return category;
-    if (!mergeableCruiserTargets.includes(cruiserMergeTarget)) return category;
-    return cruiserMergeTarget;
+    const target = getCategoryMergeTarget(category);
+    return target || category;
   };
 
   const getEffectiveFinalCategory = (category: string) =>
@@ -2009,10 +2113,21 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   };
 
   useEffect(() => {
-    if (!cruiserMergeTarget) return;
-    if (!mergeableCruiserTargets.includes(cruiserMergeTarget))
-      setCruiserMergeTarget("");
-  }, [cruiserMergeTarget, mergeableCruiserTargets]);
+    const availableCategories = originalRaceCategories();
+    setCategoryMergeTargets((prev) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      (Object.entries(prev || {}) as [string, string][]).forEach(([category, target]) => {
+        if (availableCategories.includes(category) && target && availableCategories.includes(target) && target !== category) {
+          next[category] = target;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+    if (cruiserMergeTarget && !mergeableCruiserTargets.includes(cruiserMergeTarget)) setCruiserMergeTarget("");
+  }, [riders, cruiserMergeTarget, mergeableCruiserTargets]);
 
   const getDuplicatePlateKey = (category: string, plate: string) =>
     `${String(category || "Ohne Kategorie").trim()}|||${String(plate || "").trim()}`;
@@ -4955,17 +5070,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
           )}
           <div style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
             <RiderForm
-              onChange={async () => {
-                const editedId = String(editingRider?.id || lastEditedMasterParticipantId || "");
-                setEditingRider(null);
-                await loadMasterParticipants();
-                if (editedId) {
-                  setLastEditedMasterParticipantId(editedId);
-                  window.setTimeout(() => {
-                    participantRowRefs.current[`master-${editedId}`]?.scrollIntoView({ behavior: "auto", block: "center" });
-                  }, 0);
-                }
-              }}
+              onChange={handleRiderFormChange}
               editingRider={editingRider}
               onCancelEdit={() => { setEditingRider(null); setLastEditedMasterParticipantId(""); }}
               eventYear={String(new Date().getFullYear())}
@@ -5927,38 +6032,53 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         </div>
 
         <div ref={participantFormRef} style={{ ...basePanelStyle, marginBottom: 20 }}>
-          <h2 style={{ marginTop: 0, color: colors.title }}>Teilnehmer hinzufügen</h2>
-          <p style={{ color: colors.muted, marginTop: -4 }}>
-            Teilnehmer werden aus der Haupt-Teilnehmerdatenbank in dieses Rennen / diese Rennserie übernommen. Die Race-Häkchen setzt du danach unten in der Liste.
-          </p>
-          <div>
-            <label style={labelStyle}>Teilnehmer hinzufügen</label>
-            <input
-              value={eventParticipantSearch}
-              onChange={(e) => setEventParticipantSearch(e.target.value)}
-              placeholder="Name, Startnummer oder Verein eingeben ..."
-              style={inputStyle}
-            />
-            <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-                {getSafeMasterParticipantSuggestions().length} Teilnehmer angezeigt · {selectedMasterParticipantKeys.length} ausgewählt
-              </div>
-              <button
-                type="button"
-                onClick={addSelectedMasterParticipantsToCurrentEvent}
-                disabled={selectedMasterParticipantKeys.length === 0}
-                style={selectedMasterParticipantKeys.length === 0 ? disabledButtonStyle : compactPrimaryButtonStyle}
-              >
-                Ausgewählte hinzufügen
-              </button>
-            </div>
-            <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflowY: "auto", overflowX: "hidden", background: "#fff", maxHeight: 360 }}>
-              {getSafeMasterParticipantSuggestions().length === 0 ? (
-                <div style={{ padding: 10, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden.</div>
-              ) : (
-                getSafeMasterParticipantSuggestions().map((participant: any) => {
-                  const checked = selectedMasterParticipantKeys.includes(participant.key);
-                  return (
+          <h2 style={{ marginTop: 0, color: colors.title }}>{editingRider ? "Teilnehmer bearbeiten" : "Teilnehmer hinzufügen"}</h2>
+          {editingRider ? (
+            <>
+              <p style={{ color: colors.muted, marginTop: -4 }}>
+                Die bestehende Teilnehmer-ID, Race-Häkchen und Resultat-Verknüpfungen bleiben beim Speichern erhalten.
+              </p>
+              <RiderForm
+                onChange={handleRiderFormChange}
+                editingRider={editingRider}
+                onCancelEdit={() => { setEditingRider(null); setLastEditedMasterParticipantId(""); }}
+                eventYear={participantEventYear}
+                currentEventId={currentEventId || "legacy"}
+              />
+            </>
+          ) : (
+            <>
+              <p style={{ color: colors.muted, marginTop: -4 }}>
+                Teilnehmer werden aus der Haupt-Teilnehmerdatenbank in dieses Rennen / diese Rennserie übernommen. Die Race-Häkchen setzt du danach unten in der Liste.
+              </p>
+              <div>
+                <label style={labelStyle}>Teilnehmer hinzufügen</label>
+                <input
+                  value={eventParticipantSearch}
+                  onChange={(e) => setEventParticipantSearch(e.target.value)}
+                  placeholder="Name, Startnummer oder Verein eingeben ..."
+                  style={inputStyle}
+                />
+                <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+                    {getMasterParticipantSuggestions().length} Teilnehmer angezeigt · {selectedMasterParticipantKeys.length} ausgewählt
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addSelectedMasterParticipantsToCurrentEvent}
+                    disabled={selectedMasterParticipantKeys.length === 0}
+                    style={selectedMasterParticipantKeys.length === 0 ? disabledButtonStyle : compactPrimaryButtonStyle}
+                  >
+                    Ausgewählte hinzufügen
+                  </button>
+                </div>
+                <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflowY: "auto", overflowX: "hidden", background: "#fff", maxHeight: 360 }}>
+                  {getMasterParticipantSuggestions().length === 0 ? (
+                    <div style={{ padding: 10, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden.</div>
+                  ) : (
+                    getMasterParticipantSuggestions().map((participant: any) => {
+                      const checked = selectedMasterParticipantKeys.includes(participant.key);
+                      return (
                     <div
                       key={participant.key}
                       style={{
@@ -5989,10 +6109,12 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       <button type="button" onClick={() => addMasterParticipantToCurrentEvent(participant)} style={smallGhostButtonStyle}>hinzufügen</button>
                     </div>
                   );
-                })
-              )}
-            </div>
-          </div>
+                    })
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {manualResultsMode && (
@@ -6314,7 +6436,13 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       }}
                     >
                       <button
-                        onClick={() => setEditingRider(r)}
+                        onClick={() => {
+                          setLastEditedMasterParticipantId(String(r.id || ""));
+                          setEditingRider(r);
+                          window.setTimeout(() => {
+                            participantFormRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+                          }, 0);
+                        }}
                         style={editButtonStyle}
                       >
                         Bearbeiten
@@ -6642,47 +6770,44 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                     {cat} ({groupedRace[cat].length})
                   </h3>
 
-                  {isCruiserCategory(cat) &&
-                    mergeableCruiserTargets.length > 0 && (
-                      <label
+                  {getMergeableTargetsForCategory(cat).length > 0 && (
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontWeight: 700,
+                        color: colors.title,
+                      }}
+                    >
+                      Startet mit
+                      <select
+                        value={getCategoryMergeTarget(cat)}
+                        disabled={heatsCreated}
+                        onChange={(e) => setCategoryMergeTarget(cat, e.target.value)}
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          fontWeight: 700,
-                          color: colors.title,
+                          ...inputStyle,
+                          width: 240,
+                          opacity: heatsCreated ? 0.65 : 1,
                         }}
+                        title={
+                          heatsCreated
+                            ? "Für Änderungen zuerst Reset klicken."
+                            : undefined
+                        }
                       >
-                        Startet mit
-                        <select
-                          value={cruiserMergeTarget}
-                          disabled={heatsCreated}
-                          onChange={(e) =>
-                            setCruiserMergeTarget(e.target.value)
-                          }
-                          style={{
-                            ...inputStyle,
-                            width: 220,
-                            opacity: heatsCreated ? 0.65 : 1,
-                          }}
-                          title={
-                            heatsCreated
-                              ? "Für Änderungen zuerst Reset klicken."
-                              : undefined
-                          }
-                        >
-                          <option value="">Cruiser separat</option>
-                          {mergeableCruiserTargets.map((target) => (
-                            <option key={target} value={target}>
-                              {target}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
+                        <option value="">{cat} separat</option>
+                        {getMergeableTargetsForCategory(cat).map((target) => (
+                          <option key={target} value={target}>
+                            {target}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                 </div>
 
-                {isCruiserCategory(cat) && cruiserMergeTarget && (
+                {getCategoryMergeTarget(cat) && (
                   <div
                     style={{
                       marginBottom: 8,
@@ -6690,9 +6815,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
                       fontWeight: 700,
                     }}
                   >
-                    Cruiser fahren in den Motos und Finals zusammen mit{" "}
-                    {cruiserMergeTarget}. Rangliste und Gesamtwertung bleiben
-                    getrennt unter Cruiser.
+                    {cat} startet in den Motos und Finals zusammen mit {getCategoryMergeTarget(cat)}.
+                    Rangliste und Gesamtwertung bleiben getrennt unter {cat}.
                   </div>
                 )}
 
