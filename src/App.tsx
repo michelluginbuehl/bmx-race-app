@@ -706,15 +706,23 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       window.alert(`Rennen wurde aus der Startliste entfernt, aber beim Bereinigen der lokalen Daten ist ein Fehler aufgetreten: ${error?.message || "Unbekannter Fehler"}`);
     }
 
-    if (currentEventId === event.id) {
+    const deletedEventWasOpen = currentEventId === event.id;
+    if (deletedEventWasOpen) {
+      resetCurrentEventState();
+      setInitialLoaded(false);
       setCurrentEventId(nextEvents[0]?.id || "legacy");
       setAppShellView("events");
       setViewMode("dashboard");
     }
 
     await loadMasterParticipants();
-    await loadAllRiders();
-    await loadRaceRiders();
+    if (deletedEventWasOpen) {
+      setAllRiders([]);
+      setRiders([]);
+    } else {
+      await loadAllRiders();
+      await loadRaceRiders();
+    }
     setBackupMessage(`Gelöscht: ${eventName}`);
   };
 
@@ -1119,32 +1127,89 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     await loadMasterParticipants();
   };
 
+  const clearAllParticipantRowsAndRaceData = async () => {
+    const participantDataSuffixes = [
+      "_heats",
+      "_results",
+      "_finals",
+      "_final_results",
+      "_final_manual_order",
+      "_race_closed",
+      "_cruiser_merge_target",
+      "_category_merge_targets",
+    ];
+    const participantGlobalKeys = new Set([
+      "bmx_generated_overall",
+      "bmx_overall_manual_order",
+      "bmx_overall_locked",
+      "bmx_overall_created_at",
+      STORAGE_KEYS.duplicateOkKeys,
+    ]);
+    const shouldClearParticipantDataKey = (key: string) =>
+      participantGlobalKeys.has(key) ||
+      key.startsWith(`bmx_event_`) && (
+        participantDataSuffixes.some((suffix) => key.endsWith(suffix)) ||
+        key.includes("_race_1_") ||
+        key.includes("_race_2_") ||
+        key.includes("_race_3_") ||
+        key.includes("_race_4_") ||
+        key.includes("_race_5_") ||
+        key.includes("_race_6_") ||
+        key.includes("_race_7_") ||
+        key.includes("_race_8_") ||
+        key.includes("_race_9_") ||
+        key.includes("_race_10_")
+      );
+
+    await db.transaction("rw", db.table("riders"), db.table("appData"), async () => {
+      await db.table("riders").clear();
+      const allAppData = await db.table("appData").toArray();
+      const keysToDelete = allAppData
+        .map((row: any) => String(row.key || ""))
+        .filter(shouldClearParticipantDataKey);
+      if (keysToDelete.length > 0) await db.table("appData").bulkDelete(keysToDelete);
+    });
+
+    appStorage.keys().forEach((key) => {
+      if (shouldClearParticipantDataKey(key)) appStorage.removeItem(key);
+    });
+    appStorage.setItem(STORAGE_KEYS.duplicateOkKeys, JSON.stringify([]));
+    setDuplicateOkKeys([]);
+  };
+
   const deleteAllMasterParticipants = async () => {
     const all = (await db.table("riders").toArray()).map(normalizeRider);
-    const activeIds = all.filter((rider: any) => !rider.deletedAt).map((rider: any) => rider.id).filter(Boolean);
-    if (activeIds.length === 0) {
-      window.alert("Es sind keine aktiven Teilnehmer zum Löschen vorhanden.");
+    if (all.length === 0) {
+      window.alert("Es sind keine Teilnehmerdaten vorhanden.");
       return;
     }
     if (
       !window.confirm(
-        `Alle aktiven Teilnehmer (${activeIds.length}) in den Papierkorb verschieben?\n\nVorher wird automatisch ein komplettes Sicherheitsbackup erstellt. Resultate und Gesamtwertung werden nicht gelöscht.`,
+        `Alle Teilnehmer endgültig löschen?
+
+Es werden ${all.length} Teilnehmerdatensätze aus Hauptdatenbank, Rennen/Rennserien und Papierkorb gelöscht. Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten werden ebenfalls entfernt, damit beim späteren Import/Hinzufügen keine alten Teilnehmer mehr als vorhanden erkannt werden.
+
+Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       )
     ) return;
 
-    await exportBackup("Sicherheitsbackup vor Alle-Teilnehmer-Papierkorb");
-    const deletedAt = new Date().toISOString();
-    for (const id of activeIds) {
-      await db.table("riders").update(id, { deletedAt });
-    }
+    await exportBackup("Sicherheitsbackup vor vollständiger Teilnehmer-Löschung");
+    await clearAllParticipantRowsAndRaceData();
     setSelectedMasterParticipant(null);
     setEditingRider(null);
     setLastEditedMasterParticipantId("");
+    setMasterParticipantFilter("active");
+    setAllRiders([]);
+    setRiders([]);
+    setHeats({});
+    setResults({});
+    setFinals({});
+    setFinalResults({});
+    setOverallManualOrder({});
+    setGeneratedOverallByCategory({});
+    setBackupMessage("Alle Teilnehmer und zugehörigen Renn-/Resultatdaten wurden gelöscht.");
     await loadMasterParticipants();
-    await loadAllRiders();
-    await loadRaceRiders();
-    setBackupMessage(`Alle aktiven Teilnehmer wurden in den Papierkorb verschoben: ${activeIds.length}`);
-    addChangeLog(`Alle aktiven Teilnehmer in Papierkorb verschoben (${activeIds.length})`);
+    addChangeLog("Alle Teilnehmer und zugehörigen Renn-/Resultatdaten endgültig gelöscht");
   };
 
   const getMasterParticipantKey = (rider: any) => [
@@ -2008,14 +2073,16 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
   const deleteAllRiders = async () => {
     if (
       !window.confirm(
-        "Alle Teilnehmer wirklich löschen? Diese Aktion kann nur mit einem Backup rückgängig gemacht werden.",
+        "Alle Teilnehmer in diesem Rennen / dieser Rennserie endgültig löschen?
+
+Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags werden ebenfalls entfernt. Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.",
       )
     )
       return;
-    await exportBackup("Sicherheitsbackup vor Teilnehmer-Löschung");
-    const allBeforeDelete = await db.table("riders").toArray();
-    const currentIds = allBeforeDelete.filter(belongsToCurrentEvent).map((r: any) => r.id);
-    for (const id of currentIds) await db.table("riders").update(id, { deletedAt: new Date().toISOString() });
+    await exportBackup("Sicherheitsbackup vor Teilnehmer-Löschung im Rennen");
+    const allBeforeDelete = (await db.table("riders").toArray()).map(normalizeRider);
+    const currentIds = allBeforeDelete.filter(belongsToCurrentEvent).map((r: any) => r.id).filter(Boolean);
+    if (currentIds.length > 0) await db.table("riders").bulkDelete(currentIds);
     setEditingRider(null);
     setAllRiders([]);
     setRiders([]);
@@ -2025,7 +2092,7 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     setFinalResults({});
     setOverallManualOrder({});
     setGeneratedOverallByCategory({});
-    addChangeLog("Alle Teilnehmer in Papierkorb verschoben");
+    addChangeLog("Alle Teilnehmer und zugehörigen Renn-/Resultatdaten dieses Rennens gelöscht");
   };
 
   const deleteAllRaceAssignments = async () => {
