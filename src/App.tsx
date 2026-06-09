@@ -665,39 +665,54 @@ export default function App() {
     const eventName = getEventDisplayName(event);
     if (
       !window.confirm(
-        `${eventName} wirklich löschen?
-
-Das Rennen / die Rennserie wird von der Startseite entfernt. Alle zugehörigen Teilnehmer-Zuordnungen, Motos, Finals, Resultate und Einstellungen dieses Eintrags werden gelöscht.
-
-Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
+        `${eventName} wirklich löschen?\n\nDas Rennen / die Rennserie wird von der Startseite entfernt. Alle zugehörigen Teilnehmer-Zuordnungen, Motos, Finals, Resultate und Einstellungen dieses Eintrags werden gelöscht.\n\nVor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       )
     )
       return;
 
-    await exportBackup(`Sicherheitsbackup vor Löschen von ${eventName}`);
-
+    const deletedEventWasOpen = currentEventId === event.id;
     const eventKeyPrefix = `bmx_event_${event.id}_`;
     const nextEvents = managedEvents.filter((item) => item.id !== event.id);
+
+    // Wichtig: Wenn das aktuell geöffnete Rennen gelöscht wird, zuerst die UI vom Event entkoppeln.
+    // Dadurch rendert React nicht mehr mit einer Event-ID, deren Daten gerade entfernt werden.
+    if (deletedEventWasOpen) {
+      setInitialLoaded(false);
+      setHasUnsavedChanges(false);
+      setAppShellView("events");
+      setViewMode("dashboard");
+      resetCurrentEventState();
+      setCurrentEventId("");
+    }
+
+    try {
+      await exportBackup(`Sicherheitsbackup vor Löschen von ${eventName}`);
+    } catch (error: any) {
+      if (!window.confirm(`Das automatische Backup konnte nicht erstellt werden. Trotzdem löschen?\n\nFehler: ${error?.message || "Unbekannter Fehler"}`)) return;
+    }
+
     saveManagedEvents(nextEvents);
 
     try {
-      const allRiders = await db.table("riders").toArray();
-      const riderIdsToDelete = allRiders
-        .filter((rider: any) => String(rider.eventId || "") === String(event.id))
-        .map((rider: any) => rider.id)
-        .filter(Boolean);
-      if (riderIdsToDelete.length > 0) {
-        await db.table("riders").bulkDelete(riderIdsToDelete);
-      }
+      await db.transaction("rw", db.table("riders"), db.table("appData"), async () => {
+        const allRiders = await db.table("riders").toArray();
+        const riderIdsToDelete = allRiders
+          .filter((rider: any) => String(rider.eventId || "") === String(event.id))
+          .map((rider: any) => rider.id)
+          .filter(Boolean);
+        if (riderIdsToDelete.length > 0) {
+          await db.table("riders").bulkDelete(riderIdsToDelete);
+        }
 
-      const allAppData = await db.table("appData").toArray();
-      const appDataKeysToDelete = allAppData
-        .filter((row: any) => String(row.key || "").startsWith(eventKeyPrefix))
-        .map((row: any) => row.key)
-        .filter(Boolean);
-      if (appDataKeysToDelete.length > 0) {
-        await db.table("appData").bulkDelete(appDataKeysToDelete);
-      }
+        const allAppData = await db.table("appData").toArray();
+        const appDataKeysToDelete = allAppData
+          .filter((row: any) => String(row.key || "").startsWith(eventKeyPrefix))
+          .map((row: any) => row.key)
+          .filter(Boolean);
+        if (appDataKeysToDelete.length > 0) {
+          await db.table("appData").bulkDelete(appDataKeysToDelete);
+        }
+      });
 
       appStorage.keys().forEach((key) => {
         if (key.startsWith(eventKeyPrefix)) appStorage.removeItem(key);
@@ -706,23 +721,20 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       window.alert(`Rennen wurde aus der Startliste entfernt, aber beim Bereinigen der lokalen Daten ist ein Fehler aufgetreten: ${error?.message || "Unbekannter Fehler"}`);
     }
 
-    const deletedEventWasOpen = currentEventId === event.id;
-    if (deletedEventWasOpen) {
-      resetCurrentEventState();
-      setInitialLoaded(false);
-      setCurrentEventId(nextEvents[0]?.id || "legacy");
-      setAppShellView("events");
-      setViewMode("dashboard");
-    }
-
-    await loadMasterParticipants();
     if (deletedEventWasOpen) {
       setAllRiders([]);
       setRiders([]);
+      setHeats({});
+      setResults({});
+      setFinals({});
+      setFinalResults({});
+      setOverallManualOrder({});
+      setGeneratedOverallByCategory({});
     } else {
       await loadAllRiders();
       await loadRaceRiders();
     }
+    await loadMasterParticipants();
     setBackupMessage(`Gelöscht: ${eventName}`);
   };
 
@@ -1125,6 +1137,33 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
     const idsToDelete = all.filter((rider: any) => rider.deletedAt && getMasterParticipantKey(rider) === key).map((rider: any) => rider.id).filter(Boolean);
     if (idsToDelete.length) await db.table("riders").bulkDelete(idsToDelete);
     await loadMasterParticipants();
+    await loadAllRiders();
+    await loadRaceRiders();
+    setBackupMessage(`Teilnehmer endgültig gelöscht: ${participant.name}`);
+  };
+
+  const permanentlyDeleteAllTrashParticipants = async () => {
+    const all = (await db.table("riders").toArray()).map(normalizeRider);
+    const idsToDelete = all
+      .filter((rider: any) => !!rider.deletedAt)
+      .map((rider: any) => rider.id)
+      .filter(Boolean);
+    if (idsToDelete.length === 0) {
+      window.alert("Der Papierkorb ist leer.");
+      return;
+    }
+    if (!window.confirm(`Alle Teilnehmer im Papierkorb endgültig löschen?
+
+Es werden ${idsToDelete.length} Papierkorb-Einträge dauerhaft entfernt. Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`)) return;
+    await exportBackup("Sicherheitsbackup vor Papierkorb-Leerung");
+    await db.table("riders").bulkDelete(idsToDelete);
+    setSelectedMasterParticipant(null);
+    setEditingRider(null);
+    setLastEditedMasterParticipantId("");
+    await loadMasterParticipants();
+    await loadAllRiders();
+    await loadRaceRiders();
+    setBackupMessage(`Papierkorb geleert: ${idsToDelete.length} Teilnehmer-Einträge endgültig gelöscht.`);
   };
 
   const clearAllParticipantRowsAndRaceData = async () => {
@@ -1145,9 +1184,8 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
       "bmx_overall_created_at",
       STORAGE_KEYS.duplicateOkKeys,
     ]);
-    const shouldClearParticipantDataKey = (key: string) =>
-      participantGlobalKeys.has(key) ||
-      key.startsWith(`bmx_event_`) && (
+    const shouldClearParticipantDataKey = (key: string) => {
+      const isRaceDataKey =
         participantDataSuffixes.some((suffix) => key.endsWith(suffix)) ||
         key.includes("_race_1_") ||
         key.includes("_race_2_") ||
@@ -1158,8 +1196,9 @@ Vor dem Löschen wird automatisch ein komplettes Backup erstellt.`,
         key.includes("_race_7_") ||
         key.includes("_race_8_") ||
         key.includes("_race_9_") ||
-        key.includes("_race_10_")
-      );
+        key.includes("_race_10_");
+      return participantGlobalKeys.has(key) || isRaceDataKey;
+    };
 
     await db.transaction("rw", db.table("riders"), db.table("appData"), async () => {
       await db.table("riders").clear();
@@ -1712,6 +1751,15 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
 
   useEffect(() => {
     if (appShellView !== "manager" || !currentEventId) return;
+    if (!managedEvents.some((event) => event.id === currentEventId)) {
+      setInitialLoaded(false);
+      setHasUnsavedChanges(false);
+      resetCurrentEventState();
+      setCurrentEventId("");
+      setAppShellView("events");
+      setViewMode("dashboard");
+      return;
+    }
     const loadInitialData = async () => {
       const allSavedAppData = await db.table("appData").toArray();
       allSavedAppData.forEach((row: any) => {
@@ -2073,9 +2121,9 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   const deleteAllRiders = async () => {
     if (
       !window.confirm(
-        "Alle Teilnehmer in diesem Rennen / dieser Rennserie endgültig löschen?
+        `Alle Teilnehmer in diesem Rennen / dieser Rennserie endgültig löschen?
 
-Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags werden ebenfalls entfernt. Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.",
+Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags werden ebenfalls entfernt. Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       )
     )
       return;
@@ -5267,6 +5315,14 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
               <summary style={{ cursor: "pointer", fontWeight: 900, color: colors.title }}>
                 Papierkorb gelöschte Teilnehmer ({visibleTrashGroups.length})
               </summary>
+              <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ color: colors.muted, fontSize: 13 }}>
+                  Papierkorb-Einträge können einzeln wiederhergestellt oder gesammelt endgültig gelöscht werden.
+                </div>
+                <button type="button" onClick={permanentlyDeleteAllTrashParticipants} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>
+                  Papierkorb leeren
+                </button>
+              </div>
               <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
                 {visibleTrashGroups.map((participant: any) => (
                   <div key={participant.key} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center", padding: 10, border: `1px solid ${colors.cardBorder}`, borderRadius: 10, background: "#fff" }}>
