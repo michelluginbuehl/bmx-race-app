@@ -4721,7 +4721,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     return pointsMap;
   };
 
-  const calculateOverallByCategory = () => {
+  const calculateOverallByCategory = (onlyEnoughRaces = false) => {
     const eligibleRaces = getOverallEligibleRaces();
     const raceMaps = eligibleRaces.map((race) => buildRacePointsMap(race));
     const completedRaceCount = eligibleRaces.filter((race) => raceHasFinalResults(race)).length;
@@ -4735,7 +4735,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
 
       const participated = racePoints.filter((x) => x !== null) as number[];
       if (participated.length === 0) return;
-      if (completedRaceCount >= seriesRaceCount && participated.length < requiredCountingRaces) return;
+      if (onlyEnoughRaces && participated.length < requiredCountingRaces) return;
 
       const scoredEntries = racePoints
         .map((points, index) => ({
@@ -4814,14 +4814,32 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     }
     const preview = getOverallPreviewRows();
     const summary = preview.map((x) => `${x.race}: ${x.count} Resultate (${x.status})`).join("\n");
-    if (!window.confirm(`Gesamtwertung jetzt erstellen/aktualisieren?\n\nSerien-Einstellung: ${seriesRaceCount} Rennen, beste ${overallCountingRaces} zählen.\nTie-Breaker: bessere Streichresultate.\n\n${summary}`)) return;
-    const nextOverall = calculateOverallByCategory();
+    const requiredCountingRaces = Math.max(1, Math.min(overallCountingRaces, seriesRaceCount));
+    const mode = window.prompt(
+      `Gesamtwertung erstellen: Welche Teilnehmer sollen erscheinen?\n\n` +
+        `1 = Alle Teilnehmer mit mindestens einem Resultat\n` +
+        `2 = Nur Teilnehmer mit genügend Rennen (${requiredCountingRaces})\n\n` +
+        `Eingabe 1 oder 2:`,
+      "1",
+    );
+    if (mode === null) return;
+    const normalizedMode = String(mode).trim();
+    if (normalizedMode !== "1" && normalizedMode !== "2") {
+      window.alert("Bitte Gesamtwertung nochmals erstellen und 1 oder 2 eingeben.");
+      return;
+    }
+    const onlyEnoughRaces = normalizedMode === "2";
+    const modeLabel = onlyEnoughRaces
+      ? `Nur Teilnehmer mit genügend Rennen (${requiredCountingRaces})`
+      : "Alle Teilnehmer mit mindestens einem Resultat";
+    if (!window.confirm(`Gesamtwertung jetzt erstellen/aktualisieren?\n\nModus: ${modeLabel}\nSerien-Einstellung: ${seriesRaceCount} Rennen, beste ${overallCountingRaces} zählen.\nTie-Breaker: bessere Streichresultate.\n\n${summary}`)) return;
+    const nextOverall = calculateOverallByCategory(onlyEnoughRaces);
     setGeneratedOverallByCategory(nextOverall);
     setOverallManualOrder({});
     const createdAt = new Date().toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" });
     setOverallCreatedAt(createdAt);
     setOverallLocked(false);
-    addChangeLog(`Gesamtwertung erstellt (${createdAt})`);
+    addChangeLog(`Gesamtwertung erstellt (${createdAt}) · ${modeLabel}`);
     setViewMode("overall");
   };
 
