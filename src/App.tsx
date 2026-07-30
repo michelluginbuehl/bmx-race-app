@@ -2885,13 +2885,13 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
 
     if (hasExistingRaceData) {
       const proceed = window.confirm(
-        "Manuelle Rangliste starten? Bestehende Läufe, Finals oder Resultate dieses Race werden beim Speichern der manuellen Resultatliste ersetzt.",
+        "Manuelle Rangliste starten? Bestehende Motos, Finals oder Resultate dieses Race werden erst beim Speichern der manuellen Rangliste ersetzt.",
       );
       if (!proceed) return;
       await exportBackup("Sicherheitsbackup vor manueller Rangliste");
     }
 
-    const categories = originalRaceCategories().filter((cat) => (groupedRace[cat] || []).length > 0);
+    const categories = sortCategories(Object.keys(manualRankingGroups)).filter((cat) => (manualRankingGroups[cat] || []).length > 0);
     if (categories.length === 0) {
       window.alert("Es sind keine Teilnehmer für dieses Race ausgewählt.");
       return;
@@ -2922,7 +2922,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
 
   const addRemainingManualResultCategory = (category: string) => {
     const current = manualResultOrder[category] || [];
-    const remaining = (groupedRace[category] || [])
+    const remaining = (manualRankingGroups[category] || [])
       .map((r: any) => String(r.id))
       .filter((id: string) => !current.includes(id));
     setManualResultOrder((prev) => ({ ...prev, [category]: [...current, ...remaining] }));
@@ -2934,10 +2934,10 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
       return;
     }
 
-    const categories = originalRaceCategories();
+    const categories = sortCategories(Object.keys(manualRankingGroups));
     const missing = categories
       .map((cat) => {
-        const total = (groupedRace[cat] || []).length;
+        const total = (manualRankingGroups[cat] || []).length;
         const selected = (manualResultOrder[cat] || []).length;
         return selected < total ? `${cat}: ${selected}/${total}` : "";
       })
@@ -2957,7 +2957,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     categories.forEach((cat) => {
       const selectedIds = manualResultOrder[cat] || [];
       if (selectedIds.length === 0) return;
-      const riderMap = new Map<string, any>((groupedRace[cat] || []).map((r: any) => [String(r.id), r]));
+      const riderMap = new Map<string, any>((manualRankingGroups[cat] || []).map((r: any) => [String(r.id), r]));
       const rows = selectedIds
         .map((id, index) => {
           const rider = riderMap.get(id);
@@ -2969,7 +2969,8 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
             points: index + 1,
             startPos: index + 1,
             status: "",
-            originalCategory: rider.category,
+            originalCategory: cat,
+            manualRankingOnly: true,
           };
         })
         .filter(Boolean) as any[];
@@ -2996,7 +2997,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     setFinalManualOrder(nextManualOrder);
     setManualResultsMode(false);
     setManualResultOrder({});
-    addChangeLog(`${selectedRace}: Resultate manuell erstellt`);
+    addChangeLog(`${selectedRace}: Manuelle Rangliste erstellt`);
     setTimeout(() => scrollToSection("resultate"), 0);
   };
 
@@ -3308,6 +3309,18 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     return riders.reduce((acc: any, r: any) => {
       if (!acc[r.category]) acc[r.category] = [];
       acc[r.category].push(r);
+      return acc;
+    }, {});
+  }, [riders]);
+
+  // Separate Datenbasis für die manuelle Rangliste:
+  // bewusst NICHT aus Motos/Heats abgeleitet, damit auch bei mehr als 8 Fahrern
+  // alle Teilnehmer einer Kategorie in einer einzigen Kachel anklickbar bleiben.
+  const manualRankingGroups = useMemo(() => {
+    return riders.reduce((acc: Record<string, any[]>, rider: any) => {
+      const category = String(rider?.category || "Ohne Kategorie");
+      if (!acc[category]) acc[category] = [];
+      acc[category].push(rider);
       return acc;
     }, {});
   }, [riders]);
@@ -5837,7 +5850,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
       },
       {
         title: "5. Manuelle Rangliste",
-        text: "Wenn keine Läufe gefahren werden, öffne Notfall / Reparatur oder den Button Resultate manuell erstellen. Danach platzierst du alle Fahrer einer Kategorie in Zielreihenfolge und speicherst daraus die Resultatliste.",
+        text: "Wenn keine Läufe gefahren werden, öffne den Button Manuelle Rangliste. Danach platzierst du alle Fahrer einer Kategorie in Zielreihenfolge und speicherst daraus die Resultatliste.",
       },
       {
         title: "6. Speichern und Backup",
@@ -6668,30 +6681,30 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
               <div>
                 <h2 style={{ ...sectionTitleStyle, display: "flex", alignItems: "center", gap: 8 }}>🏁 Manuelle Rangliste erstellen</h2>
                 <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4, lineHeight: 1.35 }}>
-                  1. Kategorie prüfen · 2. Fahrer der Zielreihenfolge nach anklicken · 3. Mit „Resultatliste erstellen“ speichern.
-                  Alle Fahrer einer Kategorie müssen platziert sein.
+                  1. Kategorie prüfen · 2. Alle Fahrer in Zielreihenfolge anklicken · 3. Mit „Rangliste speichern“ speichern.
+                  Alle Fahrer einer Kategorie bleiben in einer einzigen Kachel, auch bei mehr als 8 Teilnehmern.
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="button" onClick={createManualResults} style={compactPrimaryButtonStyle}>Resultatliste erstellen</button>
+                <button type="button" onClick={createManualResults} style={compactPrimaryButtonStyle}>Rangliste speichern</button>
                 <button type="button" onClick={() => { setManualResultsMode(false); setManualResultOrder({}); }} style={compactHomeButtonStyle}>Abbrechen</button>
               </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-              {sortCategories(Object.keys(groupedRace)).map((cat) => {
+              {sortCategories(Object.keys(manualRankingGroups)).map((cat) => {
                 const selectedIds = manualResultOrder[cat] || [];
                 return (
                   <div key={`manual-${cat}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 16, padding: 14, background: "#fff", boxShadow: "0 6px 16px rgba(23,32,51,0.06)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
                       <strong style={{ color: colors.title }}>{cat}</strong>
-                      <span style={{ color: colors.muted, fontSize: 12, fontWeight: 800 }}>{selectedIds.length}/{(groupedRace[cat] || []).length}</span>
+                      <span style={{ color: colors.muted, fontSize: 12, fontWeight: 800 }}>{selectedIds.length}/{(manualRankingGroups[cat] || []).length}</span>
                     </div>
                     <div style={{ display: "grid", gap: 8, paddingRight: 4 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: colors.muted, fontSize: 12, fontWeight: 900 }}>
-                        <span>Noch nicht platzierte / anklickbare Fahrer</span>
-                        <span>{selectedIds.length}/{(groupedRace[cat] || []).length} platziert</span>
+                        <span>Alle Fahrer dieser Kategorie anklicken</span>
+                        <span>{selectedIds.length}/{(manualRankingGroups[cat] || []).length} platziert</span>
                       </div>
-                      {[...(groupedRace[cat] || [])]
+                      {[...(manualRankingGroups[cat] || [])]
                         .sort((a: any, b: any) => {
                           const plateA = Number(String(a.plate || "").replace(/\D/g, ""));
                           const plateB = Number(String(b.plate || "").replace(/\D/g, ""));
@@ -6735,7 +6748,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
                         <div style={{ fontWeight: 900, color: colors.title, marginBottom: 6 }}>Bereits platzierte Fahrer</div>
                         <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
                           {selectedIds.map((id, orderIndex) => {
-                            const selectedRider = (groupedRace[cat] || []).find((r: any) => String(r.id) === String(id));
+                            const selectedRider = (manualRankingGroups[cat] || []).find((r: any) => String(r.id) === String(id));
                             return (
                               <div key={`manual-order-${cat}-${id}`}>{orderIndex + 1}. #{selectedRider?.plate || "-"} {selectedRider?.name || "Unbekannter Fahrer"}</div>
                             );
@@ -7069,9 +7082,9 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
               onClick={startManualResultsMode}
               disabled={raceClosed}
               style={raceClosed ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 52 }}
-              title="Resultatliste direkt manuell aus Teilnehmern erstellen"
+              title="Rangliste direkt manuell aus allen Teilnehmern je Kategorie erstellen"
             >
-              Results manuell
+              Manuelle Rangliste
             </button>
             <button onClick={exportHeatsStartPdf} style={{ ...compactHomeButtonStyle, minHeight: 52 }}>
               Motos PDF
@@ -7213,7 +7226,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
           </summary>
           <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <button type="button" onClick={startManualResultsMode} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 52 }}>
-              Results manuell
+              Manuelle Rangliste
             </button>
             <button type="button" onClick={saveAndExportFullBackup} style={actionSaveButtonStyle}>
               Backup / Speichern
