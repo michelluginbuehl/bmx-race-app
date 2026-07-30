@@ -8,10 +8,22 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.13.9",
+    title: "Bugfix Manuelle Rangliste sichtbar",
+    date: "2026-07-30",
+    current: true,
+    items: [
+      "Beim Klick auf Manuelle Rangliste wird der Eingabebereich nun direkt auf der Rennseite angezeigt.",
+      "Die manuelle Rangliste bleibt unabhängig von Motos/Heats und zeigt alle Teilnehmer einer Kategorie in einer Kachel.",
+      "Hinweistexte für fehlende Renninformationen wurden an die manuelle Rangliste angepasst.",
+      "Rangliste speichern erzeugt weiterhin die gewohnten Resultate für Resultate-PDF und Gesamtwertung.",
+    ],
+  },
+  {
     version: "v1.13.8",
     title: "Manuelle Rangliste pro Kategorie",
     date: "2026-07-30",
-    current: true,
+    current: false,
     items: [
       "Button Results manuell in Manuelle Rangliste umbenannt.",
       "Die manuelle Rangliste verwendet keine Motos/Heats mehr als Eingabebasis.",
