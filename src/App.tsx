@@ -1682,16 +1682,288 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   const backupAgeMinutes = getBackupAgeMinutes();
   const backupWarningActive = backupAgeMinutes === null || backupAgeMinutes > 30;
 
+  const masterParticipantExcelHeaders = [
+    "Teilnehmer ID",
+    "Name",
+    "Startnummer",
+    "Verein",
+    "Jahrgang",
+    "Geschlecht",
+    "Cruiser",
+    "Kategorie",
+    "Race1",
+    "Race2",
+    "Race3",
+    "Race4",
+    "Race5",
+    "Race6",
+    "Race7",
+    "Race8",
+    "Race9",
+    "Race10",
+    "Resultate Übersicht",
+    "Gesamtwertung Übersicht",
+  ];
+
+  const normalizeExcelHeader = (value: any) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "");
+
+  const getExcelCell = (row: any, aliases: string[]) => {
+    const aliasKeys = aliases.map(normalizeExcelHeader);
+    for (const key of Object.keys(row || {})) {
+      if (aliasKeys.includes(normalizeExcelHeader(key))) return row[key];
+    }
+    return "";
+  };
+
+  const parseExcelBoolean = (value: any) => {
+    const text = String(value ?? "").trim().toLowerCase();
+    return ["x", "ja", "yes", "true", "1", "cruiser"].includes(text);
+  };
+
+  const parseExcelYear = (value: any) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 1900 ? Math.round(number) : undefined;
+  };
+
+  const formatExcelBoolean = (value: any) => value ? "x" : "";
+
+  const buildMasterParticipantResultRows = (groups: any[]) => {
+    const rows: any[] = [];
+    groups.forEach((participant: any) => {
+      const details = getMasterParticipantEventDetails(participant);
+      details.forEach((event: any) => {
+        event.races.forEach((raceInfo: any) => {
+          if (!raceInfo.assigned && !raceInfo.rank) return;
+          rows.push({
+            "Teilnehmer ID": participant.participantId || participant.masterId || "",
+            Name: participant.name || "",
+            Startnummer: participant.plate || "",
+            Verein: participant.club || "",
+            Jahrgang: participant.birthYear || "",
+            Geschlecht: participant.gender || "",
+            Kategorie: raceInfo.category || participant.raw?.category || getDerivedCategory(participant.raw || participant),
+            Rennen: `${event.name || "Rennen"} ${event.year || ""}`.trim(),
+            Typ: event.type === "single" ? "Einzelrennen" : "Rennserie",
+            Lauf: raceInfo.race,
+            Zugeordnet: raceInfo.assigned ? "Ja" : "Nein",
+            Rang: raceInfo.rank || "",
+            Status: raceInfo.status || "",
+            Gesamtwertung: event.overall ? `Rang ${event.overall.rank} · ${event.overall.total} Punkte` : "",
+          });
+        });
+      });
+    });
+    return rows;
+  };
+
+  const buildMasterParticipantExcelRows = (groups: any[]) => {
+    return groups.map((participant: any) => {
+      const raw = participant.raw || participant;
+      const details = getMasterParticipantEventDetails(participant);
+      const resultSummary = details.flatMap((event: any) =>
+        event.races
+          .filter((raceInfo: any) => raceInfo.assigned || raceInfo.rank)
+          .map((raceInfo: any) => {
+            const rankText = raceInfo.rank ? `Rang ${raceInfo.rank}` : "angemeldet";
+            return `${event.name || "Rennen"} ${event.year || ""} ${raceInfo.race}: ${rankText}`.replace(/\s+/g, " ").trim();
+          }),
+      ).join(" | ");
+      const overallSummary = details
+        .filter((event: any) => !!event.overall)
+        .map((event: any) => `${event.name || "Rennen"}: Rang ${event.overall.rank} · ${event.overall.total} Punkte`)
+        .join(" | ");
+
+      return {
+        "Teilnehmer ID": participant.participantId || participant.masterId || getParticipantStableId(raw),
+        Name: participant.name || "",
+        Startnummer: participant.plate || "",
+        Verein: participant.club || "",
+        Jahrgang: participant.birthYear || "",
+        Geschlecht: participant.gender || "",
+        Cruiser: formatExcelBoolean(participant.cruiser),
+        Kategorie: getDerivedCategory(raw),
+        Race1: formatExcelBoolean(raw.race1),
+        Race2: formatExcelBoolean(raw.race2),
+        Race3: formatExcelBoolean(raw.race3),
+        Race4: formatExcelBoolean(raw.race4),
+        Race5: formatExcelBoolean(raw.race5),
+        Race6: formatExcelBoolean(raw.race6),
+        Race7: formatExcelBoolean(raw.race7),
+        Race8: formatExcelBoolean(raw.race8),
+        Race9: formatExcelBoolean(raw.race9),
+        Race10: formatExcelBoolean(raw.race10),
+        "Resultate Übersicht": resultSummary,
+        "Gesamtwertung Übersicht": overallSummary,
+      };
+    });
+  };
+
+  const exportMasterParticipantsExcel = () => {
+    const groups = getMasterParticipantGroups();
+    if (groups.length === 0) {
+      window.alert("Es sind keine aktiven Teilnehmer zum Exportieren vorhanden.");
+      return;
+    }
+
+    const wb = XLSX.utils.book_new();
+    const participantRows = buildMasterParticipantExcelRows(groups);
+    const participantWs = XLSX.utils.json_to_sheet(participantRows, { header: masterParticipantExcelHeaders });
+    participantWs["!cols"] = [
+      { wch: 40 }, { wch: 28 }, { wch: 14 }, { wch: 24 }, { wch: 10 }, { wch: 11 }, { wch: 9 }, { wch: 28 },
+      ...Array.from({ length: 10 }, () => ({ wch: 8 })),
+      { wch: 70 }, { wch: 45 },
+    ];
+    XLSX.utils.book_append_sheet(wb, participantWs, "Teilnehmer");
+
+    const resultRows = buildMasterParticipantResultRows(groups);
+    const resultWs = XLSX.utils.json_to_sheet(resultRows.length ? resultRows : [{ Hinweis: "Noch keine Resultate vorhanden" }]);
+    resultWs["!cols"] = [
+      { wch: 40 }, { wch: 28 }, { wch: 14 }, { wch: 24 }, { wch: 10 }, { wch: 11 }, { wch: 28 }, { wch: 30 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 14 }, { wch: 28 },
+    ];
+    XLSX.utils.book_append_sheet(wb, resultWs, "Resultate");
+
+    const infoRows = [
+      { Feld: "Wichtig", Beschreibung: "Nur das Blatt Teilnehmer wird beim Import eingelesen. Das Blatt Resultate dient nur zur Kontrolle und wird nicht importiert." },
+      { Feld: "Teilnehmer ID", Beschreibung: "Bestehende ID nicht ändern. Neue Teilnehmer können leer bleiben; beim Import wird automatisch eine neue Teilnehmer-ID vergeben." },
+      { Feld: "Geschlecht", Beschreibung: "B für Boys / männlich, G für Girls / weiblich." },
+      { Feld: "Cruiser und Race-Spalten", Beschreibung: "x, ja, yes, true oder 1 bedeutet aktiv." },
+      { Feld: "Resultate", Beschreibung: "Resultate und Gesamtwertung bleiben in der App geschützt. Beim Import werden nur Stammdaten synchronisiert." },
+    ];
+    const infoWs = XLSX.utils.json_to_sheet(infoRows);
+    infoWs["!cols"] = [{ wch: 24 }, { wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, infoWs, "Anleitung");
+
+    const safeDate = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `BMX-Teilnehmer-Hauptdatenbank_${safeDate}.xlsx`);
+    addChangeLog("Teilnehmer-Hauptdatenbank Excel exportiert");
+  };
+
   const downloadExcelTemplate = () => {
     const rows = [
-      { Name: "Max Muster", Plate: "23", Verein: "BMX Club", Jahrgang: "2014", Geschlecht: "B", Cruiser: "", Race1: "x", Race2: "x", Race3: "x", Race4: "x", Race5: "", Race6: "", Race7: "", Race8: "", Race9: "", Race10: "" },
-      { Name: "Lina Beispiel", Plate: "41", Verein: "BMX Club", Jahrgang: "2015", Geschlecht: "G", Cruiser: "x", Race1: "x", Race2: "", Race3: "x", Race4: "", Race5: "", Race6: "", Race7: "", Race8: "", Race9: "", Race10: "" },
+      { "Teilnehmer ID": "", Name: "Max Muster", Startnummer: "23", Verein: "BMX Club", Jahrgang: "2014", Geschlecht: "B", Cruiser: "", Kategorie: "", Race1: "x", Race2: "x", Race3: "", Race4: "", Race5: "", Race6: "", Race7: "", Race8: "", Race9: "", Race10: "", "Resultate Übersicht": "", "Gesamtwertung Übersicht": "" },
+      { "Teilnehmer ID": "", Name: "Lina Beispiel", Startnummer: "41", Verein: "BMX Club", Jahrgang: "2015", Geschlecht: "G", Cruiser: "x", Kategorie: "", Race1: "x", Race2: "", Race3: "", Race4: "", Race5: "", Race6: "", Race7: "", Race8: "", Race9: "", Race10: "", "Resultate Übersicht": "", "Gesamtwertung Übersicht": "" },
     ];
-    const ws = XLSX.utils.json_to_sheet(rows, { header: ["Name", "Plate", "Verein", "Jahrgang", "Geschlecht", "Cruiser", "Race1", "Race2", "Race3", "Race4", "Race5", "Race6", "Race7", "Race8", "Race9", "Race10"] });
+    const ws = XLSX.utils.json_to_sheet(rows, { header: masterParticipantExcelHeaders });
+    ws["!cols"] = [{ wch: 40 }, { wch: 28 }, { wch: 14 }, { wch: 24 }, { wch: 10 }, { wch: 11 }, { wch: 9 }, { wch: 28 }, ...Array.from({ length: 10 }, () => ({ wch: 8 })), { wch: 40 }, { wch: 35 }];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Teilnehmer Vorlage");
+    XLSX.utils.book_append_sheet(wb, ws, "Teilnehmer");
     XLSX.writeFile(wb, "BMX-Teilnehmer-Vorlage.xlsx");
     addChangeLog("Teilnehmer Excel-Vorlage heruntergeladen");
+  };
+
+  const handleMasterParticipantsExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const sheetName = wb.SheetNames.includes("Teilnehmer") ? "Teilnehmer" : wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" }) as any[];
+      const importRows = rows.filter((row: any) =>
+        String(getExcelCell(row, ["Name"])).trim() ||
+        String(getExcelCell(row, ["Startnummer", "Plate", "Nummer"])).trim() ||
+        String(getExcelCell(row, ["Teilnehmer ID", "Participant ID", "ID"])).trim(),
+      );
+
+      if (importRows.length === 0) {
+        window.alert("Im Excel wurden keine Teilnehmerdaten gefunden.");
+        return;
+      }
+
+      const allRows = (await db.table("riders").toArray()).map(normalizeRider);
+      const activeRows = allRows.filter((rider: any) => !rider.deletedAt);
+      const byStableId = new Map<string, any[]>();
+      const byMasterKey = new Map<string, any[]>();
+      activeRows.forEach((rider: any) => {
+        const stableId = getParticipantStableId(rider);
+        if (stableId) byStableId.set(stableId, [...(byStableId.get(stableId) || []), rider]);
+        const key = getMasterParticipantKey(rider);
+        byMasterKey.set(key, [...(byMasterKey.get(key) || []), rider]);
+      });
+
+      const preparedRows = importRows.map((row: any) => {
+        const name = String(getExcelCell(row, ["Name", "Teilnehmer", "Fahrer"])).trim();
+        const plate = String(getExcelCell(row, ["Startnummer", "Plate", "Nummer"])).trim();
+        const club = String(getExcelCell(row, ["Verein", "Club"])).trim();
+        const birthYear = parseExcelYear(getExcelCell(row, ["Jahrgang", "BirthYear", "Geburtsjahr"]));
+        const genderRaw = String(getExcelCell(row, ["Geschlecht", "Gender"])).trim().toUpperCase();
+        const gender = genderRaw.startsWith("G") || genderRaw.startsWith("W") || genderRaw.startsWith("F") ? "G" : genderRaw.startsWith("B") || genderRaw.startsWith("M") ? "B" : genderRaw;
+        const cruiser = parseExcelBoolean(getExcelCell(row, ["Cruiser"]));
+        const participantId = String(getExcelCell(row, ["Teilnehmer ID", "Participant ID", "ID"])).trim();
+        const racePatch = Object.fromEntries(RACES.map((race) => [raceKeyMap[race], parseExcelBoolean(getExcelCell(row, [race.replace(" ", ""), race, raceKeyMap[race]]))]));
+        const patch = {
+          name,
+          plate,
+          club,
+          birthYear,
+          jahrgang: birthYear,
+          gender,
+          geschlecht: gender,
+          cruiser,
+          isCruiser: cruiser,
+          ...racePatch,
+        };
+        const key = getMasterParticipantKey(patch);
+        const matchedById = participantId ? byStableId.get(participantId) || [] : [];
+        const matchedByKey = !matchedById.length ? byMasterKey.get(key) || [] : [];
+        return { row, patch, participantId, existingRows: matchedById.length ? matchedById : matchedByKey };
+      });
+
+      const updateCount = preparedRows.filter((entry) => entry.existingRows.length > 0).length;
+      const newCount = preparedRows.length - updateCount;
+      if (!window.confirm(`Teilnehmer aus Excel importieren?\n\nDatei: ${file.name}\nAktualisieren: ${updateCount}\nNeu anlegen: ${newCount}\n\nBestehende Resultate werden nicht überschrieben. Stammdaten werden über die Teilnehmer-ID synchronisiert.`)) return;
+
+      await exportBackup("Sicherheitsbackup vor Teilnehmer-Excel-Import");
+
+      let created = 0;
+      let updated = 0;
+      for (const entry of preparedRows) {
+        const existingRows = entry.existingRows;
+        if (existingRows.length > 0) {
+          const representative = existingRows.find((rider: any) => rider.eventId === "master") || existingRows[0];
+          const stableId = entry.participantId || getParticipantStableId(representative);
+          const edited = {
+            ...representative,
+            ...entry.patch,
+            participantId: stableId,
+            masterId: stableId,
+            eventId: representative.eventId || "master",
+          };
+          await db.table("riders").update(representative.id, getRiderSharedDataPatch(edited));
+          await db.table("riders").update(representative.id, { participantId: stableId, masterId: stableId });
+          await syncRiderSharedDataToAllReferences(representative, edited);
+          updated += 1;
+        } else {
+          const stableId = entry.participantId || crypto.randomUUID();
+          const id = crypto.randomUUID();
+          await db.table("riders").add({
+            id,
+            participantId: stableId,
+            masterId: stableId,
+            eventId: "master",
+            ...entry.patch,
+          });
+          created += 1;
+        }
+      }
+
+      await loadMasterParticipants();
+      await loadAllRiders();
+      await loadRaceRiders();
+      setBackupMessage(`Teilnehmer-Excel importiert: ${updated} aktualisiert, ${created} neu angelegt.`);
+      addChangeLog(`Teilnehmer-Excel importiert: ${updated} aktualisiert, ${created} neu`);
+    } catch (error: any) {
+      window.alert(`Teilnehmer-Excel Import fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+    }
   };
 
   const scrollHome = () => {
@@ -5259,9 +5531,25 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
             >
               Teilnehmerdatenbank aktualisieren
             </button>
+            <button
+              type="button"
+              onClick={exportMasterParticipantsExcel}
+              style={{ ...mainButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+            >
+              Teilnehmer Excel exportieren
+            </button>
+            <label style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+              Teilnehmer Excel importieren
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleMasterParticipantsExcelImport}
+                style={{ display: "none" }}
+              />
+            </label>
           </div>
           <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-            Aktualisiert die Hauptdatenbank aus allen gespeicherten Rennen und Rennserien. Rennhistorie und Rangierungen sind über Klick auf den Fahrer sichtbar.
+            Aktualisiert die Hauptdatenbank aus allen gespeicherten Rennen und Rennserien. Über Excel-Export können Teilnehmerdaten bearbeitet und neue Teilnehmer wieder importiert werden; Resultate sind im Export sichtbar, werden beim Import aber nicht überschrieben.
           </div>
         </div>
         <div style={{ ...basePanelStyle }}>
