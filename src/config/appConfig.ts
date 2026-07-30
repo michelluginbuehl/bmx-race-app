@@ -1,6 +1,6 @@
-export const APP_VERSION = "v1.13.7";
+export const APP_VERSION = "v1.13.8";
 export const APP_NAME = "BMX Race Manager";
-export const APP_CHANGE_NOTE = "Teilnehmer-Excel Export und Import";
+export const APP_CHANGE_NOTE = "Manuelle Rangliste pro Kategorie korrigiert";
 
 export const DATA_SCHEMA_VERSION = 7;
 export const BACKUP_VERSION = 2;

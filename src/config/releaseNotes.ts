@@ -8,10 +8,22 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.13.8",
+    title: "Manuelle Rangliste pro Kategorie",
+    date: "2026-07-30",
+    current: true,
+    items: [
+      "Button Results manuell in Manuelle Rangliste umbenannt.",
+      "Die manuelle Rangliste verwendet keine Motos/Heats mehr als Eingabebasis.",
+      "Alle Teilnehmer einer Kategorie werden in einer einzigen Kachel angezeigt, auch bei mehr als 8 Teilnehmern.",
+      "Die Klick-Reihenfolge erzeugt direkt die Rangliste der Kategorie.",
+      "Resultate-PDF verwendet danach wie gewohnt die gespeicherte manuelle Rangliste.",
+    ],
+  },
+  {
     version: "v1.13.7",
     title: "Teilnehmer-Excel Export und Import",
     date: "2026-06-09",
-    current: true,
     items: [
       "Teilnehmer können aus der Hauptdatenbank als Excel-Datei exportiert werden.",
       "Das Excel enthält eine editierbare Tabelle Teilnehmer und eine geschützte Übersicht Resultate.",
