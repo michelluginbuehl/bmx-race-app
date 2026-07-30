@@ -2861,7 +2861,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     ].filter(Boolean);
 
     if (stillMissing.length > 0) {
-      window.alert(`Motos können noch nicht erstellt werden. Es fehlt: ${stillMissing.join(", ")}.`);
+      window.alert(`Manuelle Rangliste kann noch nicht gestartet werden. Es fehlt: ${stillMissing.join(", ")}.`);
       return false;
     }
 
@@ -7216,6 +7216,111 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
           </div>
 
         </div>
+
+        {manualResultsMode && (
+          <div id="manual-results" style={{ ...basePanelStyle, marginBottom: 20, borderColor: colors.blueBtn, background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)", borderLeft: `6px solid ${colors.blueBtn}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+              <div>
+                <h2 style={{ ...sectionTitleStyle, display: "flex", alignItems: "center", gap: 8 }}>🏁 Manuelle Rangliste erstellen</h2>
+                <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4, lineHeight: 1.35 }}>
+                  1. Kategorie prüfen · 2. Alle Fahrer in Zielreihenfolge anklicken · 3. Mit „Rangliste speichern“ speichern.
+                  Alle Fahrer einer Kategorie bleiben in einer einzigen Kachel, auch bei mehr als 8 Teilnehmern.
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" onClick={createManualResults} style={compactPrimaryButtonStyle}>Rangliste speichern</button>
+                <button type="button" onClick={() => { setManualResultsMode(false); setManualResultOrder({}); }} style={compactHomeButtonStyle}>Abbrechen</button>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+              {sortCategories(Object.keys(manualRankingGroups)).map((cat) => {
+                const selectedIds = manualResultOrder[cat] || [];
+                return (
+                  <div key={`manual-${cat}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 16, padding: 14, background: "#fff", boxShadow: "0 6px 16px rgba(23,32,51,0.06)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <strong style={{ color: colors.title }}>{cat}</strong>
+                      <span style={{ color: colors.muted, fontSize: 12, fontWeight: 800 }}>{selectedIds.length}/{(manualRankingGroups[cat] || []).length}</span>
+                    </div>
+                    <div style={{ display: "grid", gap: 8, paddingRight: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: colors.muted, fontSize: 12, fontWeight: 900 }}>
+                        <span>Alle Fahrer dieser Kategorie anklicken</span>
+                        <span>{selectedIds.length}/{(manualRankingGroups[cat] || []).length} platziert</span>
+                      </div>
+                      {[...(manualRankingGroups[cat] || [])]
+                        .sort((a: any, b: any) => {
+                          const plateA = Number(String(a.plate || "").replace(/\D/g, ""));
+                          const plateB = Number(String(b.plate || "").replace(/\D/g, ""));
+                          if (Number.isFinite(plateA) && Number.isFinite(plateB) && plateA !== plateB) return plateA - plateB;
+                          return String(a.name || "").localeCompare(String(b.name || ""), "de");
+                        })
+                        .map((r: any) => {
+                        const riderId = String(r.id);
+                        const selectedIndex = selectedIds.indexOf(riderId);
+                        const selected = selectedIndex >= 0;
+                        return (
+                          <button
+                            key={`manual-${cat}-${riderId}`}
+                            type="button"
+                            onClick={() => toggleManualResultRider(cat, r)}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "44px 90px minmax(0, 1fr) 90px",
+                              gap: 8,
+                              alignItems: "center",
+                              textAlign: "left",
+                              border: `1px solid ${selected ? colors.blueBtn : colors.cardBorder}`,
+                              background: selected ? "#eaf2ff" : "#fff",
+                              color: colors.text,
+                              borderRadius: 8,
+                              padding: "9px 10px",
+                              cursor: "pointer",
+                              fontWeight: selected ? 900 : 700,
+                            }}
+                          >
+                            <span>{selected ? `${selectedIndex + 1}.` : ""}</span>
+                            <span>#{r.plate || "-"}</span>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                            <span style={{ color: colors.muted, fontSize: 12 }}>{getRiderMetaLabel(r)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedIds.length > 0 && (
+                      <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#f8fbff", border: `1px solid ${colors.cardBorder}` }}>
+                        <div style={{ fontWeight: 900, color: colors.title, marginBottom: 6 }}>Bereits platzierte Fahrer</div>
+                        <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                          {selectedIds.map((id, orderIndex) => {
+                            const selectedRider = (manualRankingGroups[cat] || []).find((r: any) => String(r.id) === String(id));
+                            return (
+                              <div key={`manual-order-${cat}-${id}`}>{orderIndex + 1}. #{selectedRider?.plate || "-"} {selectedRider?.name || "Unbekannter Fahrer"}</div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {selectedIds.length > 0 && (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => setManualResultOrder((prev) => ({ ...prev, [cat]: (prev[cat] || []).slice(0, -1) }))}
+                          style={smallGhostButtonStyle}
+                        >
+                          Letzten Fahrer rückgängig
+                        </button>
+                        <button type="button" onClick={() => addRemainingManualResultCategory(cat)} style={smallGhostButtonStyle}>
+                          Rest ans Ende setzen
+                        </button>
+                        <button type="button" onClick={() => clearManualResultCategory(cat)} style={smallGhostButtonStyle}>
+                          Kategorie zurücksetzen
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <details style={{ ...basePanelStyle, marginBottom: 16, background: "#fffdf7", borderColor: colors.warningBorder }} open={showEmergencyTools}>
           <summary
