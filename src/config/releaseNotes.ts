@@ -8,10 +8,22 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.13.7",
+    title: "Teilnehmer-Excel Export und Import",
+    date: "2026-06-09",
+    current: true,
+    items: [
+      "Teilnehmer können aus der Hauptdatenbank als Excel-Datei exportiert werden.",
+      "Das Excel enthält eine editierbare Tabelle Teilnehmer und eine geschützte Übersicht Resultate.",
+      "Neue Teilnehmer ohne Teilnehmer-ID erhalten beim Re-Import automatisch eine stabile Teilnehmer-ID.",
+      "Bestehende Teilnehmer werden über Teilnehmer-ID oder Stammdaten erkannt und zentral aktualisiert.",
+      "Resultate, Rennen, Motos, Finals und Gesamtwertung werden beim Excel-Import nicht überschrieben, sondern nur mit den aktualisierten Stammdaten synchronisiert.",
+    ],
+  },
+  {
     version: "v1.13.6",
     title: "Zentrale Teilnehmer-ID und Daten-Synchronisierung",
     date: "2026-06-09",
-    current: true,
     items: [
       "Teilnehmerdaten werden beim Bearbeiten über die stabile Teilnehmer-ID synchronisiert.",
       "Änderungen an Name, Startnummer, Jahrgang, Geschlecht, Verein oder Cruiser-Status werden in Hauptdatenbank, Rennen, Motos, Resultaten, Finals und Gesamtwertung übernommen.",
