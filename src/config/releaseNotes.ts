@@ -8,10 +8,22 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.14.0",
+    title: "Gesamtwertung mit Teilnehmerfilter",
+    date: "2026-07-30",
+    current: true,
+    items: [
+      "Beim Erstellen der Gesamtwertung fragt die App neu, ob alle Teilnehmer mit Resultat oder nur Teilnehmer mit genügend Rennen angezeigt werden sollen.",
+      "Der Filter richtet sich nach der Einstellung, wie viele Rennen für die Gesamtwertung zählen.",
+      "Teilnehmer mit zu wenigen Rennen können dadurch auf Wunsch aus der Gesamtwertung ausgeblendet werden.",
+      "Rennresultate und bestehende Daten werden nicht verändert; es wird nur die erzeugte Gesamtwertung gefiltert.",
+    ],
+  },
+  {
     version: "v1.13.9",
     title: "Bugfix Manuelle Rangliste sichtbar",
     date: "2026-07-30",
-    current: true,
+    current: false,
     items: [
       "Beim Klick auf Manuelle Rangliste wird der Eingabebereich nun direkt auf der Rennseite angezeigt.",
       "Die manuelle Rangliste bleibt unabhängig von Motos/Heats und zeigt alle Teilnehmer einer Kategorie in einer Kachel.",
