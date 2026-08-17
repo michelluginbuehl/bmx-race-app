@@ -1,6 +1,6 @@
-export const APP_VERSION = "v1.14.0";
+export const APP_VERSION = "v1.14.1";
 export const APP_NAME = "BMX Race Manager";
-export const APP_CHANGE_NOTE = "Gesamtwertung mit Teilnehmerfilter";
+export const APP_CHANGE_NOTE = "Gate-Anzeige und Nachmeldungen";
 
 export const DATA_SCHEMA_VERSION = 7;
 export const BACKUP_VERSION = 2;

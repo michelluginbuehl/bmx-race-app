@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.14.1",
+    title: "Gate-Anzeige und Nachmeldungen",
+    date: "2026-08-17",
+    current: true,
+    items: [
+      "In den Moto- und Final-Startlisten wird links von Plate neu die Spalte Gate angezeigt.",
+      "Unter Notfall / Reparatur gibt es neu Teilnehmer nachträglich hinzufügen.",
+      "Nachgemeldete Teilnehmer werden zuerst in freie Gate-Plätze ihrer Kategorie gesetzt, ohne bestehende Fahrer zu verschieben.",
+      "Wenn eine Kategorie durch die Nachmeldung mehr Fahrer hat als die bestehenden Moto-Gruppen aufnehmen können, fragt die App nach und erstellt nur diese Kategorie neu.",
+      "Motos anderer Kategorien bleiben bei einer Nachmeldung unverändert.",
+    ],
+  },
+  {
     version: "v1.14.0",
     title: "Gesamtwertung mit Teilnehmerfilter",
     date: "2026-07-30",
-    current: true,
+    current: false,
     items: [
       "Beim Erstellen der Gesamtwertung fragt die App neu, ob alle Teilnehmer mit Resultat oder nur Teilnehmer mit genügend Rennen angezeigt werden sollen.",
       "Der Filter richtet sich nach der Einstellung, wie viele Rennen für die Gesamtwertung zählen.",
