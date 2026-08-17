@@ -3155,7 +3155,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
       return;
     }
 
-    const selected = lateAddParticipantCandidates.find((candidate: any) => candidate.value === lateAddParticipantValue);
+    const selected: any = lateAddParticipantCandidates.find((candidate: any) => candidate.value === lateAddParticipantValue);
     if (!selected) {
       window.alert("Der ausgewählte Teilnehmer wurde nicht gefunden.");
       return;
