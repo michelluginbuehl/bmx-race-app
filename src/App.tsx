@@ -126,6 +126,7 @@ export default function App() {
   const [masterParticipantFilter, setMasterParticipantFilter] = useState<"active" | "trash" | "all">("active");
   const [duplicateOkKeys, setDuplicateOkKeys] = useState<string[]>([]);
   const [showEmergencyTools, setShowEmergencyTools] = useState(false);
+  const [lateAddParticipantValue, setLateAddParticipantValue] = useState("");
   const [selectedMasterParticipantKeys, setSelectedMasterParticipantKeys] = useState<string[]>([]);
   const [manualResultsMode, setManualResultsMode] = useState(false);
   const [manualResultOrder, setManualResultOrder] = useState<Record<string, string[]>>({});
@@ -1278,6 +1279,32 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       return parts.every((part) => text.includes(part)) || text.includes(query);
     });
   };
+
+  const lateAddParticipantCandidates = useMemo(() => {
+    const flag = raceKeyMap[selectedRace];
+    const currentEventKeys = new Set(allRiders.map((rider: any) => getMasterParticipantKey(rider)));
+    const eventCandidates = allRiders
+      .filter((rider: any) => !rider.deletedAt && !rider[flag])
+      .map((rider: any) => ({
+        value: `event:${rider.id}`,
+        label: `${rider.plate ? `#${rider.plate} ` : ""}${rider.name || "Ohne Name"} · ${rider.category || getDerivedCategory(rider)}${rider.club ? ` · ${rider.club}` : ""}`,
+        search: getMasterParticipantSearchText(rider),
+        source: "event",
+        rider,
+      }));
+
+    const masterCandidates = getMasterParticipantGroups()
+      .filter((participant: any) => !currentEventKeys.has(participant.key))
+      .map((participant: any) => ({
+        value: `master:${participant.key}`,
+        label: `${participant.plate ? `#${participant.plate} ` : ""}${participant.name || "Ohne Name"} · ${participant.raw?.category || getDerivedCategory(participant.raw || participant)}${participant.club ? ` · ${participant.club}` : ""}`,
+        search: getMasterParticipantSearchText(participant),
+        source: "master",
+        participant,
+      }));
+
+    return [...eventCandidates, ...masterCandidates].sort((a, b) => a.label.localeCompare(b.label, "de-CH", { numeric: true }));
+  }, [allRiders, masterParticipants, managedEvents, selectedRace]);
 
   const addMasterParticipantToCurrentEvent = async (participant: any) => {
     if (!currentEventId) {
@@ -3033,6 +3060,237 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     addChangeLog(`${selectedRace}: Motos erstellt`);
   };
 
+  const getFirstFreeGate = (group: any[]) => {
+    const used = new Set((group || []).map((r: any) => Number(r.startPos)).filter((value: number) => value >= 1 && value <= 8));
+    for (let gate = 1; gate <= 8; gate += 1) {
+      if (!used.has(gate)) return gate;
+    }
+    return 0;
+  };
+
+  const hasRiderInHeatCategory = (categoryHeats: any[][][], riderId: string, stableId: string) =>
+    (categoryHeats || []).some((runGroups: any[][]) =>
+      (runGroups || []).some((group: any[]) =>
+        (group || []).some((r: any) =>
+          String(r.id ?? r.riderId ?? "") === riderId || (!!stableId && String(r.participantId || r.masterId || "") === stableId),
+        ),
+      ),
+    );
+
+  const countUniqueHeatCategoryRiders = (categoryHeats: any[][][]) => {
+    const ids = new Set<string>();
+    (categoryHeats || []).forEach((runGroups: any[][]) => {
+      (runGroups || []).forEach((group: any[]) => {
+        (group || []).forEach((r: any) => {
+          const id = String(r.participantId || r.masterId || r.riderId || r.id || "");
+          if (id) ids.add(id);
+        });
+      });
+    });
+    return ids.size;
+  };
+
+  const replaceRaceCategoryData = (record: Record<string, any>, category: string) =>
+    Object.fromEntries(Object.entries(record || {}).filter(([key]) => !String(key).startsWith(`${category}_`)));
+
+  const getCategoryHeatGroupCapacity = (categoryHeats: any[][][]) => {
+    const groupCount = Math.max(0, ...(categoryHeats || []).map((runGroups: any[][]) => Array.isArray(runGroups) ? runGroups.length : 0));
+    return groupCount * 8;
+  };
+
+  const addRiderToExistingCategoryHeats = (categoryHeats: any[][][], rider: any, heatCategory: string) => {
+    let failed = false;
+    const nextCategoryHeats = (categoryHeats || []).map((runGroups: any[][]) => {
+      const groups = (runGroups || []).map((group: any[]) => [...(group || [])]);
+      let bestGroupIndex = -1;
+      groups.forEach((group, index) => {
+        if (group.length >= 8 || getFirstFreeGate(group) < 1) return;
+        if (bestGroupIndex < 0 || group.length < groups[bestGroupIndex].length) bestGroupIndex = index;
+      });
+      if (bestGroupIndex < 0) {
+        failed = true;
+        return groups;
+      }
+      const gate = getFirstFreeGate(groups[bestGroupIndex]);
+      groups[bestGroupIndex] = [
+        ...groups[bestGroupIndex],
+        {
+          ...rider,
+          riderId: String(rider.id),
+          originalCategory: rider.category,
+          category: heatCategory,
+          startPos: gate,
+        },
+      ].sort((a: any, b: any) => (a.startPos || 99) - (b.startPos || 99));
+      return groups;
+    });
+
+    if (failed || nextCategoryHeats.length === 0) return null;
+    return nextCategoryHeats;
+  };
+
+  const rebuildSingleHeatCategory = (raceRiders: any[], heatCategory: string) => {
+    const heatRiders = raceRiders
+      .filter((rider: any) => getEffectiveHeatCategory(rider.category) === heatCategory)
+      .map((rider: any) => ({
+        ...rider,
+        originalCategory: rider.category,
+        category: heatCategory,
+      }));
+    const generated = generateCategoryHeats(heatRiders);
+    return generated[heatCategory] || [];
+  };
+
+  const addLateParticipantToCurrentRace = async () => {
+    if (raceClosed) {
+      window.alert("Dieses Race ist abgeschlossen. Für Änderungen Race zuerst wieder öffnen.");
+      return;
+    }
+    if (!Object.keys(heats || {}).length) {
+      window.alert("Bitte zuerst Motos erstellen. Danach können Teilnehmer nachträglich ergänzt werden.");
+      return;
+    }
+    if (!lateAddParticipantValue) {
+      window.alert("Bitte zuerst einen Teilnehmer auswählen.");
+      return;
+    }
+
+    const selected = lateAddParticipantCandidates.find((candidate: any) => candidate.value === lateAddParticipantValue);
+    if (!selected) {
+      window.alert("Der ausgewählte Teilnehmer wurde nicht gefunden.");
+      return;
+    }
+
+    const flag = raceKeyMap[selectedRace];
+    const allRows = (await db.table("riders").toArray()).map(normalizeRider).filter((r: any) => !r.deletedAt);
+    let rider: any | null = null;
+
+    if (selected.source === "event") {
+      rider = allRows.find((row: any) => String(row.id || "") === String(selected.rider?.id || "")) || selected.rider;
+      if (!rider?.id) {
+        window.alert("Der Teilnehmer konnte im aktuellen Rennen nicht gefunden werden.");
+        return;
+      }
+      await db.table("riders").update(rider.id, { [flag]: true });
+      rider = { ...rider, [flag]: true };
+    } else {
+      const source = selected.participant?.raw || selected.participant;
+      const stableId = String(selected.participant?.masterId || source?.participantId || source?.masterId || source?.id || crypto.randomUUID());
+      const newId = crypto.randomUUID();
+      rider = normalizeRider({
+        id: newId,
+        participantId: stableId,
+        masterId: stableId,
+        name: source?.name || selected.participant?.name || "",
+        plate: source?.plate || selected.participant?.plate || "",
+        birthYear: Number(source?.birthYear || source?.jahrgang || selected.participant?.birthYear) || undefined,
+        jahrgang: Number(source?.birthYear || source?.jahrgang || selected.participant?.birthYear) || undefined,
+        gender: source?.gender || source?.geschlecht || selected.participant?.gender || "",
+        geschlecht: source?.gender || source?.geschlecht || selected.participant?.gender || "",
+        club: source?.club || selected.participant?.club || "",
+        cruiser: !!(source?.cruiser || source?.isCruiser || selected.participant?.cruiser),
+        isCruiser: !!(source?.cruiser || source?.isCruiser || selected.participant?.cruiser),
+        eventId: currentEventId || "legacy",
+        ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false])),
+        [flag]: true,
+      });
+      await db.table("riders").add(rider);
+    }
+
+    const rollbackLateAdd = async () => {
+      if (!rider?.id) return;
+      if (selected.source === "master") await db.table("riders").delete(rider.id);
+      else await db.table("riders").update(rider.id, { [flag]: false });
+    };
+
+    const heatCategory = getEffectiveHeatCategory(rider.category);
+    const categoryHeats = heats[heatCategory] || [];
+    const riderId = String(rider.id || "");
+    const stableId = getParticipantStableId(rider);
+    if (hasRiderInHeatCategory(categoryHeats, riderId, stableId)) {
+      window.alert("Dieser Teilnehmer ist in den Motos dieser Kategorie bereits vorhanden.");
+      await rollbackLateAdd();
+      await loadAllRiders();
+      await loadRaceRiders();
+      return;
+    }
+
+    const raceRidersAfter = allRows
+      .filter((row: any) => belongsToCurrentEvent(row))
+      .map((row: any) => String(row.id || "") === riderId ? { ...row, [flag]: true } : row)
+      .concat(selected.source === "master" ? [rider] : [])
+      .filter((row: any) => !!row[flag]);
+
+    const existingCount = countUniqueHeatCategoryRiders(categoryHeats);
+    const nextCount = Math.max(existingCount + 1, raceRidersAfter.filter((row: any) => getEffectiveHeatCategory(row.category) === heatCategory).length);
+    const capacity = getCategoryHeatGroupCapacity(categoryHeats);
+    const categoryHasSavedData = Object.keys(results || {}).some((key) => key.startsWith(`${heatCategory}_`)) || !!finals[getEffectiveFinalCategory(rider.category)] || Object.keys(finalResults || {}).some((key) => key.startsWith(`${getEffectiveFinalCategory(rider.category)}_`));
+    const needsRebuild = !categoryHeats.length || capacity < nextCount;
+
+    if (needsRebuild) {
+      const threshold = capacity || 8;
+      const savedDataText = categoryHasSavedData ? "\n\nGespeicherte Resultate/Finals dieser Kategorie werden entfernt, damit die Kategorie neu gefahren oder neu erfasst werden kann." : "";
+      const proceed = window.confirm(
+        categoryHeats.length
+          ? `Achtung, Anzahl grösser ${threshold}. Soll bei dieser Kategorie neue Motos erstellt werden?
+
+Nur die Kategorie "${heatCategory}" wird neu eingeteilt. Bestehende Motos anderer Kategorien bleiben unverändert.${savedDataText}`
+          : `Für die Kategorie "${heatCategory}" existieren noch keine Motos. Soll diese Kategorie jetzt mit dem nachgemeldeten Teilnehmer erstellt werden?${savedDataText}`,
+      );
+      if (!proceed) {
+        await rollbackLateAdd();
+        await loadAllRiders();
+        await loadRaceRiders();
+        return;
+      }
+      await exportBackup(`Sicherheitsbackup vor Nachmeldung in ${heatCategory}`);
+      const rebuiltCategoryHeats = rebuildSingleHeatCategory(raceRidersAfter, heatCategory);
+      setHeats(orderRecordByCategories({ ...(heats || {}), [heatCategory]: rebuiltCategoryHeats }));
+    } else {
+      if (categoryHasSavedData) {
+        const proceed = window.confirm(
+          `Für die Kategorie "${heatCategory}" existieren bereits Resultate oder Finals.
+
+Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Finals dieser Kategorie werden entfernt, damit die Rangliste neu erfasst werden kann.`,
+        );
+        if (!proceed) {
+          await rollbackLateAdd();
+          await loadAllRiders();
+          await loadRaceRiders();
+          return;
+        }
+        await exportBackup(`Sicherheitsbackup vor Nachmeldung in ${heatCategory}`);
+      }
+      const nextCategoryHeats = addRiderToExistingCategoryHeats(categoryHeats, rider, heatCategory);
+      if (!nextCategoryHeats) {
+        window.alert("In dieser Kategorie konnte kein freier Gate-Platz gefunden werden. Bitte Kategorie neu einteilen.");
+        await rollbackLateAdd();
+        await loadAllRiders();
+        await loadRaceRiders();
+        return;
+      }
+      setHeats(orderRecordByCategories({ ...(heats || {}), [heatCategory]: nextCategoryHeats }));
+    }
+
+    const finalCategory = getEffectiveFinalCategory(rider.category);
+    const nextResults = replaceRaceCategoryData(results, heatCategory);
+    const nextFinals = { ...(finals || {}) };
+    delete nextFinals[finalCategory];
+    const nextFinalResults = replaceRaceCategoryData(finalResults, finalCategory);
+    const nextFinalManualOrder = { ...(finalManualOrder || {}) };
+    delete nextFinalManualOrder[finalCategory];
+
+    setResults(nextResults);
+    setFinals(nextFinals);
+    setFinalResults(nextFinalResults);
+    setFinalManualOrder(nextFinalManualOrder);
+    setLateAddParticipantValue("");
+    await loadAllRiders();
+    await loadRaceRiders();
+    addChangeLog(`${selectedRace}: Teilnehmer nachträglich hinzugefügt (${rider.name || "Ohne Name"})`);
+    setTimeout(() => scrollToSection("vorlauf-1"), 0);
+  };
+
   const resetHeats = async () => {
     if (
       !window.confirm(
@@ -3903,11 +4161,42 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
       <div style={{ color: "#999" }}>-</div>
     );
 
+  const startListTableStyle: React.CSSProperties = {
+    width: "100%",
+    display: "grid",
+    gridTemplateColumns: "54px 80px minmax(150px, 1fr) 95px minmax(120px, 0.8fr)",
+    gap: 10,
+    alignItems: "center",
+  };
+
+  const renderStartListHeader = () => (
+    <div style={{ ...startListTableStyle, fontWeight: 800, color: colors.title, borderBottom: "1px solid #d8e0e6", paddingBottom: 6, marginBottom: 4 }}>
+      <div>Gate</div>
+      <div>Plate</div>
+      <div>Name</div>
+      <div>Jg | B/G</div>
+      <div>Verein</div>
+    </div>
+  );
+
+  const renderStartListCells = (r: any) => (
+    <div style={{ ...startListTableStyle, minHeight: ROW_HEIGHT, overflow: "hidden" }}>
+      <div style={{ fontWeight: 950, color: colors.blueBtn }}>{r.startPos || "-"}</div>
+      <div style={{ fontWeight: 800 }}>#{r.plate}</div>
+      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div>{r.name}</div>
+        <div style={{ color: colors.muted, fontSize: 11, fontFamily: "monospace" }}>ID: {getParticipantStableId(r).slice(0, 8) || "-"}</div>
+      </div>
+      <div>{getRiderMetaLabel(r)}</div>
+      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.club || "-"}</div>
+    </div>
+  );
+
   const renderStartList = (heat: any[]) => (
     <div style={{ flex: "0 0 44%", ...basePanelStyle }}>
       <strong style={{ color: colors.title }}>Startliste</strong>
       <div style={{ ...listBoxStyle, marginTop: 8 }}>
-        {renderRiderTableHeader()}
+        {renderStartListHeader()}
         {[...heat]
           .sort((a: any, b: any) => (a.startPos || 99) - (b.startPos || 99))
           .map((r: any) => (
@@ -3920,7 +4209,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
                 overflow: "hidden",
               }}
             >
-              {renderRiderCells(r)}
+              {renderStartListCells(r)}
             </div>
           ))}
       </div>
@@ -7350,6 +7639,26 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
           <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <button type="button" onClick={startManualResultsMode} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 52 }}>
               Manuelle Rangliste
+            </button>
+            <select
+              value={lateAddParticipantValue}
+              onChange={(e) => setLateAddParticipantValue(e.target.value)}
+              disabled={raceClosed || !heatsCreated || lateAddParticipantCandidates.length === 0}
+              style={{ ...inputStyle, minWidth: 320, minHeight: 52, opacity: raceClosed || !heatsCreated ? 0.65 : 1 }}
+              title={!heatsCreated ? "Zuerst Motos erstellen." : undefined}
+            >
+              <option value="">Teilnehmer für Nachmeldung wählen</option>
+              {lateAddParticipantCandidates.map((candidate: any) => (
+                <option key={candidate.value} value={candidate.value}>{candidate.label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={addLateParticipantToCurrentRace}
+              disabled={raceClosed || !heatsCreated || !lateAddParticipantValue}
+              style={raceClosed || !heatsCreated || !lateAddParticipantValue ? compactDisabledButtonStyle : actionWarningButtonStyle}
+            >
+              Teilnehmer nachträglich hinzufügen
             </button>
             <button type="button" onClick={saveAndExportFullBackup} style={actionSaveButtonStyle}>
               Backup / Speichern
