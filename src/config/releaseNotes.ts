@@ -8,10 +8,21 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.14.2",
+    title: "Buildfix Nachmeldungen",
+    date: "2026-08-17",
+    current: true,
+    items: [
+      "TypeScript-Buildfehler in der Nachmelde-Auswahl korrigiert.",
+      "Teilnehmer nachträglich hinzufügen verwendet intern nun eine einheitlich typisierte Auswahl.",
+      "Keine Änderung an Rennlogik, Gates, Motos, Resultaten oder bestehenden Daten.",
+    ],
+  },
+  {
     version: "v1.14.1",
     title: "Gate-Anzeige und Nachmeldungen",
     date: "2026-08-17",
-    current: true,
+    current: false,
     items: [
       "In den Moto- und Final-Startlisten wird links von Plate neu die Spalte Gate angezeigt.",
       "Unter Notfall / Reparatur gibt es neu Teilnehmer nachträglich hinzufügen.",
