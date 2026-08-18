@@ -8,10 +8,26 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.3",
+    title: "Öffentliche Live-Rennansicht",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Öffentliche Zuschaueransicht ohne Login über den Link #live ergänzt.",
+      "Auf der Rennseite kann das aktuell geöffnete Rennen live veröffentlicht, aktualisiert oder beendet werden.",
+      "Die Live-Ansicht lädt automatisch alle 30 Sekunden neu und zeigt nur Motos, Startlisten, Resultate, Finals und Finalresultate des aktiven Rennens.",
+      "Teilnehmer-Hauptdatenbank, Gesamtwertung, Backups, Speicherfunktionen, Bearbeiten-Buttons und interne IDs bleiben in der Live-Ansicht verborgen.",
+      "Beim Online-Speichern wird ein bereits live veröffentlichtes aktuelles Rennen automatisch mit aktualisiert.",
+      "Login-Startseite erhält einen Button Zuschaueransicht öffnen.",
+      "Neue Firestore-Regeln trennen private App-Daten von öffentlich lesbaren Live-Renn-Daten.",
+      "Keine Änderung an Rennlogik, Teilnehmerlogik oder Resultatberechnung.",
+    ],
+  },
+  {
     version: "v1.16.2",
     title: "Login-Weiterleitung korrigiert",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Fehler korrigiert, bei dem der Login erfolgreich geprüft wurde, die App danach aber auf der Login-Startseite stehen blieb.",
       "Der Online-Status wird nach dem Login jetzt mit der frisch erhaltenen Firebase-Sitzung geprüft, ohne die Anmeldung versehentlich zurückzusetzen.",
