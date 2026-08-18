@@ -8,7 +8,8 @@ import ReleaseNotes from "./components/ReleaseNotes";
 import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KEYS } from "./config/appConfig";
 import { appStorage, encodeStorageValue } from "./utils/storage";
 import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
-import { createOnlineBackup, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, saveOnlineAppState, type OnlineBackupListItem, type OnlineStorageStatus } from "./utils/onlineStorage";
+import { createOnlineBackup, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, saveOnlineAppState, setOnlineStorageAuthToken, type OnlineBackupListItem, type OnlineStorageStatus } from "./utils/onlineStorage";
+import { getValidFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
@@ -164,6 +165,11 @@ export default function App() {
   const [selectedOnlineBackupId, setSelectedOnlineBackupId] = useState("");
   const [onlineStatusLoading, setOnlineStatusLoading] = useState(false);
   const [showAdvancedStorageOptions, setShowAdvancedStorageOptions] = useState(false);
+  const [firebaseAuthSession, setFirebaseAuthSession] = useState<FirebaseAuthSession | null>(null);
+  const [firebaseAuthEmail, setFirebaseAuthEmail] = useState("");
+  const [firebaseAuthPassword, setFirebaseAuthPassword] = useState("");
+  const [firebaseAuthLoading, setFirebaseAuthLoading] = useState(false);
+  const [firebaseAuthMessage, setFirebaseAuthMessage] = useState("");
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [loadedRace, setLoadedRace] = useState<RaceName | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -2328,6 +2334,24 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     } catch {
       setDuplicateOkKeys([]);
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const restoreFirebaseLogin = async () => {
+      const session = await getValidFirebaseAuthSession();
+      if (cancelled) return;
+      setFirebaseAuthSession(session);
+      setOnlineStorageAuthToken(session?.idToken || "");
+      if (session?.email) {
+        setFirebaseAuthEmail(session.email);
+        setFirebaseAuthMessage(`Angemeldet als ${session.email}`);
+      }
+    };
+    restoreFirebaseLogin();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -5603,14 +5627,66 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     return `${Math.max(1, Math.round(kiloBytes))} KB`;
   };
 
-  const refreshOnlineStatus = async (showAlert = false) => {
+  const isFirebaseSignedIn = Boolean(firebaseAuthSession?.idToken);
+
+  const ensureOnlineAuthSession = async (actionLabel = "Online-Funktion", showAlert = true) => {
     if (!isOnlineStorageConfigured()) {
-      const message = "Online-Speicher ist noch nicht konfiguriert. Prüfe die Vercel Environment Variables.";
+      const message = "Online-Speicher ist noch nicht konfiguriert. Bitte Vercel Environment Variables prüfen.";
       setOnlineStatus({ ok: false, exists: false, message });
       setOnlineStorageMessage(message);
       if (showAlert) window.alert(message);
       return null;
     }
+
+    const session = await getValidFirebaseAuthSession();
+    if (session?.idToken) {
+      setFirebaseAuthSession(session);
+      setOnlineStorageAuthToken(session.idToken);
+      if (session.email) setFirebaseAuthEmail(session.email);
+      return session;
+    }
+
+    setFirebaseAuthSession(null);
+    setOnlineStorageAuthToken("");
+    const message = `${actionLabel} benötigt eine Anmeldung. Bitte zuerst mit Firebase E-Mail und Passwort anmelden.`;
+    setFirebaseAuthMessage(message);
+    setOnlineStorageMessage(message);
+    if (showAlert) window.alert(message);
+    return null;
+  };
+
+  const loginFirebaseAuth = async () => {
+    try {
+      setFirebaseAuthLoading(true);
+      setFirebaseAuthMessage("Anmeldung läuft ...");
+      const session = await signInWithFirebaseEmailPassword(firebaseAuthEmail, firebaseAuthPassword);
+      setFirebaseAuthSession(session);
+      setOnlineStorageAuthToken(session.idToken);
+      setFirebaseAuthPassword("");
+      setFirebaseAuthMessage(`Angemeldet als ${session.email}`);
+      setOnlineStorageMessage(`Angemeldet als ${session.email}`);
+      await refreshOnlineStatus(false);
+    } catch (error: any) {
+      const message = error?.message || "Firebase Login fehlgeschlagen.";
+      setFirebaseAuthMessage(message);
+      window.alert(message);
+    } finally {
+      setFirebaseAuthLoading(false);
+    }
+  };
+
+  const logoutFirebaseAuth = () => {
+    signOutFirebaseAuth();
+    setFirebaseAuthSession(null);
+    setOnlineStorageAuthToken("");
+    setFirebaseAuthPassword("");
+    setOnlineStorageMessage("Abgemeldet. Online speichern/laden ist gesperrt.");
+    setFirebaseAuthMessage("Abgemeldet. Bitte neu anmelden, um online zu speichern oder zu laden.");
+  };
+
+  const refreshOnlineStatus = async (showAlert = false) => {
+    const authSession = await ensureOnlineAuthSession("Online-Status prüfen", showAlert);
+    if (!authSession) return null;
 
     try {
       setOnlineStatusLoading(true);
@@ -5645,10 +5721,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   };
 
   const saveOnlineFullAppState = async () => {
-    if (!isOnlineStorageConfigured()) {
-      window.alert("Online-Speicher ist noch nicht konfiguriert. Bitte Vercel Environment Variables prüfen.");
-      return false;
-    }
+    const authSession = await ensureOnlineAuthSession("Online speichern");
+    if (!authSession) return false;
 
     try {
       setOnlineStorageMessage("Online speichern läuft ...");
@@ -5775,10 +5849,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   };
 
   const loadOnlineFullAppState = async () => {
-    if (!isOnlineStorageConfigured()) {
-      window.alert("Online-Speicher ist noch nicht konfiguriert. Bitte Vercel Environment Variables prüfen.");
-      return;
-    }
+    const authSession = await ensureOnlineAuthSession("Letzten Online-Stand laden");
+    if (!authSession) return;
 
     try {
       setOnlineStorageMessage("Letzter Online-Speicherstand wird geprüft ...");
@@ -5809,10 +5881,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   };
 
   const createNamedOnlineBackup = async () => {
-    if (!isOnlineStorageConfigured()) {
-      window.alert("Online-Speicher ist noch nicht konfiguriert. Bitte Vercel Environment Variables prüfen.");
-      return;
-    }
+    const authSession = await ensureOnlineAuthSession("Online-Backup erstellen");
+    if (!authSession) return;
 
     const defaultLabel = `${homeEventSeries || managedEvents.find((event) => event.id === currentEventId)?.name || "BMX Race Manager"} · ${formatDateTime(new Date().toISOString())}`;
     const label = window.prompt("Beschriftung für das Backup eingeben:", defaultLabel);
@@ -5856,6 +5926,9 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   };
 
   const loadSelectedOnlineBackup = async (backupIdOverride?: string) => {
+    const authSession = await ensureOnlineAuthSession("Online-Backup laden");
+    if (!authSession) return;
+
     const backupId = backupIdOverride || selectedOnlineBackupId;
     if (!backupId) {
       window.alert("Bitte zuerst ein Online-Backup auswählen oder Online-Status prüfen.");
@@ -6091,6 +6164,77 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   );
 
 
+  const renderFirebaseAuthBox = () => (
+    <div
+      style={{
+        border: `1px solid ${isFirebaseSignedIn ? colors.greenBorder : colors.warningBorder}`,
+        borderRadius: 18,
+        padding: 14,
+        background: isFirebaseSignedIn ? colors.greenBg : colors.warningBg,
+        marginBottom: 14,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Firebase Login</div>
+          <div style={{ fontWeight: 1000, color: isFirebaseSignedIn ? colors.greenBtn : "#92400e", marginTop: 4, fontSize: 17 }}>
+            {isFirebaseSignedIn ? `Angemeldet als ${firebaseAuthSession?.email || "Firebase Benutzer"}` : "Nicht angemeldet"}
+          </div>
+          <div style={{ fontSize: 13, color: colors.muted, marginTop: 5, fontWeight: 800 }}>
+            Online speichern, online laden und Online-Backups sind nur mit Anmeldung möglich.
+          </div>
+        </div>
+        {isFirebaseSignedIn && (
+          <button type="button" onClick={logoutFirebaseAuth} style={{ ...smallGhostButtonStyle, minHeight: 40 }}>
+            Abmelden
+          </button>
+        )}
+      </div>
+
+      {!isFirebaseSignedIn && (
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(180px, 1fr) auto", gap: 10, alignItems: "end" }}>
+          <div>
+            <label style={labelStyle}>E-Mail</label>
+            <input
+              value={firebaseAuthEmail}
+              onChange={(e) => setFirebaseAuthEmail(e.target.value)}
+              placeholder="deine E-Mail"
+              autoComplete="username"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>Passwort</label>
+            <input
+              type="password"
+              value={firebaseAuthPassword}
+              onChange={(e) => setFirebaseAuthPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") loginFirebaseAuth(); }}
+              placeholder="Firebase Passwort"
+              autoComplete="current-password"
+              style={inputStyle}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={loginFirebaseAuth}
+            disabled={firebaseAuthLoading}
+            style={firebaseAuthLoading ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 46 }}
+          >
+            {firebaseAuthLoading ? "Anmelden ..." : "Anmelden"}
+          </button>
+        </div>
+      )}
+
+      {firebaseAuthMessage && (
+        <div style={{ marginTop: 8, fontSize: 13, fontWeight: 900, color: isFirebaseSignedIn ? "#166534" : "#92400e" }}>
+          {firebaseAuthMessage}
+        </div>
+      )}
+    </div>
+  );
+
+
   const backupWarningBar = null;
 
 
@@ -6171,6 +6315,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
           </div>
 
+          {renderFirebaseAuthBox()}
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 14 }}>
             <div style={{ border: `1px solid ${onlineStatus?.exists ? colors.greenBorder : colors.cardBorder}`, borderRadius: 16, padding: 14, background: onlineStatus?.exists ? colors.greenBg : colors.cardSoftBg }}>
               <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Online</div>
@@ -6204,21 +6350,24 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, marginBottom: 12 }}>
             <button
               onClick={saveOnlineFullAppState}
-              style={{ ...compactSaveButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
+              disabled={!isFirebaseSignedIn}
+              style={!isFirebaseSignedIn ? { ...compactDisabledButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" } : { ...compactSaveButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
             >
               <span style={{ fontSize: 16 }}>Speichern</span>
               <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Aktuellen Stand online sichern</span>
             </button>
             <button
               onClick={loadOnlineFullAppState}
-              style={{ ...compactHomeButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
+              disabled={!isFirebaseSignedIn}
+              style={!isFirebaseSignedIn ? { ...compactDisabledButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" } : { ...compactHomeButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
             >
               <span style={{ fontSize: 16 }}>Letzten Speicherstand laden</span>
               <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.85 }}>Lädt den letzten Online-Stand</span>
             </button>
             <button
               onClick={createNamedOnlineBackup}
-              style={{ ...compactPrimaryButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
+              disabled={!isFirebaseSignedIn}
+              style={!isFirebaseSignedIn ? { ...compactDisabledButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" } : { ...compactPrimaryButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
             >
               <span style={{ fontSize: 16 }}>Backup erstellen</span>
               <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Online + Datei mit Beschriftung</span>
@@ -6234,7 +6383,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
           {showAdvancedStorageOptions && (
             <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch", padding: 12, border: `1px dashed ${colors.cardBorderStrong}`, borderRadius: 14, background: colors.cardSoftBg }}>
-              <button onClick={() => refreshOnlineStatus(true)} disabled={onlineStatusLoading} style={{ ...compactHomeButtonStyle, minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: onlineStatusLoading ? 0.65 : 1 }}>
+              <button onClick={() => refreshOnlineStatus(true)} disabled={onlineStatusLoading || !isFirebaseSignedIn} style={{ ...(!isFirebaseSignedIn ? compactDisabledButtonStyle : compactHomeButtonStyle), minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: onlineStatusLoading ? 0.65 : 1 }}>
                 Online-Status prüfen
               </button>
               <label style={{ ...compactHomeButtonStyle, minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
@@ -6298,7 +6447,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                           setSelectedOnlineBackupId(backup.id);
                           loadSelectedOnlineBackup(backup.id);
                         }}
-                        style={{ ...compactHomeButtonStyle, minHeight: 38, display: "inline-flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap" }}
+                        disabled={!isFirebaseSignedIn}
+                        style={{ ...(!isFirebaseSignedIn ? compactDisabledButtonStyle : compactHomeButtonStyle), minHeight: 38, display: "inline-flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap" }}
                       >
                         Laden
                       </button>
@@ -8093,8 +8243,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             <button
               type="button"
               onClick={saveOnlineFullAppState}
-              style={{ ...(hasUnsavedChanges || !lastOnlineSaveAt ? actionWarningButtonStyle : actionSaveButtonStyle), minHeight: 52 }}
-              title={hasUnsavedChanges || !lastOnlineSaveAt ? "Änderungen vorhanden – online speichern" : "Aktueller Stand ist online gespeichert"}
+              disabled={!isFirebaseSignedIn}
+              style={{ ...(!isFirebaseSignedIn ? compactDisabledButtonStyle : (hasUnsavedChanges || !lastOnlineSaveAt ? actionWarningButtonStyle : actionSaveButtonStyle)), minHeight: 52 }}
+              title={!isFirebaseSignedIn ? "Bitte zuerst auf der Startseite anmelden" : hasUnsavedChanges || !lastOnlineSaveAt ? "Änderungen vorhanden – online speichern" : "Aktueller Stand ist online gespeichert"}
             >
               Speichern
             </button>
