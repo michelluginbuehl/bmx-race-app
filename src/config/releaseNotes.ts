@@ -8,10 +8,22 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.14.6",
+    title: "Teilnehmer-Auswahlbuttons bereinigt",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Im Bereich Teilnehmer in dieser Rennserie / diesem Rennen wurden die Race-Alle-Auswahlbuttons entfernt.",
+      "Alle Kategorie-auswählen-Buttons innerhalb der Kategorien wurden entfernt.",
+      "Die Auswahl der Fahrer erfolgt weiterhin direkt über die Race-Checkboxen R1, R2, R3 und R4 in der Tabelle.",
+      "Keine Änderung an Teilnehmerdaten, Race-Zuordnung, Resultaten, Motos, Gates oder Backups.",
+    ],
+  },
+  {
     version: "v1.14.5",
     title: "Teilnehmerliste übersichtlicher",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Im Bereich Teilnehmer in dieser Rennserie / diesem Rennen wurden die Kategorie-Auswahlbuttons entfernt.",
       "Die Filterbuttons Alle, Race ausgewählt, Race offen, Fehlende Angaben, Doppelte Nummern und Cruiser sind jetzt gleich hoch und optisch einheitlich.",
