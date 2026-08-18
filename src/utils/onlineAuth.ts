@@ -12,36 +12,13 @@ export type FirebaseAuthSession = {
 const AUTH_STORAGE_KEY = "bmx_firebase_auth_session_v1";
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
-const safeJsonParse = (value: string | null) => {
-  if (!value) return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-};
-
-const persistSession = (session: FirebaseAuthSession) => {
-  try {
-    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-  } catch {
-    // Anmeldung bleibt in dieser Browser-Sitzung trotzdem im React-State erhalten.
-  }
+const persistSession = (_session: FirebaseAuthSession) => {
+  // Absichtlich keine dauerhafte Speicherung:
+  // Nach Neuladen, Schliessen der App oder neuem Öffnen ist wieder ein Login nötig.
 };
 
 const readRawStoredSession = (): FirebaseAuthSession | null => {
-  if (typeof window === "undefined") return null;
-  const parsed = safeJsonParse(window.localStorage.getItem(AUTH_STORAGE_KEY));
-  if (!parsed || typeof parsed !== "object") return null;
-  if (!parsed.idToken || !parsed.refreshToken || !parsed.email) return null;
-  return {
-    email: String(parsed.email || ""),
-    localId: String(parsed.localId || ""),
-    idToken: String(parsed.idToken || ""),
-    refreshToken: String(parsed.refreshToken || ""),
-    expiresAt: String(parsed.expiresAt || ""),
-    signedInAt: String(parsed.signedInAt || ""),
-  };
+  return null;
 };
 
 export const getStoredFirebaseAuthSession = () => readRawStoredSession();
