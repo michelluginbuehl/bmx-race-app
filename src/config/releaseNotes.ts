@@ -8,10 +8,24 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.14.4",
+    title: "Teilnehmer direkt im Rennen erfassen und auswählen",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Im Teilnehmerbereich eines Rennens kann jetzt direkt ein neuer Teilnehmer erfasst werden, ohne zurück ins Hauptmenü zu wechseln.",
+      "Neue Teilnehmer erhalten weiterhin automatisch eine stabile Teilnehmer-ID und werden direkt dem aktuell gewählten Race zugeordnet.",
+      "Die Teilnehmerauswahl wurde übersichtlicher nach Kategorien gruppiert.",
+      "Teilnehmer können per Suche, Kategorie-Filter, Mehrfachauswahl oder Kategorie-Schnellaktion zum aktuellen Race hinzugefügt werden.",
+      "Der Teilnehmerlisten-Filter zeigt neu auch nur ausgewählte oder noch offene Teilnehmer für das aktuelle Race an.",
+      "Nach bereits erstellten Motos bleibt die bestehende Notfall-Nachmeldung zuständig, damit Gate-Zuteilungen geschützt bleiben.",
+    ],
+  },
+  {
     version: "v1.14.2",
     title: "Buildfix Nachmeldungen",
     date: "2026-08-17",
-    current: true,
+    current: false,
     items: [
       "TypeScript-Buildfehler in der Nachmelde-Auswahl korrigiert.",
       "Teilnehmer nachträglich hinzufügen verwendet intern nun eine einheitlich typisierte Auswahl.",
