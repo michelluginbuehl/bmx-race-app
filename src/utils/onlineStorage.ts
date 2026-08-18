@@ -25,6 +25,7 @@ const encodePathPart = (part: string) => encodeURIComponent(part.trim());
 
 const getFirestoreDocumentUrl = (extraPath = "") => {
   const { projectId, apiKey, collectionPath, documentId } = firebaseOnlineStorageConfig;
+  const databaseId = String((firebaseOnlineStorageConfig as any).databaseId || "default").trim() || "default";
   const cleanCollection = collectionPath.trim().replace(/^\/+|\/+$/g, "");
   const cleanDocument = documentId.trim().replace(/^\/+|\/+$/g, "");
   const basePath = `${cleanCollection}/${cleanDocument}`;
@@ -34,7 +35,7 @@ const getFirestoreDocumentUrl = (extraPath = "") => {
     .map(encodePathPart)
     .join("/");
 
-  return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId.trim())}/databases/(default)/documents/${fullPath}?key=${encodeURIComponent(apiKey.trim())}`;
+  return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId.trim())}/databases/${encodeURIComponent(databaseId)}/documents/${fullPath}?key=${encodeURIComponent(apiKey.trim())}`;
 };
 
 const parseFirestoreError = async (response: Response) => {
