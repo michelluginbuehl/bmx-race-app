@@ -7094,7 +7094,6 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 12px", background: colors.tableHeadBg }}>
                           <strong style={{ color: colors.title }}>{category} ({categoryItems.length})</strong>
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            <button type="button" onClick={() => selectVisibleMasterParticipantCategory(category)} style={smallGhostButtonStyle}>Kategorie auswählen</button>
                             <button type="button" onClick={() => addVisibleMasterParticipantCategoryToCurrentRace(category)} style={smallGhostButtonStyle}>Alle zu {selectedRace}</button>
                           </div>
                         </div>
@@ -7269,41 +7268,55 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
             Cruiser wird separat gewertet.
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(260px, 1fr) repeat(6, auto)",
-              gap: 10,
-              alignItems: "center",
-              marginBottom: 14,
-            }}
-          >
+          <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
             <input
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
               placeholder="Fahrer suchen: Name, Startnummer, Verein, Kategorie ..."
               style={inputStyle}
             />
-            {[
-              ["all", "Alle"],
-              ["selectedRace", `${selectedRace} ausgewählt`],
-              ["notSelectedRace", `${selectedRace} offen`],
-              ["missing", "Fehlende Angaben"],
-              ["duplicates", "Doppelte Nummern"],
-              ["cruiser", "Cruiser"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setParticipantQuickFilter(key as any)}
-                style={
-                  participantQuickFilter === key
-                    ? activeRaceButtonStyle
-                    : secondaryButtonStyle
-                }
-              >
-                {label}
-              </button>
-            ))}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
+                gap: 10,
+                alignItems: "stretch",
+              }}
+            >
+              {[
+                ["all", "Alle"],
+                ["selectedRace", `${selectedRace} ausgewählt`],
+                ["notSelectedRace", `${selectedRace} offen`],
+                ["missing", "Fehlende Angaben"],
+                ["duplicates", "Doppelte Nummern"],
+                ["cruiser", "Cruiser"],
+              ].map(([key, label]) => {
+                const active = participantQuickFilter === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setParticipantQuickFilter(key as any)}
+                    style={{
+                      ...(active ? activeRaceButtonStyle : secondaryButtonStyle),
+                      width: "100%",
+                      minHeight: 52,
+                      height: 52,
+                      padding: "8px 10px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      textAlign: "center",
+                      fontSize: 13,
+                      lineHeight: 1.15,
+                      boxSizing: "border-box",
+                      whiteSpace: "normal",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {(() => {
