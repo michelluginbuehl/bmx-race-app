@@ -8,10 +8,24 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.8",
+    title: "Dublettenhilfe und Plate-Historie",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Beim Erfassen eines Teilnehmers in der Hauptdatenbank werden während der Namenseingabe ähnliche bereits gespeicherte Teilnehmer angezeigt.",
+      "Die Dublettenhilfe zeigt Name, Startnummer, Jahrgang, Geschlecht, Verein, Ähnlichkeitswert und Teilnehmer-ID an.",
+      "Ein erkannter bestehender Teilnehmer kann direkt zur Bearbeitung geöffnet werden, damit keine unnötige Dublette entsteht.",
+      "Wird eine Startnummer/Plate geändert, bleibt die alte Plate in bereits abgeschlossenen Rennen in gespeicherten Motos, Resultaten und Finals erhalten.",
+      "Zukünftige und noch offene Rennen verwenden weiterhin die neu gespeicherte Plate.",
+      "Keine Änderung an Rennlogik, Punkteberechnung oder Finalerstellung.",
+    ],
+  },
+  {
     version: "v1.15.7",
     title: "Online-Speichern als Standard",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Obere Backup-Warnzeile wurde vollständig entfernt; Speicher- und Backup-Funktionen liegen nur noch im Bereich Speicher auf der Startseite.",
       "Status-Chips Ungespeichert und Backup empfohlen wurden aus dem Header-Banner entfernt.",
