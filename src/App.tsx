@@ -186,6 +186,8 @@ export default function App() {
   const [adminLiveRace, setAdminLiveRace] = useState<PublicLiveRacePayload | null>(null);
   const [liveRaceMessage, setLiveRaceMessage] = useState("");
   const [liveRaceLoading, setLiveRaceLoading] = useState(false);
+  const liveAutoPublishInProgressRef = useRef(false);
+  const liveAutoPublishCallbackRef = useRef<() => Promise<void>>(async () => undefined);
 
   const colors: Record<string, string> = {
     pageBg: "#eef3f7",
@@ -5466,6 +5468,22 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       return;
     setRaceClosed(true);
     addChangeLog(`${selectedRace}: abgeschlossen`);
+
+    if (isCurrentRaceLive) {
+      const shouldEndLive = window.confirm(
+        `${selectedRace} wurde abgeschlossen.\n\nSoll die öffentliche Live-Ansicht jetzt auch beendet werden?\n\nOK = Live-Ansicht beenden\nAbbrechen = Live-Ansicht weiter anzeigen`,
+      );
+      if (shouldEndLive) {
+        window.setTimeout(() => {
+          void deactivateCurrentRaceLive(true);
+        }, 0);
+      } else {
+        setLiveRaceMessage("Race abgeschlossen. Live-Ansicht bleibt aktiv und wird automatisch aktualisiert.");
+        window.setTimeout(() => {
+          void liveAutoPublishCallbackRef.current();
+        }, 500);
+      }
+    }
   };
 
   const overallByCategory = generatedOverallByCategory;
@@ -6290,45 +6308,62 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     }
   };
 
-  const publishCurrentRaceLive = async () => {
-    const authSession = await ensureOnlineAuthSession("Live-Rennen veröffentlichen");
+  const publishCurrentRaceLiveSnapshot = async (options: { manual?: boolean; showLoading?: boolean; saveLocalFirst?: boolean } = {}) => {
+    const { manual = false, showLoading = false, saveLocalFirst = false } = options;
+    const authSession = await ensureOnlineAuthSession(manual ? "Live-Rennen veröffentlichen" : "Live-Rennen automatisch aktualisieren", manual);
     if (!authSession) return false;
 
     if (!currentEventId) {
-      window.alert("Bitte zuerst ein Rennen öffnen.");
+      if (manual) window.alert("Bitte zuerst ein Rennen öffnen.");
       return false;
     }
 
     try {
-      setLiveRaceLoading(true);
-      setLiveRaceMessage("Live-Rennen wird veröffentlicht ...");
-      await saveCurrentState();
+      if (showLoading) setLiveRaceLoading(true);
+      setLiveRaceMessage(manual ? "Live-Rennen wird veröffentlicht ..." : "Live-Rennen wird automatisch aktualisiert ...");
+      if (saveLocalFirst) await saveCurrentState();
       const payload = buildPublicLiveRacePayload();
       const result = await publishPublicLiveRace(payload);
       if (!result.ok) throw new Error(result.message || "Live-Rennen konnte nicht veröffentlicht werden.");
       const updatedPayload = { ...payload, updatedAt: result.updatedAt || payload.updatedAt, active: true };
       setAdminLiveRace(updatedPayload);
-      setLiveRaceMessage(`Live veröffentlicht: ${payload.eventName} · ${payload.raceName} · ${formatDateTime(updatedPayload.updatedAt)}`);
-      addChangeLog(`${selectedRace}: Live-Rennen veröffentlicht`);
+      setLiveRaceMessage(
+        manual
+          ? `Live veröffentlicht: ${payload.eventName} · ${payload.raceName} · ${formatDateTime(updatedPayload.updatedAt)}`
+          : `Live automatisch aktualisiert: ${formatDateTime(updatedPayload.updatedAt)}`
+      );
+      if (manual) addChangeLog(`${selectedRace}: Live-Rennen veröffentlicht/aktualisiert`);
       return true;
     } catch (error: any) {
-      const message = `Live-Veröffentlichung fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`;
+      const message = manual
+        ? `Live-Veröffentlichung fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`
+        : `Automatische Live-Aktualisierung fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`;
       setLiveRaceMessage(message);
-      window.alert(message);
+      if (manual) window.alert(message);
       return false;
     } finally {
-      setLiveRaceLoading(false);
+      if (showLoading) setLiveRaceLoading(false);
     }
   };
 
-  const deactivateCurrentRaceLive = async () => {
+  liveAutoPublishCallbackRef.current = async () => {
+    await publishCurrentRaceLiveSnapshot({ manual: false, showLoading: false, saveLocalFirst: false });
+  };
+
+  const publishCurrentRaceLive = async () => {
+    return publishCurrentRaceLiveSnapshot({ manual: true, showLoading: true, saveLocalFirst: true });
+  };
+
+  const deactivateCurrentRaceLive = async (skipConfirm = false) => {
     const authSession = await ensureOnlineAuthSession("Live-Rennen beenden");
     if (!authSession) return false;
 
-    const ok = window.confirm(
-      `Live-Ansicht beenden?\n\nDie Zuschauer sehen danach kein aktives Live-Rennen mehr. Die internen Renn- und Resultatdaten bleiben unverändert.`,
-    );
-    if (!ok) return false;
+    if (!skipConfirm) {
+      const ok = window.confirm(
+        `Live-Ansicht beenden?\n\nDie Zuschauer sehen danach kein aktives Live-Rennen mehr. Die internen Renn- und Resultatdaten bleiben unverändert.`,
+      );
+      if (!ok) return false;
+    }
 
     try {
       setLiveRaceLoading(true);
@@ -6382,6 +6417,20 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     if (!firebaseAuthReady || !isFirebaseSignedIn || appShellView !== "manager" || !currentEventId) return;
     refreshAdminLiveRaceStatus(false);
   }, [firebaseAuthReady, isFirebaseSignedIn, appShellView, currentEventId, selectedRace]);
+
+  useEffect(() => {
+    if (!firebaseAuthReady || !isFirebaseSignedIn || appShellView !== "manager" || !currentEventId || !isCurrentRaceLive) return;
+    const publishAutomatically = () => {
+      if (liveAutoPublishInProgressRef.current) return;
+      liveAutoPublishInProgressRef.current = true;
+      liveAutoPublishCallbackRef.current().finally(() => {
+        liveAutoPublishInProgressRef.current = false;
+      });
+    };
+
+    const timer = window.setInterval(publishAutomatically, 30_000);
+    return () => window.clearInterval(timer);
+  }, [firebaseAuthReady, isFirebaseSignedIn, appShellView, currentEventId, selectedRace, isCurrentRaceLive]);
 
   useEffect(() => {
     if (appShellView !== "events") return;
@@ -8990,14 +9039,15 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 </div>
                 <div style={{ color: colors.muted, fontSize: 13, fontWeight: 850, marginTop: 4 }}>
                   Öffentlich sichtbar: Motos, Startlisten, Resultate und Finals. Nicht sichtbar: Teilnehmerdatenbank, Gesamtwertung, Backups und Bearbeitung.
+                  {isCurrentRaceLive ? " Automatische Live-Aktualisierung alle 30 Sekunden ist aktiv." : ""}
                 </div>
                 {liveRaceMessage && <div style={{ color: colors.muted, fontSize: 13, fontWeight: 850, marginTop: 4 }}>{liveRaceMessage}</div>}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <button type="button" onClick={publishCurrentRaceLive} disabled={liveRaceLoading || !isFirebaseSignedIn} style={liveRaceLoading || !isFirebaseSignedIn ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 42 }}>
-                  {isCurrentRaceLive ? "Live aktualisieren" : "Dieses Rennen live veröffentlichen"}
+                  {isCurrentRaceLive ? "Jetzt live aktualisieren" : "Dieses Rennen live veröffentlichen"}
                 </button>
-                <button type="button" onClick={deactivateCurrentRaceLive} disabled={liveRaceLoading || !isCurrentRaceLive} style={liveRaceLoading || !isCurrentRaceLive ? compactDisabledButtonStyle : { ...actionDangerButtonStyle, minHeight: 42 }}>
+                <button type="button" onClick={() => void deactivateCurrentRaceLive()} disabled={liveRaceLoading || !isCurrentRaceLive} style={liveRaceLoading || !isCurrentRaceLive ? compactDisabledButtonStyle : { ...actionDangerButtonStyle, minHeight: 42 }}>
                   Live beenden
                 </button>
                 <button type="button" onClick={() => window.open(getPublicLiveUrl(), "_blank")} style={{ ...compactHomeButtonStyle, minHeight: 42 }}>
