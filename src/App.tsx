@@ -8,7 +8,7 @@ import ReleaseNotes from "./components/ReleaseNotes";
 import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KEYS } from "./config/appConfig";
 import { appStorage, encodeStorageValue } from "./utils/storage";
 import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
-import { isOnlineStorageConfigured, loadOnlineAppState, saveOnlineAppState } from "./utils/onlineStorage";
+import { createOnlineBackup, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, saveOnlineAppState, type OnlineBackupListItem, type OnlineStorageStatus } from "./utils/onlineStorage";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
@@ -156,6 +156,12 @@ export default function App() {
   const [eventLogo, setEventLogo] = useState<string>("");
   const [backupMessage, setBackupMessage] = useState("");
   const [onlineStorageMessage, setOnlineStorageMessage] = useState("");
+  const [lastOnlineSaveAt, setLastOnlineSaveAt] = useState("");
+  const [onlineStatus, setOnlineStatus] = useState<OnlineStorageStatus | null>(null);
+  const [onlineStatusCheckedAt, setOnlineStatusCheckedAt] = useState("");
+  const [onlineBackups, setOnlineBackups] = useState<OnlineBackupListItem[]>([]);
+  const [selectedOnlineBackupId, setSelectedOnlineBackupId] = useState("");
+  const [onlineStatusLoading, setOnlineStatusLoading] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [loadedRace, setLoadedRace] = useState<RaceName | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -2283,6 +2289,7 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       const savedOverallCreatedAt = await loadAppData<string>("bmx_overall_created_at", "");
       const savedBackupHistory = await loadAppData<any[]>("bmx_backup_history", []);
       const savedLastSaveAt = await loadAppData<string>("bmx_last_save_at", "");
+      const savedLastOnlineSaveAt = await loadAppData<string>("bmx_last_online_save_at", "");
       const savedHomeEventSeries = await loadAppData<string>("bmx_home_event_series", "");
       const savedSeriesRaceCount = await loadAppData<number>("bmx_series_race_count", 4);
       const savedOverallCountingRaces = await loadAppData<number>("bmx_overall_counting_races", 3);
@@ -2300,6 +2307,7 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       setEventLogo(savedGlobalEventLogo || "");
       setBackupHistory(Array.isArray(savedBackupHistory) ? savedBackupHistory : []);
       setLastSaveAt(savedLastSaveAt || "");
+      setLastOnlineSaveAt(savedLastOnlineSaveAt || "");
       setChangeLog(savedChangeLog || []);
       setOverallLocked(!!savedOverallLocked);
       setOverallCreatedAt(savedOverallCreatedAt || "");
@@ -5465,10 +5473,58 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     await exportBackup("Speichern / komplettes Datei-Backup");
   };
 
+  const isLocalNewerThanOnline = (onlineIso?: string) => {
+    if (!lastSaveAt || !onlineIso) return false;
+    const localTime = new Date(lastSaveAt).getTime();
+    const onlineTime = new Date(onlineIso).getTime();
+    return Number.isFinite(localTime) && Number.isFinite(onlineTime) && localTime > onlineTime;
+  };
+
+  const refreshOnlineStatus = async (showAlert = false) => {
+    if (!isOnlineStorageConfigured()) {
+      const message = "Online-Speicher ist noch nicht konfiguriert. Prüfe die Vercel Environment Variables.";
+      setOnlineStatus({ ok: false, exists: false, message });
+      setOnlineStorageMessage(message);
+      if (showAlert) window.alert(message);
+      return null;
+    }
+
+    try {
+      setOnlineStatusLoading(true);
+      setOnlineStorageMessage("Online-Status wird geprüft ...");
+      const [statusResult, backupResult] = await Promise.all([
+        getOnlineAppStateStatus(),
+        listOnlineBackups(),
+      ]);
+      const checkedAt = new Date().toISOString();
+      setOnlineStatus(statusResult);
+      setOnlineStatusCheckedAt(checkedAt);
+      if (backupResult.ok) {
+        setOnlineBackups(backupResult.backups);
+        if (!selectedOnlineBackupId && backupResult.backups[0]?.id) setSelectedOnlineBackupId(backupResult.backups[0].id);
+      }
+      const localNewerNote = statusResult.exists && isLocalNewerThanOnline(statusResult.updatedAt)
+        ? " Lokale Daten sind neuer als der Online-Stand."
+        : "";
+      const backupNote = backupResult.ok ? ` Online-Backups: ${backupResult.backups.length}.` : " Online-Backups konnten nicht geprüft werden.";
+      const message = `${statusResult.message}${statusResult.updatedAt ? ` Stand: ${formatDateTime(statusResult.updatedAt)}.` : ""}${localNewerNote}${backupNote}`;
+      setOnlineStorageMessage(message);
+      if (showAlert) window.alert(message);
+      return { statusResult, backupResult };
+    } catch (error: any) {
+      const message = `Online-Status konnte nicht geprüft werden: ${error?.message || "Unbekannter Fehler"}`;
+      setOnlineStorageMessage(message);
+      if (showAlert) window.alert(message);
+      return null;
+    } finally {
+      setOnlineStatusLoading(false);
+    }
+  };
+
   const saveOnlineFullAppState = async () => {
     if (!isOnlineStorageConfigured()) {
-      window.alert("Online-Speicher ist vorbereitet, aber noch nicht konfiguriert. Bitte Firebase-Daten in src/config/firebaseConfig.ts eintragen und enabled auf true setzen.");
-      return;
+      window.alert("Online-Speicher ist noch nicht konfiguriert. Bitte Vercel Environment Variables prüfen.");
+      return false;
     }
 
     try {
@@ -5486,59 +5542,162 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
       const iso = result.updatedAt || new Date().toISOString();
       await saveBoth("bmx_last_online_save_at", iso);
+      setLastOnlineSaveAt(iso);
+      setOnlineStatus({ ok: true, exists: true, message: "Online-Daten vorhanden.", updatedAt: iso, appVersion: APP_VERSION, riderCount: ridersBackup.length, eventCount: eventsBackup.length });
+      setOnlineStatusCheckedAt(new Date().toISOString());
       setOnlineStorageMessage(`Online gespeichert: ${formatDateTime(iso)}`);
       setBackupMessage(`Online gespeichert: ${formatDateTime(iso)}`);
       addChangeLog(`Online gespeichert: ${formatDateTime(iso)}`);
+      return true;
     } catch (error: any) {
       setOnlineStorageMessage("");
       window.alert(`Online-Speichern fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+      return false;
     }
+  };
+
+  const askBeforeReplacingLocalData = async (sourceLabel: string, updatedAt?: string) => {
+    if (isLocalNewerThanOnline(updatedAt)) {
+      const choice = window.prompt(
+        `Lokale Daten sind neuer als ${sourceLabel}.\n\n` +
+          `Lokale Speicherung: ${formatDateTime(lastSaveAt)}\n` +
+          `${sourceLabel}: ${updatedAt ? formatDateTime(updatedAt) : "unbekannt"}\n\n` +
+          `Was möchtest du tun?\n` +
+          `1 = Online-Version trotzdem laden\n` +
+          `2 = Lokale Version zuerst online speichern\n` +
+          `3 = Abbrechen`,
+        "3",
+      );
+      const normalizedChoice = String(choice || "").trim();
+      if (normalizedChoice === "2") {
+        await saveOnlineFullAppState();
+        return false;
+      }
+      if (normalizedChoice !== "1") return false;
+    }
+
+    return window.confirm(
+      `${sourceLabel} laden?\n\n` +
+        `Stand: ${updatedAt ? formatDateTime(updatedAt) : "unbekannt"}\n\n` +
+        `Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig ersetzt.\n` +
+        `Vorher wird automatisch ein komplettes Datei-Sicherheitsbackup erstellt.`,
+    );
+  };
+
+  const restoreOnlineBackupData = async (backup: any, sourceLabel: string, updatedAt?: string) => {
+    const validation = validateBackupStructure(backup);
+    if (!validation.ok) {
+      throw new Error(validation.message || "Die Online-Daten sind unvollständig oder beschädigt.");
+    }
+
+    const backupSummary = getBackupSummary(backup);
+    const detailsOk = window.confirm(
+      `${sourceLabel} wirklich importieren?\n\n` +
+        `Rennen/Rennserien: ${backupSummary.eventCount}\n` +
+        `Teilnehmer: ${backupSummary.riderCount}\n` +
+        `Gespeicherte App-Daten: ${backupSummary.appDataCount}\n` +
+        `Backup-Version: ${backupSummary.backupVersion}\n` +
+        `Datenstruktur-Version: ${backupSummary.dataSchemaVersion}\n` +
+        `Stand: ${updatedAt ? formatDateTime(updatedAt) : formatDateTime(backupSummary.exportedAt)}\n\n` +
+        `Lokale Daten werden ersetzt. Vorher wird automatisch ein Sicherheitsbackup erstellt.`,
+    );
+    if (!detailsOk) return false;
+
+    await exportBackup(`Sicherheitsbackup vor Laden von ${sourceLabel}`);
+    await restoreFullAppBackupEnvelope(backup);
+    alert(`${sourceLabel} erfolgreich geladen. Die App wird jetzt neu geladen.`);
+    window.location.reload();
+    return true;
   };
 
   const loadOnlineFullAppState = async () => {
     if (!isOnlineStorageConfigured()) {
-      window.alert("Online-Speicher ist vorbereitet, aber noch nicht konfiguriert. Bitte Firebase-Daten in src/config/firebaseConfig.ts eintragen und enabled auf true setzen.");
+      window.alert("Online-Speicher ist noch nicht konfiguriert. Bitte Vercel Environment Variables prüfen.");
       return;
     }
 
     try {
-      setOnlineStorageMessage("Online laden läuft ...");
-      const result = await loadOnlineAppState();
-      if (!result.ok) throw new Error(result.message || "Online-Laden fehlgeschlagen.");
-      const backup = result.data;
-
-      const validation = validateBackupStructure(backup);
-      if (!validation.ok) {
-        throw new Error(validation.message || "Die Online-Daten sind unvollständig oder beschädigt.");
+      setOnlineStorageMessage("Letzter Online-Speicherstand wird geprüft ...");
+      const statusResult = await getOnlineAppStateStatus();
+      setOnlineStatus(statusResult);
+      setOnlineStatusCheckedAt(new Date().toISOString());
+      if (!statusResult.ok) throw new Error(statusResult.message || "Online-Status konnte nicht geprüft werden.");
+      if (!statusResult.exists) {
+        setOnlineStorageMessage("Keine Online-Daten vorhanden.");
+        window.alert("Es sind noch keine Online-Daten vorhanden. Bitte zuerst Online speichern.");
+        return;
       }
 
-      const backupSummary = getBackupSummary(backup);
-      const schemaNote = backupSummary.schemaNote;
-      const exportedAt = backupSummary.exportedAt;
-      const ok = window.confirm(
-        `Online-Daten laden?
-
-Stand: ${result.updatedAt || exportedAt}
-Rennen/Rennserien: ${backupSummary.eventCount}
-Teilnehmer: ${backupSummary.riderCount}
-Gespeicherte App-Daten: ${backupSummary.appDataCount}
-Backup-Version: ${backupSummary.backupVersion}
-Datenstruktur-Version: ${backupSummary.dataSchemaVersion}${schemaNote}
-
-Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig durch die Online-Daten ersetzt. Vorher wird ein Sicherheitsbackup erstellt.`,
-      );
-      if (!ok) {
+      const canLoad = await askBeforeReplacingLocalData("letzten Online-Speicherstand", statusResult.updatedAt);
+      if (!canLoad) {
         setOnlineStorageMessage("");
         return;
       }
 
-      await exportBackup("Sicherheitsbackup vor Online-Laden");
-      await restoreFullAppBackupEnvelope(backup);
-      alert("Online-Daten erfolgreich geladen. Die bisherigen lokalen Daten auf diesem Gerät wurden ersetzt. Die App wird jetzt neu geladen.");
-      window.location.reload();
+      setOnlineStorageMessage("Letzter Online-Speicherstand wird geladen ...");
+      const result = await loadOnlineAppState();
+      if (!result.ok) throw new Error(result.message || "Online-Laden fehlgeschlagen.");
+      await restoreOnlineBackupData(result.data, "Letzter Online-Speicherstand", result.updatedAt || statusResult.updatedAt);
     } catch (error: any) {
       setOnlineStorageMessage("");
       window.alert(`Online-Laden fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+    }
+  };
+
+  const createNamedOnlineBackup = async () => {
+    if (!isOnlineStorageConfigured()) {
+      window.alert("Online-Speicher ist noch nicht konfiguriert. Bitte Vercel Environment Variables prüfen.");
+      return;
+    }
+
+    const defaultLabel = `${homeEventSeries || managedEvents.find((event) => event.id === currentEventId)?.name || "BMX Race Manager"} · ${formatDateTime(new Date().toISOString())}`;
+    const label = window.prompt("Beschriftung für das Online-Backup eingeben:", defaultLabel);
+    if (label === null) return;
+
+    try {
+      setOnlineStorageMessage("Online-Backup wird erstellt ...");
+      await saveCurrentState();
+      const { backup, ridersBackup, eventsBackup } = await buildFullAppBackupEnvelope(`Online Backup: ${label.trim() || "ohne Beschriftung"}`);
+      const result = await createOnlineBackup(backup, label.trim() || defaultLabel, {
+        appName: APP_NAME,
+        appVersion: APP_VERSION,
+        riderCount: ridersBackup.length,
+        eventCount: eventsBackup.length,
+      });
+      if (!result.ok) throw new Error(result.message || "Online-Backup konnte nicht erstellt werden.");
+
+      const iso = result.updatedAt || new Date().toISOString();
+      setOnlineBackups(result.backups || []);
+      if (result.backupId) setSelectedOnlineBackupId(result.backupId);
+      setOnlineStorageMessage(`Online-Backup erstellt: ${formatDateTime(iso)}`);
+      setBackupMessage(`Online-Backup erstellt: ${label.trim() || defaultLabel}`);
+      addChangeLog(`Online-Backup erstellt: ${label.trim() || defaultLabel}`);
+    } catch (error: any) {
+      setOnlineStorageMessage("");
+      window.alert(`Online-Backup fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+    }
+  };
+
+  const loadSelectedOnlineBackup = async () => {
+    if (!selectedOnlineBackupId) {
+      window.alert("Bitte zuerst ein Online-Backup auswählen oder Online-Status prüfen.");
+      return;
+    }
+
+    const selectedBackup = onlineBackups.find((backup) => backup.id === selectedOnlineBackupId);
+    const sourceLabel = selectedBackup ? `Online-Backup „${selectedBackup.label}“` : "ausgewähltes Online-Backup";
+
+    try {
+      const canLoad = await askBeforeReplacingLocalData(sourceLabel, selectedBackup?.createdAt);
+      if (!canLoad) return;
+
+      setOnlineStorageMessage(`${sourceLabel} wird geladen ...`);
+      const result = await loadOnlineBackup(selectedOnlineBackupId);
+      if (!result.ok) throw new Error(result.message || "Online-Backup konnte nicht geladen werden.");
+      await restoreOnlineBackupData(result.data, sourceLabel, result.updatedAt || selectedBackup?.createdAt);
+    } catch (error: any) {
+      setOnlineStorageMessage("");
+      window.alert(`Online-Backup laden fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
     }
   };
 
@@ -5838,19 +5997,56 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
-          <h2 style={sectionTitleStyle}>Import / Export</h2>
+          <h2 style={sectionTitleStyle}>Speicher / Online Backup</h2>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10, marginBottom: 12 }}>
+            <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: colors.muted, textTransform: "uppercase" }}>Online-Status</div>
+              <div style={{ fontWeight: 1000, color: onlineStatus?.exists ? colors.greenBtn : colors.orangeBtn, marginTop: 4 }}>
+                {onlineStatus?.exists ? "Online-Daten vorhanden" : onlineStatus?.ok === false ? "Online-Status unklar" : "Keine Online-Daten"}
+              </div>
+              <div style={{ fontSize: 13, color: colors.muted, marginTop: 4 }}>
+                {onlineStatus?.updatedAt ? `Stand: ${formatDateTime(onlineStatus.updatedAt)}` : "Noch kein Online-Stand geladen/geprüft"}
+              </div>
+            </div>
+            <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: colors.muted, textTransform: "uppercase" }}>Zuletzt online gespeichert</div>
+              <div style={{ fontWeight: 1000, color: colors.title, marginTop: 4 }}>
+                {lastOnlineSaveAt ? formatDateTime(lastOnlineSaveAt) : "-"}
+              </div>
+              <div style={{ fontSize: 13, color: colors.muted, marginTop: 4 }}>
+                Lokal zuletzt: {lastSaveAt ? formatDateTime(lastSaveAt) : "-"}
+              </div>
+            </div>
+            <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? colors.warningBg : colors.cardSoftBg }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: colors.muted, textTransform: "uppercase" }}>Vergleich lokal / online</div>
+              <div style={{ fontWeight: 1000, color: onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "#92400e" : colors.greenBtn, marginTop: 4 }}>
+                {onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "Lokale Daten sind neuer" : onlineStatus?.exists ? "Kein Konflikt erkannt" : "Noch nicht geprüft"}
+              </div>
+              <div style={{ fontSize: 13, color: colors.muted, marginTop: 4 }}>
+                {onlineStatusCheckedAt ? `Geprüft: ${formatDateTime(onlineStatusCheckedAt)}` : "Status noch nicht geprüft"}
+              </div>
+            </div>
+          </div>
+
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
             <button onClick={saveOnlineFullAppState} style={{ ...compactSaveButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               Online speichern
             </button>
             <button onClick={loadOnlineFullAppState} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Online laden
+              Letzten Online-Stand laden
+            </button>
+            <button onClick={createNamedOnlineBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              Online Backup erstellen
+            </button>
+            <button onClick={() => refreshOnlineStatus(true)} disabled={onlineStatusLoading} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: onlineStatusLoading ? 0.65 : 1 }}>
+              Online-Status prüfen
             </button>
             <button onClick={saveAndExportFullBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Backup erstellen
+              Datei-Backup erstellen
             </button>
             <label style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
-              Backup importieren
+              Datei-Backup importieren
               <input
                 type="file"
                 accept="application/json,.json"
@@ -5859,12 +6055,47 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               />
             </label>
           </div>
+
+          <div style={{ marginTop: 12, border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: "#f8fbff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+              <div>
+                <div style={{ fontWeight: 1000, color: colors.title }}>Online Backups</div>
+                <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+                  Bis zu 20 beschriftete Online-Backups werden nach Datum sortiert angezeigt. Laden ersetzt die lokalen Daten erst nach Sicherheitsabfrage und Datei-Backup.
+                </div>
+              </div>
+              <div style={{ fontWeight: 900, color: colors.muted }}>{onlineBackups.length} / 20</div>
+            </div>
+            {onlineBackups.length > 0 ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
+                <select
+                  value={selectedOnlineBackupId}
+                  onChange={(e) => setSelectedOnlineBackupId(e.target.value)}
+                  style={{ ...inputStyle, flex: "1 1 360px", minHeight: 44 }}
+                >
+                  {onlineBackups.map((backup) => (
+                    <option key={backup.id} value={backup.id}>
+                      {formatDateTime(backup.createdAt)} · {backup.label} · {backup.riderCount ?? "?"} Teilnehmer · {backup.eventCount ?? "?"} Rennen
+                    </option>
+                  ))}
+                </select>
+                <button onClick={loadSelectedOnlineBackup} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  Ausgewähltes Online Backup laden
+                </button>
+              </div>
+            ) : (
+              <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+                Noch keine Online-Backups geladen oder vorhanden. Klicke auf Online-Status prüfen oder erstelle ein neues Online Backup.
+              </div>
+            )}
+          </div>
+
           <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800, lineHeight: 1.35 }}>
-            Online speichern/laden ist vorbereitet und verwendet komplette App-Daten. Der lokale Speicher bleibt weiterhin aktiv. Backup erstellen lädt wie bisher eine komplette JSON-Datei herunter. Beim Import oder Online-Laden werden die lokalen Daten auf diesem Gerät vollständig ersetzt.
+            Online speichern aktualisiert den normalen Online-Stand. Online Backup erstellen legt zusätzlich einen beschrifteten Stand ab. Online laden ersetzt lokale Daten nur nach Warnung und automatischem Datei-Sicherheitsbackup.
           </div>
           {!isOnlineStorageConfigured() && (
             <div style={{ marginTop: 8, color: "#92400e", background: colors.warningBg, border: `1px solid ${colors.warningBorder}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, fontWeight: 900 }}>
-              Firebase ist vorbereitet, aber noch nicht konfiguriert. Trage Projekt-ID und API-Key in src/config/firebaseConfig.ts ein und setze enabled auf true.
+              Firebase ist vorbereitet, aber noch nicht vollständig konfiguriert. Prüfe die Vercel Environment Variables.
             </div>
           )}
           {(backupMessage || onlineStorageMessage) && (
@@ -5874,6 +6105,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             </div>
           )}
         </div>
+
         <div style={{ ...basePanelStyle }}>
           <h2 style={sectionTitleStyle}>Aktive Rennen / Rennserien</h2>
           {activeGroupedEvents.length === 0 ? (
