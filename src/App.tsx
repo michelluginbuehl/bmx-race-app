@@ -7351,28 +7351,6 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
               </div>
             );
           })()}
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              flexWrap: "wrap",
-              marginBottom: 14,
-            }}
-          >
-            {activeRaces.map((race) => (
-              <button
-                key={race}
-                onClick={() => selectAllForRace(race)}
-                style={secondaryButtonStyle}
-              >
-                {race}:{" "}
-                {areAllSelectedForRace(race)
-                  ? "alle abwählen"
-                  : "alle auswählen"}
-              </button>
-            ))}
-          </div>
-
           {filteredAllRiders.length === 0 && (
             <div style={{ ...basePanelStyle, color: colors.muted }}>
               Keine Teilnehmer mit diesem Filter gefunden.
@@ -7384,28 +7362,6 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
               <h3 style={{ color: colors.title }}>
                 {cat} ({filteredGroupedAll[cat].length})
               </h3>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  flexWrap: "wrap",
-                  marginBottom: 10,
-                }}
-              >
-                {activeRaces.map((race) => (
-                  <button
-                    key={`${cat}-${race}`}
-                    onClick={() => selectAllForRace(race, cat)}
-                    style={secondaryButtonStyle}
-                  >
-                    {race}: Kategorie{" "}
-                    {areAllSelectedForRace(race, cat)
-                      ? "abwählen"
-                      : "auswählen"}
-                  </button>
-                ))}
-              </div>
-
               <div style={{ ...basePanelStyle }}>
                 <div
                   style={{
