@@ -8,10 +8,25 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.9",
+    title: "Firebase Login und geschützte Online-Daten",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Firebase Login mit E-Mail und Passwort ergänzt.",
+      "Startseite zeigt im Speicherbereich den Status Angemeldet als ... oder Nicht angemeldet.",
+      "Abmelden-Button ergänzt; nach dem Abmelden sind Online speichern, Online laden und Online-Backups gesperrt.",
+      "Online-Speicherzugriffe senden ein Firebase Auth ID Token an Firestore REST.",
+      "Gespeicherte Anmeldung wird automatisch erneuert, solange ein gültiger Refresh Token vorhanden ist.",
+      "Anleitung für Firebase Authentication und sichere Firestore-Regeln liegt als Zusatzdatei bei.",
+      "Keine Änderung an Rennlogik, Teilnehmerlogik oder Resultatberechnung.",
+    ],
+  },
+  {
     version: "v1.15.8",
     title: "Dublettenhilfe und Plate-Historie",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Beim Erfassen eines Teilnehmers in der Hauptdatenbank werden während der Namenseingabe ähnliche bereits gespeicherte Teilnehmer angezeigt.",
       "Die Dublettenhilfe zeigt Name, Startnummer, Jahrgang, Geschlecht, Verein, Ähnlichkeitswert und Teilnehmer-ID an.",

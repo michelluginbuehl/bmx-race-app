@@ -11,7 +11,7 @@ export type FirebaseOnlineStorageConfig = {
   databaseId: string;
 };
 
-// Firebase Firestore REST-Konfiguration.
+// Firebase Firestore REST- und Firebase Authentication REST-Konfiguration.
 // Die Werte werden über Vercel Environment Variables gesetzt, damit keine API Keys
 // direkt im GitHub-Repository stehen und GitHub Secret Scanning nicht anschlägt.
 // Benötigte Variablen in Vercel:
@@ -27,6 +27,10 @@ export type FirebaseOnlineStorageConfig = {
 // - VITE_FIREBASE_AUTH_DOMAIN=...
 // - VITE_FIREBASE_STORAGE_BUCKET=...
 // - VITE_FIREBASE_MESSAGING_SENDER_ID=...
+//
+// v1.15.9 nutzt zusätzlich Firebase Authentication per REST API.
+// Dafür wird derselbe VITE_FIREBASE_API_KEY verwendet; das Passwort wird nie
+// in Vercel oder GitHub gespeichert, sondern vom Benutzer in der App eingegeben.
 const env = (import.meta as any).env ?? {};
 
 const enabledFromEnv = String(env.VITE_FIREBASE_ENABLED ?? "").toLowerCase() === "true";
