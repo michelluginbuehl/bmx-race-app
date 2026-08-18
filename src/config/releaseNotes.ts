@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.0",
+    title: "Online-Speicher vorbereitet",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Firebase-Konfigurationsdatei ergänzt, damit der Online-Speicher später ohne App-Umbau aktiviert werden kann.",
+      "Online-Speicher-Utility über Firestore REST vorbereitet; es benötigt keine zusätzlichen npm-Pakete.",
+      "Auf der Startseite wurden die Buttons Online speichern, Online laden, Backup erstellen und Backup importieren vorbereitet.",
+      "Der lokale Speicher bleibt unverändert aktiv und dient weiterhin als Sicherheit.",
+      "Backup erstellen erzeugt weiterhin eine komplette JSON-Datei mit allen Rennen, Teilnehmern, Resultaten und Einstellungen.",
+    ],
+  },
+  {
     version: "v1.14.6",
     title: "Teilnehmer-Auswahlbuttons bereinigt",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Im Bereich Teilnehmer in dieser Rennserie / diesem Rennen wurden die Race-Alle-Auswahlbuttons entfernt.",
       "Alle Kategorie-auswählen-Buttons innerhalb der Kategorien wurden entfernt.",
