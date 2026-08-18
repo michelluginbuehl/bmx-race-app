@@ -8,10 +8,25 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.4",
+    title: "Online-Status und Online-Backups",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Startseite zeigt den letzten Online-Speicherzeitpunkt und ob Online-Daten vorhanden sind.",
+      "Button Online-Status prüfen ergänzt, inklusive Online-Backup-Liste.",
+      "Online laden prüft vor dem Laden, ob lokale Daten neuer sind, und bietet Laden, lokales Hochladen oder Abbrechen an.",
+      "Online laden ersetzt lokale Daten nur nach klarer Warnung und erstellt vorher automatisch ein Datei-Sicherheitsbackup.",
+      "Beschriftete Online-Backups können erstellt und später nach Datum sortiert ausgewählt und geladen werden.",
+      "Es werden bis zu 20 Online-Backups im Index geführt; ältere Backups werden automatisch aus der Auswahl entfernt.",
+      "Lokaler Speicher und Datei-Backup bleiben unverändert aktiv.",
+    ],
+  },
+  {
     version: "v1.15.3",
     title: "Firestore-Datenbank-ID default",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Online-Speicher verwendet neu die Firestore-Datenbank-ID default ohne Klammern.",
       "Damit passt die App zu der in Google Cloud erstellten benannten Datenbank default.",
