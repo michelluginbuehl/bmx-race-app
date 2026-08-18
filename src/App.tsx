@@ -5668,7 +5668,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       setFirebaseAuthPassword("");
       setFirebaseAuthMessage(`Angemeldet als ${session.email}`);
       setOnlineStorageMessage(`Angemeldet als ${session.email}`);
-      await refreshOnlineStatus(false);
+      await refreshOnlineStatus(false, session);
     } catch (error: any) {
       const message = error?.message || "Firebase Login fehlgeschlagen.";
       setFirebaseAuthMessage(message);
@@ -5687,9 +5687,10 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     setFirebaseAuthMessage("Abgemeldet. Bitte neu anmelden, um online zu speichern oder zu laden.");
   };
 
-  const refreshOnlineStatus = async (showAlert = false) => {
-    const authSession = await ensureOnlineAuthSession("Online-Status prüfen", showAlert);
+  const refreshOnlineStatus = async (showAlert = false, existingSession?: FirebaseAuthSession | null) => {
+    const authSession = existingSession || (await ensureOnlineAuthSession("Online-Status prüfen", showAlert));
     if (!authSession) return null;
+    setOnlineStorageAuthToken(authSession.idToken);
 
     try {
       setOnlineStatusLoading(true);
