@@ -162,6 +162,7 @@ export default function App() {
   const [onlineBackups, setOnlineBackups] = useState<OnlineBackupListItem[]>([]);
   const [selectedOnlineBackupId, setSelectedOnlineBackupId] = useState("");
   const [onlineStatusLoading, setOnlineStatusLoading] = useState(false);
+  const [showAdvancedStorageOptions, setShowAdvancedStorageOptions] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [loadedRace, setLoadedRace] = useState<RaceName | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -5973,8 +5974,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
       fontWeight: 900,
       flexWrap: "wrap",
     }}>
-      <span>{backupAgeMinutes === null ? "⚠ Noch kein Backup erstellt." : `⚠ Letztes Backup vor ${backupAgeMinutes} Minuten.`}</span>
-      <button type="button" onClick={saveAndExportFullBackup} style={compactSaveButtonStyle}>Backup jetzt erstellen</button>
+      <span>{backupAgeMinutes === null ? "⚠ Noch kein Online-Speicherstand erstellt." : `⚠ Letztes Datei-Backup vor ${backupAgeMinutes} Minuten.`}</span>
+      <button type="button" onClick={saveOnlineFullAppState} style={compactSaveButtonStyle}>Online speichern</button>
     </div>
   ) : null;
 
@@ -6046,79 +6047,112 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
-          <h2 style={sectionTitleStyle}>Speicher-Dashboard</h2>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 14 }}>
+            <div>
+              <h2 style={{ ...sectionTitleStyle, marginBottom: 4 }}>Speicher</h2>
+              <div style={{ color: colors.muted, fontSize: 14, fontWeight: 800, lineHeight: 1.35 }}>
+                Online speichern ist der normale Speicherstand. Online-Backups sind beschriftete Sicherungen zum späteren Wiederherstellen.
+              </div>
+            </div>
+            <button
+              onClick={() => refreshOnlineStatus(true)}
+              disabled={onlineStatusLoading}
+              style={{ ...smallGhostButtonStyle, minHeight: 38, opacity: onlineStatusLoading ? 0.65 : 1 }}
+            >
+              Status prüfen
+            </button>
+          </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10, marginBottom: 12 }}>
-            <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
-              <div style={{ fontSize: 12, fontWeight: 900, color: colors.muted, textTransform: "uppercase" }}>Online-Status</div>
-              <div style={{ fontWeight: 1000, color: onlineStatus?.exists ? colors.greenBtn : colors.orangeBtn, marginTop: 4 }}>
-                {onlineStatus?.exists ? "Online-Daten vorhanden" : onlineStatus?.ok === false ? "Online-Status unklar" : "Keine Online-Daten"}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 14 }}>
+            <div style={{ border: `1px solid ${onlineStatus?.exists ? colors.greenBorder : colors.cardBorder}`, borderRadius: 16, padding: 14, background: onlineStatus?.exists ? colors.greenBg : colors.cardSoftBg }}>
+              <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Online</div>
+              <div style={{ fontWeight: 1000, color: onlineStatus?.exists ? colors.greenBtn : colors.orangeBtn, marginTop: 5, fontSize: 17 }}>
+                {onlineStatus?.exists ? "Online-Daten vorhanden" : onlineStatus?.ok === false ? "Status unklar" : "Keine Online-Daten"}
               </div>
-              <div style={{ fontSize: 13, color: colors.muted, marginTop: 4 }}>
-                {onlineStatus?.updatedAt ? `Stand: ${formatDateTime(onlineStatus.updatedAt)}` : "Noch kein Online-Stand geladen/geprüft"}
-              </div>
-            </div>
-            <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
-              <div style={{ fontSize: 12, fontWeight: 900, color: colors.muted, textTransform: "uppercase" }}>Zuletzt online gespeichert</div>
-              <div style={{ fontWeight: 1000, color: colors.title, marginTop: 4 }}>
-                {lastOnlineSaveAt ? formatDateTime(lastOnlineSaveAt) : "-"}
-              </div>
-              <div style={{ fontSize: 13, color: colors.muted, marginTop: 4 }}>
-                Lokal zuletzt: {lastSaveAt ? formatDateTime(lastSaveAt) : "-"}
+              <div style={{ fontSize: 13, color: colors.muted, marginTop: 5, fontWeight: 800 }}>
+                {onlineStatus?.updatedAt ? `Stand: ${formatDateTime(onlineStatus.updatedAt)}` : "Noch kein Online-Stand geprüft"}
               </div>
             </div>
-            <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? colors.warningBg : colors.cardSoftBg }}>
-              <div style={{ fontSize: 12, fontWeight: 900, color: colors.muted, textTransform: "uppercase" }}>Vergleich lokal / online</div>
-              <div style={{ fontWeight: 1000, color: onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "#92400e" : colors.greenBtn, marginTop: 4 }}>
-                {onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "Lokale Daten sind neuer" : onlineStatus?.exists ? "Kein Konflikt erkannt" : "Noch nicht geprüft"}
+            <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 16, padding: 14, background: colors.cardSoftBg }}>
+              <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Zuletzt gespeichert</div>
+              <div style={{ fontWeight: 1000, color: colors.title, marginTop: 5, fontSize: 17 }}>
+                Online: {lastOnlineSaveAt ? formatDateTime(lastOnlineSaveAt) : "-"}
               </div>
-              <div style={{ fontSize: 13, color: colors.muted, marginTop: 4 }}>
-                {onlineStatusCheckedAt ? `Geprüft: ${formatDateTime(onlineStatusCheckedAt)}` : "Status noch nicht geprüft"}
+              <div style={{ fontSize: 13, color: colors.muted, marginTop: 5, fontWeight: 800 }}>
+                Lokal: {lastSaveAt ? formatDateTime(lastSaveAt) : "-"}
+              </div>
+            </div>
+            <div style={{ border: `1px solid ${onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? colors.warningBorder : colors.cardBorder}`, borderRadius: 16, padding: 14, background: onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? colors.warningBg : colors.cardSoftBg }}>
+              <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Vergleich</div>
+              <div style={{ fontWeight: 1000, color: onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "#92400e" : onlineStatus?.exists ? colors.greenBtn : colors.muted, marginTop: 5, fontSize: 17 }}>
+                {onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "Lokal ist neuer" : onlineStatus?.exists ? "Synchron" : "Noch nicht geprüft"}
+              </div>
+              <div style={{ fontSize: 13, color: colors.muted, marginTop: 5, fontWeight: 800 }}>
+                {onlineStatusCheckedAt ? `Geprüft: ${formatDateTime(onlineStatusCheckedAt)}` : `${onlineBackups.length} Online-Backups geladen`}
               </div>
             </div>
           </div>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
-            <button onClick={saveOnlineFullAppState} style={{ ...compactSaveButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Aktuellen Stand online speichern
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, marginBottom: 12 }}>
+            <button
+              onClick={saveOnlineFullAppState}
+              style={{ ...compactSaveButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
+            >
+              <span style={{ fontSize: 16 }}>Online speichern</span>
+              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Aktuellen Stand sichern</span>
             </button>
-            <button onClick={loadOnlineFullAppState} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Letzten Online-Stand laden
+            <button
+              onClick={loadOnlineFullAppState}
+              style={{ ...compactHomeButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
+            >
+              <span style={{ fontSize: 16 }}>Letzten Online-Stand laden</span>
+              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.85 }}>Ersetzt lokale Daten nach Warnung</span>
             </button>
-            <button onClick={createNamedOnlineBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Online-Backup beschriftet erstellen
+            <button
+              onClick={createNamedOnlineBackup}
+              style={{ ...compactPrimaryButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
+            >
+              <span style={{ fontSize: 16 }}>Online-Backup erstellen</span>
+              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Mit Beschriftung speichern</span>
             </button>
-            <button onClick={() => refreshOnlineStatus(true)} disabled={onlineStatusLoading} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: onlineStatusLoading ? 0.65 : 1 }}>
-              Online-Status prüfen
-            </button>
-            <button onClick={saveAndExportFullBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Datei-Backup herunterladen
-            </button>
-            <label style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
-              Datei-Backup importieren
-              <input
-                type="file"
-                accept="application/json,.json"
-                onChange={importBackup}
-                style={{ display: "none" }}
-              />
-            </label>
           </div>
 
-          <div style={{ marginTop: 12, border: `1px solid ${colors.cardBorder}`, borderRadius: 16, padding: 14, background: "#f8fbff" }}>
+          <button
+            onClick={() => setShowAdvancedStorageOptions((open) => !open)}
+            style={{ ...smallGhostButtonStyle, minHeight: 38 }}
+          >
+            {showAdvancedStorageOptions ? "Weitere Speicheroptionen ausblenden" : "Weitere Speicheroptionen anzeigen"}
+          </button>
+
+          {showAdvancedStorageOptions && (
+            <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch", padding: 12, border: `1px dashed ${colors.cardBorderStrong}`, borderRadius: 14, background: colors.cardSoftBg }}>
+              <button onClick={() => refreshOnlineStatus(true)} disabled={onlineStatusLoading} style={{ ...compactHomeButtonStyle, minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: onlineStatusLoading ? 0.65 : 1 }}>
+                Online-Status prüfen
+              </button>
+              <button onClick={saveAndExportFullBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                Datei-Backup herunterladen
+              </button>
+              <label style={{ ...compactHomeButtonStyle, minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
+                Datei-Backup importieren
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={importBackup}
+                  style={{ display: "none" }}
+                />
+              </label>
+            </div>
+          )}
+
+          <div style={{ marginTop: 14, border: `1px solid ${colors.cardBorder}`, borderRadius: 18, padding: 14, background: "#f8fbff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
               <div>
                 <div style={{ fontWeight: 1000, color: colors.title, fontSize: 17 }}>Online-Backups</div>
                 <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800, lineHeight: 1.35 }}>
-                  Beschriftete Sicherungen werden nach Datum sortiert angezeigt. Jedes Backup kann direkt über den Button geladen werden.
+                  Beschriftete Sicherungen, neuste zuerst. Zum Wiederherstellen direkt auf „Laden“ klicken.
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <div style={{ fontWeight: 1000, color: colors.muted }}>{onlineBackups.length} / 20</div>
-                <button onClick={createNamedOnlineBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 40, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                  Neues Online-Backup erstellen
-                </button>
-              </div>
+              <div style={{ fontWeight: 1000, color: colors.muted }}>{onlineBackups.length} / 20</div>
             </div>
             {onlineBackups.length > 0 ? (
               <div style={{ display: "grid", gap: 8 }}>
@@ -6159,9 +6193,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                           setSelectedOnlineBackupId(backup.id);
                           loadSelectedOnlineBackup(backup.id);
                         }}
-                        style={{ ...compactHomeButtonStyle, minHeight: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap" }}
+                        style={{ ...compactHomeButtonStyle, minHeight: 38, display: "inline-flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap" }}
                       >
-                        Dieses Backup laden
+                        Laden
                       </button>
                     </div>
                   );
@@ -6169,23 +6203,20 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             ) : (
               <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800, border: `1px dashed ${colors.cardBorderStrong}`, borderRadius: 14, padding: 14, background: colors.cardBg }}>
-                Noch keine Online-Backups vorhanden oder geladen. Klicke auf Online-Status prüfen oder erstelle ein neues beschriftetes Online-Backup.
+                Noch keine Online-Backups angezeigt. Klicke auf Status prüfen oder erstelle ein beschriftetes Online-Backup.
               </div>
             )}
           </div>
 
-          <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800, lineHeight: 1.35 }}>
-            „Aktuellen Stand online speichern“ aktualisiert den normalen Online-Stand. „Online-Backup beschriftet erstellen“ legt zusätzlich einen beschrifteten Stand ab. Laden ersetzt lokale Daten nur nach Warnung und automatischem Datei-Sicherheitsbackup.
-          </div>
+          {(backupMessage || onlineStorageMessage) && (
+            <div style={{ marginTop: 10, color: colors.muted, display: "grid", gap: 4, padding: "10px 12px", borderRadius: 12, background: colors.cardSoftBg, border: `1px solid ${colors.cardBorder}` }}>
+              {backupMessage && <div>{backupMessage}</div>}
+              {onlineStorageMessage && <div>{onlineStorageMessage}</div>}
+            </div>
+          )}
           {!isOnlineStorageConfigured() && (
             <div style={{ marginTop: 8, color: "#92400e", background: colors.warningBg, border: `1px solid ${colors.warningBorder}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, fontWeight: 900 }}>
               Firebase ist vorbereitet, aber noch nicht vollständig konfiguriert. Prüfe die Vercel Environment Variables.
-            </div>
-          )}
-          {(backupMessage || onlineStorageMessage) && (
-            <div style={{ marginTop: 10, color: colors.muted, display: "grid", gap: 4 }}>
-              {backupMessage && <div>{backupMessage}</div>}
-              {onlineStorageMessage && <div>{onlineStorageMessage}</div>}
             </div>
           )}
         </div>
