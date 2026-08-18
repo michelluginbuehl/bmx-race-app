@@ -47,6 +47,18 @@ const PAYLOAD_CHUNK_SIZE = 180_000;
 const MAX_ONLINE_BACKUPS = 20;
 const BACKUP_INDEX_PATH = "onlineBackupIndex/current";
 
+let onlineStorageAuthToken = "";
+
+export const setOnlineStorageAuthToken = (idToken?: string) => {
+  onlineStorageAuthToken = String(idToken || "").trim();
+};
+
+const buildFirestoreHeaders = (headers: Record<string, string> = {}) => {
+  return onlineStorageAuthToken
+    ? { ...headers, Authorization: `Bearer ${onlineStorageAuthToken}` }
+    : headers;
+};
+
 const hasConfigValue = (value: string) => Boolean(value && value.trim() && !value.includes("DEIN_") && !value.includes("YOUR_"));
 
 export const isOnlineStorageConfigured = () => {
@@ -79,8 +91,15 @@ const getFirestoreDocumentUrl = (extraPath = "") => {
 const parseFirestoreError = async (response: Response) => {
   try {
     const json = await response.json();
-    return json?.error?.message || response.statusText || "Unbekannter Online-Speicher-Fehler";
+    const message = json?.error?.message || response.statusText || "Unbekannter Online-Speicher-Fehler";
+    if (response.status === 401 || response.status === 403) {
+      return `${message} Bitte in der App mit Firebase Login anmelden und Firestore-Regeln prüfen.`;
+    }
+    return message;
   } catch {
+    if (response.status === 401 || response.status === 403) {
+      return `${response.statusText || "Zugriff verweigert"}. Bitte in der App mit Firebase Login anmelden und Firestore-Regeln prüfen.`;
+    }
     return response.statusText || "Unbekannter Online-Speicher-Fehler";
   }
 };
@@ -96,7 +115,7 @@ const splitPayload = (payloadJson: string) => {
 const patchFirestoreDocument = async (url: string, fields: Record<string, any>) => {
   const response = await fetch(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: buildFirestoreHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ fields }),
   });
 
@@ -108,7 +127,7 @@ const patchFirestoreDocument = async (url: string, fields: Record<string, any>) 
 };
 
 const readDocument = async (extraPath = "") => {
-  const response = await fetch(getFirestoreDocumentUrl(extraPath), { method: "GET" });
+  const response = await fetch(getFirestoreDocumentUrl(extraPath), { method: "GET", headers: buildFirestoreHeaders() });
   if (!response.ok) {
     if (response.status === 404) return null;
     throw new Error(await parseFirestoreError(response));
@@ -120,7 +139,7 @@ const readManifest = async () => readDocument();
 
 const deleteDocumentIfExists = async (extraPath = "") => {
   try {
-    await fetch(getFirestoreDocumentUrl(extraPath), { method: "DELETE" });
+    await fetch(getFirestoreDocumentUrl(extraPath), { method: "DELETE", headers: buildFirestoreHeaders() });
   } catch {
     // Best-effort-Aufräumen. Alte Daten werden nicht mehr referenziert, falls Löschen fehlschlägt.
   }
@@ -233,7 +252,7 @@ const loadChunkedDocument = async (baseExtraPath = ""): Promise<OnlineStorageRes
   try {
     const chunks: string[] = [];
     for (let index = 0; index < chunkCount; index += 1) {
-      const chunkResponse = await fetch(getFirestoreDocumentUrl(`${normalizedBasePath}/chunks/chunk_${String(index).padStart(4, "0")}`), { method: "GET" });
+      const chunkResponse = await fetch(getFirestoreDocumentUrl(`${normalizedBasePath}/chunks/chunk_${String(index).padStart(4, "0")}`), { method: "GET", headers: buildFirestoreHeaders() });
       if (!chunkResponse.ok) {
         return { ok: false, message: `Online-Daten sind unvollständig. Chunk ${index + 1} fehlt.` };
       }
