@@ -778,7 +778,8 @@ export default function App() {
 
   const openManagedEvent = async (event: ManagedEvent) => {
     if (currentEventId && initialLoaded && hasUnsavedChanges) {
-      await saveCurrentState();
+      const saved = await saveOnlineFullAppState();
+      if (!saved) return;
     }
     setInitialLoaded(false);
     resetCurrentEventState();
@@ -4091,14 +4092,14 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   const renderAppHeader = () => (
     <AppHeader
       onHomeClick={async () => {
-        if (appShellView === "manager" && currentEventId && initialLoaded && hasUnsavedChanges) await saveCurrentState();
+        if (appShellView === "manager" && currentEventId && initialLoaded && hasUnsavedChanges) {
+          const saved = await saveOnlineFullAppState();
+          if (!saved) return;
+        }
         setAppShellView("events");
         setViewMode("dashboard");
       }}
       colors={colors}
-      chipStyle={chipStyle}
-      hasUnsavedChanges={hasUnsavedChanges}
-      backupWarningActive={backupWarningActive}
     />
   );
 
@@ -5362,7 +5363,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     addChangeLog(`Gesamtwertung ${category} manuell geändert`);
   };
 
-  const saveCurrentState = async () => {
+  const saveCurrentState = async (options: { markClean?: boolean; showMessage?: boolean; logChange?: boolean } = {}) => {
+    const { markClean = false, showMessage = false, logChange = false } = options;
     try {
       const iso = new Date().toISOString();
       await saveBoth("bmx_last_save_at", iso);
@@ -5375,11 +5377,13 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       await saveBoth("bmx_overall_created_at", overallCreatedAt || "");
       await saveBoth("bmx_change_log", changeLog || []);
       setLastSaveAt(iso);
-      setHasUnsavedChanges(false);
-      setBackupMessage(`Gespeichert: ${formatDateTime(iso)}`);
-      addChangeLog(`Lokal gespeichert: ${formatDateTime(iso)}`);
+      if (markClean) setHasUnsavedChanges(false);
+      if (showMessage) setBackupMessage(`Zwischenspeicher aktualisiert: ${formatDateTime(iso)}`);
+      if (logChange) addChangeLog(`Zwischenspeicher aktualisiert: ${formatDateTime(iso)}`);
+      return iso;
     } catch (error: any) {
       alert(`Speichern fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+      return "";
     }
   };
 
@@ -5470,11 +5474,11 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   };
 
   const saveAndExportFullBackup = async () => {
-    await saveCurrentState();
-    await exportBackup("Speichern / komplettes Datei-Backup");
+    await createNamedOnlineBackup();
   };
 
   const isLocalNewerThanOnline = (onlineIso?: string) => {
+    if (hasUnsavedChanges) return true;
     if (!lastSaveAt || !onlineIso) return false;
     const localTime = new Date(lastSaveAt).getTime();
     const onlineTime = new Date(onlineIso).getTime();
@@ -5552,6 +5556,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       const iso = result.updatedAt || new Date().toISOString();
       await saveBoth("bmx_last_online_save_at", iso);
       setLastOnlineSaveAt(iso);
+      setHasUnsavedChanges(false);
       setOnlineStatus({ ok: true, exists: true, message: "Online-Daten vorhanden.", updatedAt: iso, appVersion: APP_VERSION, riderCount: ridersBackup.length, eventCount: eventsBackup.length });
       setOnlineStatusCheckedAt(new Date().toISOString());
       setOnlineStorageMessage(`Online gespeichert: ${formatDateTime(iso)}`);
@@ -5700,30 +5705,43 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     }
 
     const defaultLabel = `${homeEventSeries || managedEvents.find((event) => event.id === currentEventId)?.name || "BMX Race Manager"} · ${formatDateTime(new Date().toISOString())}`;
-    const label = window.prompt("Beschriftung für das Online-Backup eingeben:", defaultLabel);
+    const label = window.prompt("Beschriftung für das Backup eingeben:", defaultLabel);
     if (label === null) return;
+    const finalLabel = label.trim() || defaultLabel;
 
     try {
-      setOnlineStorageMessage("Online-Backup wird erstellt ...");
+      setOnlineStorageMessage("Backup wird online und als Datei erstellt ...");
       await saveCurrentState();
-      const { backup, ridersBackup, eventsBackup } = await buildFullAppBackupEnvelope(`Online Backup: ${label.trim() || "ohne Beschriftung"}`);
-      const result = await createOnlineBackup(backup, label.trim() || defaultLabel, {
+      const { backup, ridersBackup, eventsBackup } = await buildFullAppBackupEnvelope(`Backup: ${finalLabel}`);
+      const meta = {
         appName: APP_NAME,
         appVersion: APP_VERSION,
         riderCount: ridersBackup.length,
         eventCount: eventsBackup.length,
-      });
+      };
+
+      const mainResult = await saveOnlineAppState(backup, meta);
+      if (!mainResult.ok) throw new Error(mainResult.message || "Online-Speichern fehlgeschlagen.");
+
+      const result = await createOnlineBackup(backup, finalLabel, meta);
       if (!result.ok) throw new Error(result.message || "Online-Backup konnte nicht erstellt werden.");
 
-      const iso = result.updatedAt || new Date().toISOString();
+      await exportBackup(`Backup-Datei zu Online-Backup: ${finalLabel}`);
+
+      const iso = mainResult.updatedAt || result.updatedAt || new Date().toISOString();
+      await saveBoth("bmx_last_online_save_at", iso);
+      setLastOnlineSaveAt(iso);
+      setHasUnsavedChanges(false);
+      setOnlineStatus({ ok: true, exists: true, message: "Online-Daten vorhanden.", updatedAt: iso, appVersion: APP_VERSION, riderCount: ridersBackup.length, eventCount: eventsBackup.length });
+      setOnlineStatusCheckedAt(new Date().toISOString());
       setOnlineBackups(result.backups || []);
       if (result.backupId) setSelectedOnlineBackupId(result.backupId);
-      setOnlineStorageMessage(`Online-Backup erstellt: ${formatDateTime(iso)}`);
-      setBackupMessage(`Online-Backup erstellt: ${label.trim() || defaultLabel}`);
-      addChangeLog(`Online-Backup erstellt: ${label.trim() || defaultLabel}`);
+      setOnlineStorageMessage(`Backup erstellt: online und als Datei · ${formatDateTime(iso)}`);
+      setBackupMessage(`Backup erstellt: ${finalLabel}`);
+      addChangeLog(`Backup online und als Datei erstellt: ${finalLabel}`);
     } catch (error: any) {
       setOnlineStorageMessage("");
-      window.alert(`Online-Backup fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+      window.alert(`Backup fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
     }
   };
 
@@ -5917,6 +5935,11 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     doc.save(buildPdfFilename("bmx_gesamtwertung"));
   };
 
+  useEffect(() => {
+    if (appShellView !== "events") return;
+    refreshOnlineStatus(false);
+  }, [appShellView]);
+
   const warningCards = [
     dashboardStats.missingCount
       ? `${dashboardStats.missingCount} Teilnehmer mit fehlenden Pflichtfeldern`
@@ -5958,26 +5981,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   );
 
 
-  const backupWarningBar = backupWarningActive ? (
-    <div style={{
-      marginBottom: 16,
-      padding: "12px 14px",
-      borderRadius: 14,
-      border: `1px solid ${colors.warningBorder}`,
-      borderLeft: `6px solid ${colors.warningBorder}`,
-      background: colors.warningBg,
-      color: "#92400e",
-      display: "flex",
-      gap: 12,
-      justifyContent: "space-between",
-      alignItems: "center",
-      fontWeight: 900,
-      flexWrap: "wrap",
-    }}>
-      <span>{backupAgeMinutes === null ? "⚠ Noch kein Online-Speicherstand erstellt." : `⚠ Letztes Datei-Backup vor ${backupAgeMinutes} Minuten.`}</span>
-      <button type="button" onClick={saveOnlineFullAppState} style={compactSaveButtonStyle}>Online speichern</button>
-    </div>
-  ) : null;
+  const backupWarningBar = null;
 
 
   if (appShellView === "events") {
@@ -6051,16 +6055,10 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             <div>
               <h2 style={{ ...sectionTitleStyle, marginBottom: 4 }}>Speicher</h2>
               <div style={{ color: colors.muted, fontSize: 14, fontWeight: 800, lineHeight: 1.35 }}>
-                Online speichern ist der normale Speicherstand. Online-Backups sind beschriftete Sicherungen zum späteren Wiederherstellen.
+                Online speichern ist der normale Speicherstand. Backups werden online abgelegt und zusätzlich als Datei heruntergeladen.
               </div>
             </div>
-            <button
-              onClick={() => refreshOnlineStatus(true)}
-              disabled={onlineStatusLoading}
-              style={{ ...smallGhostButtonStyle, minHeight: 38, opacity: onlineStatusLoading ? 0.65 : 1 }}
-            >
-              Status prüfen
-            </button>
+
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, marginBottom: 14 }}>
@@ -6074,18 +6072,18 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             </div>
             <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 16, padding: 14, background: colors.cardSoftBg }}>
-              <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Zuletzt gespeichert</div>
+              <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Speicherstand</div>
               <div style={{ fontWeight: 1000, color: colors.title, marginTop: 5, fontSize: 17 }}>
-                Online: {lastOnlineSaveAt ? formatDateTime(lastOnlineSaveAt) : "-"}
+                Zuletzt online: {lastOnlineSaveAt ? formatDateTime(lastOnlineSaveAt) : "-"}
               </div>
               <div style={{ fontSize: 13, color: colors.muted, marginTop: 5, fontWeight: 800 }}>
-                Lokal: {lastSaveAt ? formatDateTime(lastSaveAt) : "-"}
+                Offene Änderungen: {hasUnsavedChanges ? "Ja" : "Nein"}
               </div>
             </div>
             <div style={{ border: `1px solid ${onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? colors.warningBorder : colors.cardBorder}`, borderRadius: 16, padding: 14, background: onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? colors.warningBg : colors.cardSoftBg }}>
               <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Vergleich</div>
               <div style={{ fontWeight: 1000, color: onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "#92400e" : onlineStatus?.exists ? colors.greenBtn : colors.muted, marginTop: 5, fontSize: 17 }}>
-                {onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "Lokal ist neuer" : onlineStatus?.exists ? "Synchron" : "Noch nicht geprüft"}
+                {onlineStatus?.exists && isLocalNewerThanOnline(onlineStatus.updatedAt) ? "Änderungen offen" : onlineStatus?.exists ? "Synchron" : "Status offen"}
               </div>
               <div style={{ fontSize: 13, color: colors.muted, marginTop: 5, fontWeight: 800 }}>
                 {onlineStatusCheckedAt ? `Geprüft: ${formatDateTime(onlineStatusCheckedAt)}` : `${onlineBackups.length} Online-Backups geladen`}
@@ -6098,22 +6096,22 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               onClick={saveOnlineFullAppState}
               style={{ ...compactSaveButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
             >
-              <span style={{ fontSize: 16 }}>Online speichern</span>
-              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Aktuellen Stand sichern</span>
+              <span style={{ fontSize: 16 }}>Speichern</span>
+              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Aktuellen Stand online sichern</span>
             </button>
             <button
               onClick={loadOnlineFullAppState}
               style={{ ...compactHomeButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
             >
-              <span style={{ fontSize: 16 }}>Letzten Online-Stand laden</span>
-              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.85 }}>Ersetzt lokale Daten nach Warnung</span>
+              <span style={{ fontSize: 16 }}>Letzten Speicherstand laden</span>
+              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.85 }}>Lädt den letzten Online-Stand</span>
             </button>
             <button
               onClick={createNamedOnlineBackup}
               style={{ ...compactPrimaryButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
             >
-              <span style={{ fontSize: 16 }}>Online-Backup erstellen</span>
-              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Mit Beschriftung speichern</span>
+              <span style={{ fontSize: 16 }}>Backup erstellen</span>
+              <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Online + Datei mit Beschriftung</span>
             </button>
           </div>
 
@@ -6129,11 +6127,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <button onClick={() => refreshOnlineStatus(true)} disabled={onlineStatusLoading} style={{ ...compactHomeButtonStyle, minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: onlineStatusLoading ? 0.65 : 1 }}>
                 Online-Status prüfen
               </button>
-              <button onClick={saveAndExportFullBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                Datei-Backup herunterladen
-              </button>
               <label style={{ ...compactHomeButtonStyle, minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
-                Datei-Backup importieren
+                Lokale Backup-Datei laden
                 <input
                   type="file"
                   accept="application/json,.json"
@@ -6149,7 +6144,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <div>
                 <div style={{ fontWeight: 1000, color: colors.title, fontSize: 17 }}>Online-Backups</div>
                 <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800, lineHeight: 1.35 }}>
-                  Beschriftete Sicherungen, neuste zuerst. Zum Wiederherstellen direkt auf „Laden“ klicken.
+                  Online-Backups, neuste zuerst. Zum Wiederherstellen direkt auf „Laden“ klicken oder unter weitere Speicheroptionen eine lokale Backup-Datei laden.
                 </div>
               </div>
               <div style={{ fontWeight: 1000, color: colors.muted }}>{onlineBackups.length} / 20</div>
@@ -6203,7 +6198,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             ) : (
               <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800, border: `1px dashed ${colors.cardBorderStrong}`, borderRadius: 14, padding: 14, background: colors.cardBg }}>
-                Noch keine Online-Backups angezeigt. Klicke auf Status prüfen oder erstelle ein beschriftetes Online-Backup.
+                Noch keine Online-Backups angezeigt. Öffne weitere Speicheroptionen und prüfe den Status oder erstelle ein neues Backup.
               </div>
             )}
           </div>
@@ -6978,7 +6973,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <span style={getStatusBadgeStyle(hasUnsavedChanges ? "Warnung" : "OK")}>{hasUnsavedChanges ? "Ungesicherte Änderungen" : "Keine offenen Änderungen"}</span>
             </div>
           </div>
-          <button onClick={async () => { if (currentEventId && initialLoaded && hasUnsavedChanges) await saveCurrentState(); setAppShellView("events"); }} style={{ ...secondaryButtonStyle, minHeight: 46 }}>Zur Startseite</button>
+          <button onClick={async () => { if (currentEventId && initialLoaded && hasUnsavedChanges) { const saved = await saveOnlineFullAppState(); if (!saved) return; } setAppShellView("events"); }} style={{ ...secondaryButtonStyle, minHeight: 46 }}>Zur Startseite</button>
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 14 }}>
@@ -7167,13 +7162,10 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
         <div style={{ ...basePanelStyle, marginBottom: 20 }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>Datenstatus</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
             <div><strong>Letzte Änderung</strong><br />{changeLog[0] || "Noch keine Änderung"}</div>
-            <div><strong>Letzte Speicherung</strong><br />{formatDateTime(lastSaveAt)}</div>
-            <div><strong>Letztes Backup</strong><br />{getLastBackup() ? `${formatDateTime(getLastBackup().iso)} · ${getLastBackup().fileName}` : "Noch kein Backup"}</div>
-            <div style={{ gridColumn: "1 / -1", color: backupWarningActive ? colors.redBtn : colors.muted, fontWeight: 800 }}>
-              {backupWarningActive ? (backupAgeMinutes === null ? "Warnung: Noch kein Backup erstellt." : `Warnung: Seit ${backupAgeMinutes} Minuten kein Backup erstellt.`) : "Backup aktuell"}
-            </div>
+            <div><strong>Letzte Online-Speicherung</strong><br />{lastOnlineSaveAt ? formatDateTime(lastOnlineSaveAt) : "Noch nicht online gespeichert"}</div>
+            <div><strong>Speicherstatus</strong><br />{hasUnsavedChanges ? "Änderungen offen – bitte online speichern" : "Online gespeichert"}</div>
           </div>
         </div>
 
@@ -7955,9 +7947,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             </button>
             <button
               type="button"
-              onClick={saveAndExportFullBackup}
-              style={{ ...actionSaveButtonStyle, minHeight: 52 }}
-              title="Speichert lokal und exportiert ein komplettes App-Backup"
+              onClick={saveOnlineFullAppState}
+              style={{ ...(hasUnsavedChanges || !lastOnlineSaveAt ? actionWarningButtonStyle : actionSaveButtonStyle), minHeight: 52 }}
+              title={hasUnsavedChanges || !lastOnlineSaveAt ? "Änderungen vorhanden – online speichern" : "Aktueller Stand ist online gespeichert"}
             >
               Speichern
             </button>
@@ -8252,8 +8244,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             >
               Teilnehmer nachträglich hinzufügen
             </button>
-            <button type="button" onClick={saveAndExportFullBackup} style={actionSaveButtonStyle}>
-              Backup / Speichern
+            <button type="button" onClick={createNamedOnlineBackup} style={compactPrimaryButtonStyle}>
+              Backup erstellen
             </button>
             <button type="button" onClick={resetHeats} disabled={raceClosed} style={raceClosed ? compactDisabledButtonStyle : actionDangerButtonStyle}>
               Race zurücksetzen
