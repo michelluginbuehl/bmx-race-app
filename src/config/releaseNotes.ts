@@ -8,10 +8,24 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.6",
+    title: "Speicher-Dashboard vereinfacht",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Obere Backup-Warnung verwendet jetzt den Button Online speichern statt Backup jetzt erstellen.",
+      "Speicher-Dashboard optisch aufgeräumt und auf drei Hauptaktionen reduziert: Online speichern, letzten Online-Stand laden und Online-Backup erstellen.",
+      "Datei-Backup, Datei-Import und zusätzliche Statusprüfung sind in weitere Speicheroptionen ausgelagert.",
+      "Online-Backups bleiben als sichtbare Liste erhalten und können weiterhin direkt per Button geladen werden.",
+      "Statuskarten für Online-Stand, letzte Speicherung und lokalen/Online-Vergleich wurden kompakter dargestellt.",
+      "Keine Änderung an Rennlogik, Teilnehmerlogik oder Resultatberechnung.",
+    ],
+  },
+  {
     version: "v1.15.5",
     title: "Online-Speicher-Dashboard und Backup-Liste",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Startseite zeigt den Speicherbereich neu als klareres Dashboard.",
       "Buttons für Online-Speichern, Online-Laden, Online-Backup und Datei-Backup wurden verständlicher benannt.",
