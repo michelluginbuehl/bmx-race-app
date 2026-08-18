@@ -8,7 +8,7 @@ import ReleaseNotes from "./components/ReleaseNotes";
 import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KEYS } from "./config/appConfig";
 import { appStorage, encodeStorageValue } from "./utils/storage";
 import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
-import { createOnlineBackup, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, saveOnlineAppState, setOnlineStorageAuthToken, type OnlineBackupListItem, type OnlineStorageStatus } from "./utils/onlineStorage";
+import { createOnlineBackup, deactivatePublicLiveRace, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, loadPublicLiveRace, publishPublicLiveRace, saveOnlineAppState, setOnlineStorageAuthToken, type OnlineBackupListItem, type OnlineStorageStatus, type PublicLiveRacePayload } from "./utils/onlineStorage";
 import { refreshFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -178,6 +178,14 @@ export default function App() {
   const [dataCheckIssues, setDataCheckIssues] = useState<Array<{ level: "info" | "warning" | "error"; title: string; detail: string; repairable?: boolean }>>([]);
   const [dataCheckRunning, setDataCheckRunning] = useState(false);
   const [dataRepairMessage, setDataRepairMessage] = useState("");
+  const [isPublicLiveView, setIsPublicLiveView] = useState(() => typeof window !== "undefined" && window.location.hash.toLowerCase() === "#live");
+  const [publicLiveRace, setPublicLiveRace] = useState<PublicLiveRacePayload | null>(null);
+  const [publicLiveLoading, setPublicLiveLoading] = useState(false);
+  const [publicLiveMessage, setPublicLiveMessage] = useState("");
+  const [publicLiveCheckedAt, setPublicLiveCheckedAt] = useState("");
+  const [adminLiveRace, setAdminLiveRace] = useState<PublicLiveRacePayload | null>(null);
+  const [liveRaceMessage, setLiveRaceMessage] = useState("");
+  const [liveRaceLoading, setLiveRaceLoading] = useState(false);
 
   const colors: Record<string, string> = {
     pageBg: "#eef3f7",
@@ -238,6 +246,15 @@ export default function App() {
     () => (managedEvents.find((event) => event.id === currentEventId) || null)?.type === "single",
     [managedEvents, currentEventId],
   );
+
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateLiveRoute = () => setIsPublicLiveView(window.location.hash.toLowerCase() === "#live");
+    updateLiveRoute();
+    window.addEventListener("hashchange", updateLiveRoute);
+    return () => window.removeEventListener("hashchange", updateLiveRoute);
+  }, []);
 
   const getRiderGenderCode = (rider: any) => {
     const value = String(rider?.gender || rider?.geschlecht || "")
@@ -5747,9 +5764,20 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       setHasUnsavedChanges(false);
       setOnlineStatus({ ok: true, exists: true, message: "Online-Daten vorhanden.", updatedAt: iso, appVersion: APP_VERSION, riderCount: ridersBackup.length, eventCount: eventsBackup.length });
       setOnlineStatusCheckedAt(new Date().toISOString());
-      setOnlineStorageMessage(`Online gespeichert: ${formatDateTime(iso)}`);
-      setBackupMessage(`Online gespeichert: ${formatDateTime(iso)}`);
-      addChangeLog(`Online gespeichert: ${formatDateTime(iso)}`);
+
+      let liveNote = "";
+      if (isCurrentRaceLive) {
+        const livePayload = buildPublicLiveRacePayload();
+        const liveResult = await publishPublicLiveRace(livePayload);
+        if (!liveResult.ok) throw new Error(liveResult.message || "Live-Rennen konnte nicht aktualisiert werden.");
+        const updatedLivePayload = { ...livePayload, updatedAt: liveResult.updatedAt || livePayload.updatedAt, active: true };
+        setAdminLiveRace(updatedLivePayload);
+        liveNote = ` · Live aktualisiert: ${formatDateTime(updatedLivePayload.updatedAt)}`;
+      }
+
+      setOnlineStorageMessage(`Online gespeichert: ${formatDateTime(iso)}${liveNote}`);
+      setBackupMessage(`Online gespeichert: ${formatDateTime(iso)}${liveNote}`);
+      addChangeLog(`Online gespeichert: ${formatDateTime(iso)}${liveNote}`);
       return true;
     } catch (error: any) {
       setOnlineStorageMessage("");
@@ -6122,6 +6150,239 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     doc.save(buildPdfFilename("bmx_gesamtwertung"));
   };
 
+
+  const getPublicLiveUrl = () => {
+    if (typeof window === "undefined") return "#live";
+    return `${window.location.origin}${window.location.pathname}${window.location.search}#live`;
+  };
+
+  const openPublicLiveView = () => {
+    if (typeof window === "undefined") return;
+    window.location.hash = "live";
+    setIsPublicLiveView(true);
+  };
+
+  const copyPublicLiveUrl = async () => {
+    const liveUrl = getPublicLiveUrl();
+    try {
+      await navigator.clipboard.writeText(liveUrl);
+      setLiveRaceMessage("Live-Link kopiert.");
+    } catch {
+      window.prompt("Live-Link kopieren:", liveUrl);
+    }
+  };
+
+  const getPublicRiderRow = (rider: any, fallbackRank?: number) => ({
+    gate: rider?.startPos || rider?.gate || "",
+    plate: String(rider?.plate || "").trim(),
+    name: String(rider?.name || "Ohne Name").trim(),
+    club: String(rider?.club || "").trim(),
+    category: String(rider?.category || "").trim(),
+    rank: Number(rider?.rank || fallbackRank || 0) || undefined,
+    status: String(rider?.status || "").trim(),
+  });
+
+  const buildPublicLiveRacePayload = (): PublicLiveRacePayload => {
+    const nowIso = new Date().toISOString();
+    const currentEvent = getCurrentEvent();
+    const eventName = homeEventSeries.trim() || currentEvent?.name || "BMX Rennen";
+    const raceStatus = getRaceStatus(selectedRace);
+    const publicCategories = sortCategories(Object.keys(groupedRace || {})).map((category) => ({
+      category,
+      riders: [...(groupedRace[category] || [])]
+        .sort((a: any, b: any) => String(a.plate || "").localeCompare(String(b.plate || ""), "de-CH", { numeric: true }) || String(a.name || "").localeCompare(String(b.name || ""), "de-CH", { numeric: true }))
+        .map((rider: any) => getPublicRiderRow(rider)),
+    }));
+
+    const publicMotos = sortCategories(Object.keys(heats || {})).map((category) => ({
+      category,
+      runs: [0, 1, 2].map((runIndex) => ({
+        name: `Moto ${runIndex + 1}`,
+        races: ((heats?.[category]?.[runIndex] || []) as any[]).map((group: any[], heatIndex: number) => {
+          const key = `${category}_${runIndex}_${heatIndex}`;
+          const result = Array.isArray(results?.[key]) ? results[key] : [];
+          return {
+            raceNumber: getSequentialHeatRaceNumber(heats, category, runIndex, heatIndex),
+            startList: [...(group || [])]
+              .sort((a: any, b: any) => Number(a.startPos || 99) - Number(b.startPos || 99))
+              .map((rider: any) => getPublicRiderRow(rider)),
+            results: result.map((rider: any, index: number) => getPublicRiderRow(rider, index + 1)),
+          };
+        }),
+      })).filter((run) => run.races.length > 0),
+    })).filter((categoryBlock) => categoryBlock.runs.length > 0);
+
+    const publicFinals = sortCategories(Object.keys(finals || {})).map((category) => ({
+      category: getFinalCategoryLabel(category),
+      rounds: ["Manuelle Rangliste", "4. Vorlauf", "C-Final", "B-Final", "A-Final"].map((roundName) => {
+        const heat = finals?.[category]?.[roundName] || [];
+        const key = `${category}_${roundName}`;
+        const result = Array.isArray(finalResults?.[key]) ? finalResults[key] : [];
+        return {
+          name: getRoundDisplayName(roundName),
+          startList: [...heat]
+            .sort((a: any, b: any) => Number(a.startPos || 99) - Number(b.startPos || 99))
+            .map((rider: any) => getPublicRiderRow(rider)),
+          results: result.map((rider: any, index: number) => getPublicRiderRow(rider, index + 1)),
+        };
+      }).filter((round) => round.startList.length > 0 || round.results.length > 0),
+    })).filter((categoryBlock) => categoryBlock.rounds.length > 0);
+
+    const publicFinalRankings = Object.keys(finals || {}).length > 0
+      ? originalRaceCategories().map((category) => ({
+          category,
+          rows: buildFinalCategoryRanking(category).map((rider: any, index: number) => ({
+            rank: rider.rank || index + 1,
+            plate: String(rider.plate || ""),
+            name: String(rider.name || ""),
+            club: String(rider.club || ""),
+            final: getRoundLabelForRankingAndPdf(rider.roundName),
+            status: String(rider.status || ""),
+          })),
+        })).filter((categoryBlock) => categoryBlock.rows.length > 0)
+      : [];
+
+    return {
+      publicVersion: 1,
+      active: true,
+      publishedAt: nowIso,
+      updatedAt: nowIso,
+      appName: APP_NAME,
+      appVersion: APP_VERSION,
+      eventId: currentEventId || "legacy",
+      eventName,
+      raceName: selectedRace,
+      raceStatus,
+      location: eventLocation || "",
+      date: eventDate || "",
+      participantCount: riders.length,
+      categories: publicCategories,
+      motos: publicMotos,
+      finals: publicFinals,
+      finalRankings: publicFinalRankings,
+    };
+  };
+
+  const isCurrentRaceLive = Boolean(
+    adminLiveRace?.active &&
+      String(adminLiveRace.eventId || "") === String(currentEventId || "legacy") &&
+      String(adminLiveRace.raceName || "") === String(selectedRace || ""),
+  );
+
+  const refreshAdminLiveRaceStatus = async (showAlert = false) => {
+    try {
+      setLiveRaceLoading(true);
+      const result = await loadPublicLiveRace();
+      setAdminLiveRace(result.data || null);
+      const message = result.active && result.data
+        ? `Live veröffentlicht: ${result.data.eventName} · ${result.data.raceName} · ${formatDateTime(result.updatedAt || result.data.updatedAt)}`
+        : result.message;
+      setLiveRaceMessage(message);
+      if (showAlert) window.alert(message);
+      return result;
+    } catch (error: any) {
+      const message = `Live-Status konnte nicht geprüft werden: ${error?.message || "Unbekannter Fehler"}`;
+      setLiveRaceMessage(message);
+      if (showAlert) window.alert(message);
+      return null;
+    } finally {
+      setLiveRaceLoading(false);
+    }
+  };
+
+  const publishCurrentRaceLive = async () => {
+    const authSession = await ensureOnlineAuthSession("Live-Rennen veröffentlichen");
+    if (!authSession) return false;
+
+    if (!currentEventId) {
+      window.alert("Bitte zuerst ein Rennen öffnen.");
+      return false;
+    }
+
+    try {
+      setLiveRaceLoading(true);
+      setLiveRaceMessage("Live-Rennen wird veröffentlicht ...");
+      await saveCurrentState();
+      const payload = buildPublicLiveRacePayload();
+      const result = await publishPublicLiveRace(payload);
+      if (!result.ok) throw new Error(result.message || "Live-Rennen konnte nicht veröffentlicht werden.");
+      const updatedPayload = { ...payload, updatedAt: result.updatedAt || payload.updatedAt, active: true };
+      setAdminLiveRace(updatedPayload);
+      setLiveRaceMessage(`Live veröffentlicht: ${payload.eventName} · ${payload.raceName} · ${formatDateTime(updatedPayload.updatedAt)}`);
+      addChangeLog(`${selectedRace}: Live-Rennen veröffentlicht`);
+      return true;
+    } catch (error: any) {
+      const message = `Live-Veröffentlichung fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`;
+      setLiveRaceMessage(message);
+      window.alert(message);
+      return false;
+    } finally {
+      setLiveRaceLoading(false);
+    }
+  };
+
+  const deactivateCurrentRaceLive = async () => {
+    const authSession = await ensureOnlineAuthSession("Live-Rennen beenden");
+    if (!authSession) return false;
+
+    const ok = window.confirm(
+      `Live-Ansicht beenden?\n\nDie Zuschauer sehen danach kein aktives Live-Rennen mehr. Die internen Renn- und Resultatdaten bleiben unverändert.`,
+    );
+    if (!ok) return false;
+
+    try {
+      setLiveRaceLoading(true);
+      setLiveRaceMessage("Live-Rennen wird beendet ...");
+      const payload = adminLiveRace || buildPublicLiveRacePayload();
+      const result = await deactivatePublicLiveRace({ ...payload, active: false, appVersion: APP_VERSION });
+      if (!result.ok) throw new Error(result.message || "Live-Rennen konnte nicht beendet werden.");
+      const stoppedPayload = { ...payload, active: false, updatedAt: result.updatedAt || new Date().toISOString() };
+      setAdminLiveRace(stoppedPayload);
+      setLiveRaceMessage(`Live-Rennen beendet: ${formatDateTime(stoppedPayload.updatedAt)}`);
+      addChangeLog(`${selectedRace}: Live-Rennen beendet`);
+      return true;
+    } catch (error: any) {
+      const message = `Live-Rennen beenden fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`;
+      setLiveRaceMessage(message);
+      window.alert(message);
+      return false;
+    } finally {
+      setLiveRaceLoading(false);
+    }
+  };
+
+  const refreshPublicLiveRace = async (showLoading = true) => {
+    try {
+      if (showLoading) setPublicLiveLoading(true);
+      const result = await loadPublicLiveRace();
+      setPublicLiveCheckedAt(new Date().toISOString());
+      if (result.ok && result.active && result.data) {
+        setPublicLiveRace(result.data);
+        setPublicLiveMessage(result.message);
+      } else {
+        setPublicLiveRace(null);
+        setPublicLiveMessage(result.message || "Aktuell ist kein Rennen live veröffentlicht.");
+      }
+    } catch (error: any) {
+      setPublicLiveRace(null);
+      setPublicLiveMessage(error?.message || "Live-Rennen konnte nicht geladen werden.");
+    } finally {
+      if (showLoading) setPublicLiveLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isPublicLiveView) return;
+    refreshPublicLiveRace(true);
+    const timer = window.setInterval(() => refreshPublicLiveRace(false), 30_000);
+    return () => window.clearInterval(timer);
+  }, [isPublicLiveView]);
+
+  useEffect(() => {
+    if (!firebaseAuthReady || !isFirebaseSignedIn || appShellView !== "manager" || !currentEventId) return;
+    refreshAdminLiveRaceStatus(false);
+  }, [firebaseAuthReady, isFirebaseSignedIn, appShellView, currentEventId, selectedRace]);
+
   useEffect(() => {
     if (appShellView !== "events") return;
     refreshOnlineStatus(false);
@@ -6349,6 +6610,14 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                   </button>
                 </div>
 
+                <button
+                  type="button"
+                  onClick={openPublicLiveView}
+                  style={{ ...compactHomeButtonStyle, minHeight: 48, width: "100%", marginTop: 12 }}
+                >
+                  Zuschaueransicht öffnen
+                </button>
+
                 {firebaseAuthMessage && (
                   <div
                     style={{
@@ -6375,8 +6644,211 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   );
 
 
+
+  const publicLivePanelStyle: React.CSSProperties = {
+    border: `1px solid ${colors.cardBorder}`,
+    borderRadius: 18,
+    background: colors.cardBg,
+    padding: 14,
+    boxShadow: "0 8px 20px rgba(23,32,51,0.07)",
+  };
+
+  const renderPublicLiveRows = (rows: any[], mode: "start" | "result") => (
+    <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+      {rows.length === 0 ? (
+        <div style={{ color: colors.muted, fontWeight: 800, padding: "8px 0" }}>Noch nicht erfasst</div>
+      ) : rows.map((row: any, index: number) => (
+        <div
+          key={`${mode}-${row.plate}-${row.name}-${index}`}
+          style={{
+            display: "grid",
+            gridTemplateColumns: mode === "start" ? "48px 76px minmax(140px, 1fr) minmax(90px, 0.7fr)" : "48px 76px minmax(140px, 1fr) minmax(80px, 0.6fr)",
+            gap: 8,
+            alignItems: "center",
+            minHeight: 32,
+            padding: "6px 8px",
+            borderRadius: 10,
+            background: index % 2 === 0 ? colors.cardSoftBg : colors.cardBg,
+            border: `1px solid ${colors.cardBorder}`,
+            fontWeight: 800,
+          }}
+        >
+          <div style={{ color: colors.blueBtn, fontWeight: 1000 }}>{mode === "start" ? row.gate || "-" : row.rank || index + 1}</div>
+          <div>#{row.plate || "-"}</div>
+          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.name || "-"}</div>
+          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: colors.muted }}>{mode === "result" ? row.status || row.club || "-" : row.club || "-"}</div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderPublicLiveView = () => (
+    <div
+      style={{
+        padding: 20,
+        fontFamily: "Arial, sans-serif",
+        background: colors.pageBg,
+        minHeight: "100vh",
+        color: colors.text,
+        position: "relative",
+        maxWidth: 1320,
+        margin: "0 auto",
+      }}
+    >
+      <div style={{ position: "relative", zIndex: 1 }}>
+        {renderAppHeader()}
+
+        <div style={{ ...basePanelStyle, marginBottom: 18, borderLeft: `6px solid ${publicLiveRace ? colors.greenBtn : colors.warningBorder}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Öffentliche Live-Ansicht</div>
+              <h1 style={{ margin: "6px 0", color: colors.title, fontSize: 30 }}>BMX Race Manager Live</h1>
+              <div style={{ color: colors.muted, fontWeight: 900 }}>Aktualisierung automatisch alle 30 Sekunden</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" onClick={() => refreshPublicLiveRace(true)} disabled={publicLiveLoading} style={publicLiveLoading ? compactDisabledButtonStyle : compactHomeButtonStyle}>
+                {publicLiveLoading ? "Aktualisiere ..." : "Jetzt aktualisieren"}
+              </button>
+              <button type="button" onClick={() => { if (typeof window !== "undefined") window.location.hash = ""; setIsPublicLiveView(false); }} style={smallGhostButtonStyle}>
+                Zum Login
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {!publicLiveRace ? (
+          <div style={{ ...basePanelStyle, textAlign: "center", padding: 34 }}>
+            <h2 style={{ marginTop: 0, color: colors.title }}>Aktuell ist kein Rennen live veröffentlicht</h2>
+            <div style={{ color: colors.muted, fontWeight: 900, lineHeight: 1.45 }}>
+              Sobald die Rennleitung ein Rennen live aktiviert, erscheinen hier Motos, Startlisten, Resultate und Finals.
+            </div>
+            {publicLiveMessage && <div style={{ marginTop: 14, color: colors.muted, fontWeight: 800 }}>{publicLiveMessage}</div>}
+          </div>
+        ) : (
+          <>
+            <div style={{ ...basePanelStyle, marginBottom: 18 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase" }}>Rennen</div>
+                  <div style={{ fontWeight: 1000, color: colors.title, fontSize: 18 }}>{publicLiveRace.eventName}</div>
+                  <div style={{ color: colors.muted, fontWeight: 900 }}>{publicLiveRace.raceName}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase" }}>Status</div>
+                  <div style={{ fontWeight: 1000, color: colors.greenBtn, fontSize: 18 }}>{publicLiveRace.raceStatus || "Live"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase" }}>Ort / Datum</div>
+                  <div style={{ fontWeight: 1000, color: colors.title }}>{publicLiveRace.location || "-"}</div>
+                  <div style={{ color: colors.muted, fontWeight: 900 }}>{publicLiveRace.date || "-"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase" }}>Aktualisiert</div>
+                  <div style={{ fontWeight: 1000, color: colors.title }}>{formatDateTime(publicLiveRace.updatedAt)}</div>
+                  <div style={{ color: colors.muted, fontWeight: 900 }}>{publicLiveCheckedAt ? `Geprüft: ${formatDateTime(publicLiveCheckedAt)}` : "-"}</div>
+                </div>
+              </div>
+            </div>
+
+            {publicLiveRace.motos?.length > 0 && (
+              <div style={{ ...basePanelStyle, marginBottom: 18 }}>
+                <h2 style={{ ...sectionTitleStyle }}>Motos / Laufeinteilung</h2>
+                <div style={{ display: "grid", gap: 16 }}>
+                  {publicLiveRace.motos.map((categoryBlock: any) => (
+                    <div key={`live-moto-${categoryBlock.category}`} style={publicLivePanelStyle}>
+                      <h3 style={{ margin: "0 0 10px", color: colors.title }}>{categoryBlock.category}</h3>
+                      <div style={{ display: "grid", gap: 14 }}>
+                        {categoryBlock.runs.map((run: any) => (
+                          <div key={`${categoryBlock.category}-${run.name}`}>
+                            <h4 style={{ margin: "4px 0 8px", color: colors.title }}>{run.name}</h4>
+                            <div style={{ display: "grid", gap: 12 }}>
+                              {run.races.map((race: any) => (
+                                <div key={`${categoryBlock.category}-${run.name}-${race.raceNumber}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
+                                  <strong style={{ color: colors.title }}>Race {race.raceNumber}</strong>
+                                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 }}>
+                                    <div>
+                                      <strong>Startliste</strong>
+                                      {renderPublicLiveRows(race.startList || [], "start")}
+                                    </div>
+                                    <div>
+                                      <strong>Resultat</strong>
+                                      {renderPublicLiveRows(race.results || [], "result")}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {publicLiveRace.finals?.length > 0 && (
+              <div style={{ ...basePanelStyle, marginBottom: 18 }}>
+                <h2 style={{ ...sectionTitleStyle }}>Finals</h2>
+                <div style={{ display: "grid", gap: 16 }}>
+                  {publicLiveRace.finals.map((categoryBlock: any) => (
+                    <div key={`live-final-${categoryBlock.category}`} style={publicLivePanelStyle}>
+                      <h3 style={{ margin: "0 0 10px", color: colors.title }}>{categoryBlock.category}</h3>
+                      <div style={{ display: "grid", gap: 12 }}>
+                        {categoryBlock.rounds.map((round: any) => (
+                          <div key={`${categoryBlock.category}-${round.name}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
+                            <strong style={{ color: colors.title }}>{round.name}</strong>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 }}>
+                              <div>
+                                <strong>Startliste</strong>
+                                {renderPublicLiveRows(round.startList || [], "start")}
+                              </div>
+                              <div>
+                                <strong>Resultat</strong>
+                                {renderPublicLiveRows(round.results || [], "result")}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {publicLiveRace.finalRankings?.length > 0 && (
+              <div style={{ ...basePanelStyle, marginBottom: 18 }}>
+                <h2 style={{ ...sectionTitleStyle }}>Resultate</h2>
+                <div style={{ display: "grid", gap: 12 }}>
+                  {publicLiveRace.finalRankings.map((categoryBlock: any) => (
+                    <div key={`live-ranking-${categoryBlock.category}`} style={publicLivePanelStyle}>
+                      <h3 style={{ margin: "0 0 8px", color: colors.title }}>{categoryBlock.category}</h3>
+                      {renderPublicLiveRows(categoryBlock.rows || [], "result")}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(!publicLiveRace.motos?.length && !publicLiveRace.finals?.length && !publicLiveRace.finalRankings?.length) && (
+              <div style={{ ...basePanelStyle, textAlign: "center", padding: 24 }}>
+                <h2 style={{ marginTop: 0, color: colors.title }}>Live-Rennen ist aktiv</h2>
+                <div style={{ color: colors.muted, fontWeight: 900 }}>Motos oder Resultate wurden noch nicht veröffentlicht.</div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+
   const backupWarningBar = null;
 
+
+  if (isPublicLiveView) {
+    return renderPublicLiveView();
+  }
 
   if (!firebaseAuthReady || !isFirebaseSignedIn) {
     return renderLoginStartScreen();
@@ -8508,6 +8980,35 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               ⚠ Renninformationen unvollständig: {[!homeEventSeries.trim() ? "Rennserie" : "", !eventLocation.trim() ? "Rennort" : "", !eventDate.trim() ? "Datum" : ""].filter(Boolean).join(", ")} fehlt. Bitte vor dem Erstellen der Motos ergänzen.
             </div>
           )}
+
+          <div style={{ marginBottom: 14, padding: 14, borderRadius: 16, border: `1px solid ${isCurrentRaceLive ? colors.greenBorder : colors.cardBorder}`, background: isCurrentRaceLive ? colors.greenBg : colors.cardSoftBg }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Öffentliche Live-Ansicht</div>
+                <div style={{ fontWeight: 1000, color: isCurrentRaceLive ? colors.greenBtn : colors.title, fontSize: 17, marginTop: 4 }}>
+                  {isCurrentRaceLive ? `Dieses Rennen ist live veröffentlicht` : adminLiveRace?.active ? `Anderes Rennen ist live: ${adminLiveRace.eventName} · ${adminLiveRace.raceName}` : "Kein Rennen live veröffentlicht"}
+                </div>
+                <div style={{ color: colors.muted, fontSize: 13, fontWeight: 850, marginTop: 4 }}>
+                  Öffentlich sichtbar: Motos, Startlisten, Resultate und Finals. Nicht sichtbar: Teilnehmerdatenbank, Gesamtwertung, Backups und Bearbeitung.
+                </div>
+                {liveRaceMessage && <div style={{ color: colors.muted, fontSize: 13, fontWeight: 850, marginTop: 4 }}>{liveRaceMessage}</div>}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button type="button" onClick={publishCurrentRaceLive} disabled={liveRaceLoading || !isFirebaseSignedIn} style={liveRaceLoading || !isFirebaseSignedIn ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 42 }}>
+                  {isCurrentRaceLive ? "Live aktualisieren" : "Dieses Rennen live veröffentlichen"}
+                </button>
+                <button type="button" onClick={deactivateCurrentRaceLive} disabled={liveRaceLoading || !isCurrentRaceLive} style={liveRaceLoading || !isCurrentRaceLive ? compactDisabledButtonStyle : { ...actionDangerButtonStyle, minHeight: 42 }}>
+                  Live beenden
+                </button>
+                <button type="button" onClick={() => window.open(getPublicLiveUrl(), "_blank")} style={{ ...compactHomeButtonStyle, minHeight: 42 }}>
+                  Live-Ansicht öffnen
+                </button>
+                <button type="button" onClick={copyPublicLiveUrl} style={{ ...smallGhostButtonStyle, minHeight: 42 }}>
+                  Link kopieren
+                </button>
+              </div>
+            </div>
+          </div>
 
           <div
             style={{
