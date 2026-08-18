@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.1",
+    title: "Online-Speicher aktiviert",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Firebase-Projekt bmx-race-manager in der App-Konfiguration aktiviert.",
+      "Online speichern und Online laden verwenden jetzt Firestore REST und komplette App-Daten.",
+      "Der Online-Speicher nutzt eine Chunk-Speicherung, damit auch grössere Backup-Daten nicht an der Firestore-Dokumentgrösse scheitern.",
+      "Lokaler Speicher und Datei-Backup bleiben unverändert als Sicherheit erhalten.",
+      "Beim Online-Laden wird weiterhin zuerst ein Sicherheitsbackup erstellt und erst nach Bestätigung lokal ersetzt.",
+    ],
+  },
+  {
     version: "v1.15.0",
     title: "Online-Speicher vorbereitet",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Firebase-Konfigurationsdatei ergänzt, damit der Online-Speicher später ohne App-Umbau aktiviert werden kann.",
       "Online-Speicher-Utility über Firestore REST vorbereitet; es benötigt keine zusätzlichen npm-Pakete.",
