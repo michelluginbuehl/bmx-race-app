@@ -8,10 +8,24 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.1",
+    title: "Login bei jedem Start",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Die App zeigt bei jedem Öffnen, Neuladen oder nach dem Schliessen wieder zuerst die Login-Startseite.",
+      "Eine frühere Firebase-Anmeldung wird nicht mehr automatisch wiederhergestellt.",
+      "Die eigentliche App bleibt vollständig ausgeblendet, bis der Login erfolgreich ist.",
+      "Login-Token werden nur während der aktuellen Nutzung im App-State gehalten und nicht dauerhaft im Browser gespeichert.",
+      "Nach Abmelden oder Neuladen ist wieder ein Login mit E-Mail und Passwort nötig.",
+      "Keine Änderung an Rennlogik, Teilnehmerlogik oder Resultatberechnung.",
+    ],
+  },
+  {
     version: "v1.16.0",
     title: "Login-Startseite",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Beim Öffnen der App erscheint zuerst eine geschützte Startseite mit Header-Banner und Anmeldefenster.",
       "Die eigentliche App, Startseite, Rennen, Teilnehmer, Resultate und Speicherfunktionen werden erst nach erfolgreichem Firebase Login angezeigt.",
