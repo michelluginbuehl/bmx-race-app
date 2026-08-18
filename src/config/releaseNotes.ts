@@ -8,10 +8,22 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.14.5",
+    title: "Teilnehmerliste übersichtlicher",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Im Bereich Teilnehmer in dieser Rennserie / diesem Rennen wurden die Kategorie-Auswahlbuttons entfernt.",
+      "Die Filterbuttons Alle, Race ausgewählt, Race offen, Fehlende Angaben, Doppelte Nummern und Cruiser sind jetzt gleich hoch und optisch einheitlich.",
+      "Die Suche und die Filterbuttons wurden getrennt angeordnet, damit die Ansicht auf dem iPad ruhiger und besser bedienbar bleibt.",
+      "Keine Änderung an Teilnehmerdaten, Race-Zuordnung, Resultaten, Motos, Gates oder Backups.",
+    ],
+  },
+  {
     version: "v1.14.4",
     title: "Teilnehmer direkt im Rennen erfassen und auswählen",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Im Teilnehmerbereich eines Rennens kann jetzt direkt ein neuer Teilnehmer erfasst werden, ohne zurück ins Hauptmenü zu wechseln.",
       "Neue Teilnehmer erhalten weiterhin automatisch eine stabile Teilnehmer-ID und werden direkt dem aktuell gewählten Race zugeordnet.",
