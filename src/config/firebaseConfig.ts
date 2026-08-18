@@ -8,6 +8,7 @@ export type FirebaseOnlineStorageConfig = {
   messagingSenderId?: string;
   collectionPath: string;
   documentId: string;
+  databaseId: string;
 };
 
 // Firebase Firestore REST-Konfiguration.
@@ -19,6 +20,10 @@ export type FirebaseOnlineStorageConfig = {
 // - VITE_FIREBASE_PROJECT_ID=...
 // - VITE_FIREBASE_APP_ID=...
 // Optional:
+// - VITE_FIREBASE_DATABASE_ID=default
+//   Hinweis: Wenn in Google Cloud eine benannte Datenbank ohne Klammern erstellt wurde,
+//   muss hier genau dieser Name verwendet werden.
+// Optional:
 // - VITE_FIREBASE_AUTH_DOMAIN=...
 // - VITE_FIREBASE_STORAGE_BUCKET=...
 // - VITE_FIREBASE_MESSAGING_SENDER_ID=...
@@ -28,6 +33,7 @@ const enabledFromEnv = String(env.VITE_FIREBASE_ENABLED ?? "").toLowerCase() ===
 const projectId = String(env.VITE_FIREBASE_PROJECT_ID ?? "").trim();
 const apiKey = String(env.VITE_FIREBASE_API_KEY ?? "").trim();
 const appId = String(env.VITE_FIREBASE_APP_ID ?? "").trim();
+const databaseId = String(env.VITE_FIREBASE_DATABASE_ID ?? "default").trim() || "default";
 
 export const firebaseOnlineStorageConfig: FirebaseOnlineStorageConfig = {
   enabled: enabledFromEnv && Boolean(projectId) && Boolean(apiKey) && Boolean(appId),
@@ -39,4 +45,5 @@ export const firebaseOnlineStorageConfig: FirebaseOnlineStorageConfig = {
   messagingSenderId: String(env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "").trim() || undefined,
   collectionPath: "bmxRaceManager",
   documentId: "mainAppState",
+  databaseId,
 };

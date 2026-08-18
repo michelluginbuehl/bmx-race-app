@@ -8,10 +8,22 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.3",
+    title: "Firestore-Datenbank-ID default",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Online-Speicher verwendet neu die Firestore-Datenbank-ID default ohne Klammern.",
+      "Damit passt die App zu der in Google Cloud erstellten benannten Datenbank default.",
+      "Optional kann die Datenbank-ID über VITE_FIREBASE_DATABASE_ID gesetzt werden.",
+      "Online speichern/laden, lokaler Speicher und Datei-Backup bleiben unverändert.",
+    ],
+  },
+  {
     version: "v1.15.2",
     title: "Firebase-Konfiguration über Vercel Environment Variables",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Firebase API Key und Projektwerte werden nicht mehr direkt im GitHub-Repository gespeichert.",
       "Firebase-Konfiguration wird über Vercel Environment Variables geladen.",
