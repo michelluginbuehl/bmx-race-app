@@ -8,10 +8,24 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.5",
+    title: "Online-Speicher-Dashboard und Backup-Liste",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Startseite zeigt den Speicherbereich neu als klareres Dashboard.",
+      "Buttons für Online-Speichern, Online-Laden, Online-Backup und Datei-Backup wurden verständlicher benannt.",
+      "Online-Backups werden direkt als sichtbare Liste nach Datum angezeigt.",
+      "Online-Backups können jetzt direkt über einen Button in der Liste geladen werden; keine Nummerneingabe mehr nötig.",
+      "Warnungen vor dem Wiederherstellen wurden deutlicher formuliert und zeigen den Ablauf mit automatischem Sicherheitsbackup.",
+      "Rennlogik, Teilnehmerlogik und Resultatberechnung bleiben unverändert.",
+    ],
+  },
+  {
     version: "v1.15.4",
     title: "Online-Status und Online-Backups",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Startseite zeigt den letzten Online-Speicherzeitpunkt und ob Online-Daten vorhanden sind.",
       "Button Online-Status prüfen ergänzt, inklusive Online-Backup-Liste.",

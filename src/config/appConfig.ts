@@ -1,6 +1,6 @@
-export const APP_VERSION = "v1.15.4";
+export const APP_VERSION = "v1.15.5";
 export const APP_NAME = "BMX Race Manager";
-export const APP_CHANGE_NOTE = "Online-Status und beschriftete Online-Backups";
+export const APP_CHANGE_NOTE = "Online-Speicher-Dashboard und Backup-Liste";
 
 export const DATA_SCHEMA_VERSION = 8;
 export const BACKUP_VERSION = 2;
