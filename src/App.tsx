@@ -5480,6 +5480,14 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     return Number.isFinite(localTime) && Number.isFinite(onlineTime) && localTime > onlineTime;
   };
 
+  const formatPayloadSize = (size?: number) => {
+    const parsed = Number(size);
+    if (!Number.isFinite(parsed) || parsed <= 0) return "-";
+    const kiloBytes = parsed / 1024;
+    if (kiloBytes >= 1024) return `${(kiloBytes / 1024).toFixed(1)} MB`;
+    return `${Math.max(1, Math.round(kiloBytes))} KB`;
+  };
+
   const refreshOnlineStatus = async (showAlert = false) => {
     if (!isOnlineStorageConfigured()) {
       const message = "Online-Speicher ist noch nicht konfiguriert. Prüfe die Vercel Environment Variables.";
@@ -5559,13 +5567,24 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   const askBeforeReplacingLocalData = async (sourceLabel: string, updatedAt?: string) => {
     if (isLocalNewerThanOnline(updatedAt)) {
       const choice = window.prompt(
-        `Lokale Daten sind neuer als ${sourceLabel}.\n\n` +
-          `Lokale Speicherung: ${formatDateTime(lastSaveAt)}\n` +
-          `${sourceLabel}: ${updatedAt ? formatDateTime(updatedAt) : "unbekannt"}\n\n` +
-          `Was möchtest du tun?\n` +
-          `1 = Online-Version trotzdem laden\n` +
-          `2 = Lokale Version zuerst online speichern\n` +
-          `3 = Abbrechen`,
+        `Konflikt erkannt: Die lokalen Daten auf diesem Gerät sind neuer als ${sourceLabel}.
+
+` +
+          `Lokaler Stand: ${formatDateTime(lastSaveAt)}
+` +
+          `${sourceLabel}: ${updatedAt ? formatDateTime(updatedAt) : "unbekannt"}
+
+` +
+          `Bitte auswählen:
+` +
+          `1 = ${sourceLabel} laden und lokale Daten ersetzen
+` +
+          `2 = Lokale Version zuerst als aktuellen Online-Stand speichern
+` +
+          `3 = Abbrechen, nichts verändern
+
+` +
+          `Empfehlung: Bei Unsicherheit zuerst abbrechen oder lokale Version online speichern.`,
         "3",
       );
       const normalizedChoice = String(choice || "").trim();
@@ -5577,10 +5596,22 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     }
 
     return window.confirm(
-      `${sourceLabel} laden?\n\n` +
-        `Stand: ${updatedAt ? formatDateTime(updatedAt) : "unbekannt"}\n\n` +
-        `Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig ersetzt.\n` +
-        `Vorher wird automatisch ein komplettes Datei-Sicherheitsbackup erstellt.`,
+      `${sourceLabel} laden?
+
+` +
+        `Stand: ${updatedAt ? formatDateTime(updatedAt) : "unbekannt"}
+
+` +
+        `Wichtig:
+` +
+        `- Alle aktuellen lokalen Daten auf diesem Gerät werden ersetzt.
+` +
+        `- Vorher wird automatisch ein komplettes Datei-Sicherheitsbackup heruntergeladen.
+` +
+        `- Rennen, Teilnehmer, Resultate und Einstellungen werden aus dem gewählten Online-Stand übernommen.
+
+` +
+        `Nur fortfahren, wenn du diesen Stand wirklich wiederherstellen möchtest.`,
     );
   };
 
@@ -5592,14 +5623,31 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
     const backupSummary = getBackupSummary(backup);
     const detailsOk = window.confirm(
-      `${sourceLabel} wirklich importieren?\n\n` +
-        `Rennen/Rennserien: ${backupSummary.eventCount}\n` +
-        `Teilnehmer: ${backupSummary.riderCount}\n` +
-        `Gespeicherte App-Daten: ${backupSummary.appDataCount}\n` +
-        `Backup-Version: ${backupSummary.backupVersion}\n` +
-        `Datenstruktur-Version: ${backupSummary.dataSchemaVersion}\n` +
-        `Stand: ${updatedAt ? formatDateTime(updatedAt) : formatDateTime(backupSummary.exportedAt)}\n\n` +
-        `Lokale Daten werden ersetzt. Vorher wird automatisch ein Sicherheitsbackup erstellt.`,
+      `${sourceLabel} wirklich wiederherstellen?
+
+` +
+        `Inhalt des gewählten Online-Stands:
+` +
+        `- Rennen/Rennserien: ${backupSummary.eventCount}
+` +
+        `- Teilnehmer: ${backupSummary.riderCount}
+` +
+        `- Gespeicherte App-Daten: ${backupSummary.appDataCount}
+` +
+        `- Backup-Version: ${backupSummary.backupVersion}
+` +
+        `- Datenstruktur-Version: ${backupSummary.dataSchemaVersion}
+` +
+        `- Stand: ${updatedAt ? formatDateTime(updatedAt) : formatDateTime(backupSummary.exportedAt)}
+
+` +
+        `Ablauf:
+` +
+        `1. Die App erstellt zuerst automatisch ein Datei-Sicherheitsbackup der aktuellen lokalen Daten.
+` +
+        `2. Danach werden die lokalen Daten vollständig durch diesen Online-Stand ersetzt.
+` +
+        `3. Die App wird anschliessend neu geladen.`,
     );
     if (!detailsOk) return false;
 
@@ -5678,13 +5726,14 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     }
   };
 
-  const loadSelectedOnlineBackup = async () => {
-    if (!selectedOnlineBackupId) {
+  const loadSelectedOnlineBackup = async (backupIdOverride?: string) => {
+    const backupId = backupIdOverride || selectedOnlineBackupId;
+    if (!backupId) {
       window.alert("Bitte zuerst ein Online-Backup auswählen oder Online-Status prüfen.");
       return;
     }
 
-    const selectedBackup = onlineBackups.find((backup) => backup.id === selectedOnlineBackupId);
+    const selectedBackup = onlineBackups.find((backup) => backup.id === backupId);
     const sourceLabel = selectedBackup ? `Online-Backup „${selectedBackup.label}“` : "ausgewähltes Online-Backup";
 
     try {
@@ -5692,7 +5741,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       if (!canLoad) return;
 
       setOnlineStorageMessage(`${sourceLabel} wird geladen ...`);
-      const result = await loadOnlineBackup(selectedOnlineBackupId);
+      const result = await loadOnlineBackup(backupId);
       if (!result.ok) throw new Error(result.message || "Online-Backup konnte nicht geladen werden.");
       await restoreOnlineBackupData(result.data, sourceLabel, result.updatedAt || selectedBackup?.createdAt);
     } catch (error: any) {
@@ -5997,7 +6046,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         </div>
 
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
-          <h2 style={sectionTitleStyle}>Speicher / Online Backup</h2>
+          <h2 style={sectionTitleStyle}>Speicher-Dashboard</h2>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10, marginBottom: 12 }}>
             <div style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
@@ -6031,19 +6080,19 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
             <button onClick={saveOnlineFullAppState} style={{ ...compactSaveButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Online speichern
+              Aktuellen Stand online speichern
             </button>
             <button onClick={loadOnlineFullAppState} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               Letzten Online-Stand laden
             </button>
             <button onClick={createNamedOnlineBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Online Backup erstellen
+              Online-Backup beschriftet erstellen
             </button>
             <button onClick={() => refreshOnlineStatus(true)} disabled={onlineStatusLoading} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", opacity: onlineStatusLoading ? 0.65 : 1 }}>
               Online-Status prüfen
             </button>
             <button onClick={saveAndExportFullBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Datei-Backup erstellen
+              Datei-Backup herunterladen
             </button>
             <label style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", boxSizing: "border-box" }}>
               Datei-Backup importieren
@@ -6056,42 +6105,77 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             </label>
           </div>
 
-          <div style={{ marginTop: 12, border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: "#f8fbff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ marginTop: 12, border: `1px solid ${colors.cardBorder}`, borderRadius: 16, padding: 14, background: "#f8fbff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
               <div>
-                <div style={{ fontWeight: 1000, color: colors.title }}>Online Backups</div>
-                <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-                  Bis zu 20 beschriftete Online-Backups werden nach Datum sortiert angezeigt. Laden ersetzt die lokalen Daten erst nach Sicherheitsabfrage und Datei-Backup.
+                <div style={{ fontWeight: 1000, color: colors.title, fontSize: 17 }}>Online-Backups</div>
+                <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800, lineHeight: 1.35 }}>
+                  Beschriftete Sicherungen werden nach Datum sortiert angezeigt. Jedes Backup kann direkt über den Button geladen werden.
                 </div>
               </div>
-              <div style={{ fontWeight: 900, color: colors.muted }}>{onlineBackups.length} / 20</div>
-            </div>
-            {onlineBackups.length > 0 ? (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
-                <select
-                  value={selectedOnlineBackupId}
-                  onChange={(e) => setSelectedOnlineBackupId(e.target.value)}
-                  style={{ ...inputStyle, flex: "1 1 360px", minHeight: 44 }}
-                >
-                  {onlineBackups.map((backup) => (
-                    <option key={backup.id} value={backup.id}>
-                      {formatDateTime(backup.createdAt)} · {backup.label} · {backup.riderCount ?? "?"} Teilnehmer · {backup.eventCount ?? "?"} Rennen
-                    </option>
-                  ))}
-                </select>
-                <button onClick={loadSelectedOnlineBackup} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                  Ausgewähltes Online Backup laden
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ fontWeight: 1000, color: colors.muted }}>{onlineBackups.length} / 20</div>
+                <button onClick={createNamedOnlineBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 40, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  Neues Online-Backup erstellen
                 </button>
               </div>
+            </div>
+            {onlineBackups.length > 0 ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                {onlineBackups.map((backup, index) => {
+                  const isSelected = backup.id === selectedOnlineBackupId;
+                  return (
+                    <div
+                      key={backup.id}
+                      onClick={() => setSelectedOnlineBackupId(backup.id)}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 1fr) auto",
+                        gap: 12,
+                        alignItems: "center",
+                        border: `1px solid ${isSelected ? colors.blueBorder : colors.cardBorder}`,
+                        borderRadius: 14,
+                        padding: 12,
+                        background: isSelected ? "#eff6ff" : colors.cardBg,
+                        boxShadow: isSelected ? "0 8px 20px rgba(37, 99, 235, 0.10)" : "none",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+                          <span style={{ fontWeight: 1000, color: colors.title }}>#{index + 1} · {backup.label}</span>
+                          <span style={{ fontSize: 13, fontWeight: 900, color: colors.muted }}>{formatDateTime(backup.createdAt)}</span>
+                        </div>
+                        <div style={{ marginTop: 5, display: "flex", gap: 10, flexWrap: "wrap", color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+                          <span>{backup.riderCount ?? "?"} Teilnehmer</span>
+                          <span>{backup.eventCount ?? "?"} Rennen/Rennserien</span>
+                          <span>App {backup.appVersion || "-"}</span>
+                          <span>{formatPayloadSize(backup.payloadSize)}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedOnlineBackupId(backup.id);
+                          loadSelectedOnlineBackup(backup.id);
+                        }}
+                        style={{ ...compactHomeButtonStyle, minHeight: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap" }}
+                      >
+                        Dieses Backup laden
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
-              <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-                Noch keine Online-Backups geladen oder vorhanden. Klicke auf Online-Status prüfen oder erstelle ein neues Online Backup.
+              <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800, border: `1px dashed ${colors.cardBorderStrong}`, borderRadius: 14, padding: 14, background: colors.cardBg }}>
+                Noch keine Online-Backups vorhanden oder geladen. Klicke auf Online-Status prüfen oder erstelle ein neues beschriftetes Online-Backup.
               </div>
             )}
           </div>
 
           <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800, lineHeight: 1.35 }}>
-            Online speichern aktualisiert den normalen Online-Stand. Online Backup erstellen legt zusätzlich einen beschrifteten Stand ab. Online laden ersetzt lokale Daten nur nach Warnung und automatischem Datei-Sicherheitsbackup.
+            „Aktuellen Stand online speichern“ aktualisiert den normalen Online-Stand. „Online-Backup beschriftet erstellen“ legt zusätzlich einen beschrifteten Stand ab. Laden ersetzt lokale Daten nur nach Warnung und automatischem Datei-Sicherheitsbackup.
           </div>
           {!isOnlineStorageConfigured() && (
             <div style={{ marginTop: 8, color: "#92400e", background: colors.warningBg, border: `1px solid ${colors.warningBorder}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, fontWeight: 900 }}>
