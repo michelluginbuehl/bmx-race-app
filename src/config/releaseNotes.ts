@@ -8,10 +8,25 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.7",
+    title: "Online-Speichern als Standard",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Obere Backup-Warnzeile wurde vollständig entfernt; Speicher- und Backup-Funktionen liegen nur noch im Bereich Speicher auf der Startseite.",
+      "Status-Chips Ungespeichert und Backup empfohlen wurden aus dem Header-Banner entfernt.",
+      "Der Button Speichern im Rennblatt speichert jetzt online statt ein lokales Datei-Backup zu erzeugen.",
+      "Der Speichern-Button im Rennblatt ist grün, wenn der aktuelle Stand online gespeichert ist, und orange, sobald Änderungen offen sind.",
+      "Backup erstellen legt den aktuellen Stand online ab, erstellt ein beschriftetes Online-Backup und lädt zusätzlich eine lokale Backup-Datei herunter.",
+      "Beim Backup-Laden kann weiterhin zwischen Online-Backup-Liste und lokaler Backup-Datei gewählt werden.",
+      "Keine Änderung an Rennlogik, Teilnehmerlogik oder Resultatberechnung.",
+    ],
+  },
+  {
     version: "v1.15.6",
     title: "Speicher-Dashboard vereinfacht",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Obere Backup-Warnung verwendet jetzt den Button Online speichern statt Backup jetzt erstellen.",
       "Speicher-Dashboard optisch aufgeräumt und auf drei Hauptaktionen reduziert: Online speichern, letzten Online-Stand laden und Online-Backup erstellen.",
