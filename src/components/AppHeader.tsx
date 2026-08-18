@@ -5,17 +5,11 @@ import headerBannerImage from "../assets/header-banner.jpg";
 type AppHeaderProps = {
   onHomeClick: () => void | Promise<void>;
   colors: Record<string, string>;
-  chipStyle: React.CSSProperties;
-  hasUnsavedChanges: boolean;
-  backupWarningActive: boolean;
 };
 
 export default function AppHeader({
   onHomeClick,
   colors,
-  chipStyle,
-  hasUnsavedChanges,
-  backupWarningActive,
 }: AppHeaderProps) {
   return (
     <button
@@ -27,7 +21,7 @@ export default function AppHeader({
         minHeight: "clamp(220px, 19.5vw, 276px)",
         display: "flex",
         alignItems: "flex-end",
-        justifyContent: "space-between",
+        justifyContent: "flex-start",
         gap: 12,
         marginBottom: 18,
         padding: "14px 16px 12px 16px",
@@ -59,44 +53,6 @@ export default function AppHeader({
         }}
       >
         {APP_VERSION}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          justifyContent: "flex-end",
-          alignItems: "flex-end",
-          alignSelf: "flex-end",
-          marginTop: "auto",
-        }}
-      >
-        <div
-          style={{
-            ...chipStyle,
-            minHeight: 28,
-            padding: "5px 10px",
-            fontSize: 12,
-            background: hasUnsavedChanges ? colors.warningBg : colors.successBg,
-            borderColor: hasUnsavedChanges ? colors.warningBorder : colors.successBorder,
-            boxShadow: "0 4px 12px rgba(17,24,39,0.10)",
-          }}
-        >
-          {hasUnsavedChanges ? "⚠ Ungespeichert" : "✓ Gespeichert"}
-        </div>
-        <div
-          style={{
-            ...chipStyle,
-            minHeight: 28,
-            padding: "5px 10px",
-            fontSize: 12,
-            background: backupWarningActive ? colors.warningBg : colors.successBg,
-            borderColor: backupWarningActive ? colors.warningBorder : colors.successBorder,
-            boxShadow: "0 4px 12px rgba(17,24,39,0.10)",
-          }}
-        >
-          {backupWarningActive ? "⚠ Backup empfohlen" : "💾 Backup OK"}
-        </div>
       </div>
     </button>
   );
