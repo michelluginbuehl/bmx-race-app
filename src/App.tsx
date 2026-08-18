@@ -8,6 +8,7 @@ import ReleaseNotes from "./components/ReleaseNotes";
 import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KEYS } from "./config/appConfig";
 import { appStorage, encodeStorageValue } from "./utils/storage";
 import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
+import { isOnlineStorageConfigured, loadOnlineAppState, saveOnlineAppState } from "./utils/onlineStorage";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
@@ -154,6 +155,7 @@ export default function App() {
   const [eventDate, setEventDate] = useState("");
   const [eventLogo, setEventLogo] = useState<string>("");
   const [backupMessage, setBackupMessage] = useState("");
+  const [onlineStorageMessage, setOnlineStorageMessage] = useState("");
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [loadedRace, setLoadedRace] = useState<RaceName | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -5385,19 +5387,51 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     return `${cleanApp}_${cleanSeries}_${APP_VERSION}_${date}_${time}.json`;
   };
 
+  const buildFullAppBackupEnvelope = async (reason = "Manuelles Backup") => {
+    const ridersBackup = await db.table("riders").toArray();
+    const appDataBackup = await db.table("appData").toArray();
+    const eventsBackup = getRawManagedEvents();
+
+    const backup = createBackupEnvelope({
+      reason,
+      lastSaveAt,
+      managedEvents: normalizeManagedEventsForSchema(eventsBackup),
+      riders: ridersBackup,
+      appData: appDataBackup,
+    });
+
+    return { backup, ridersBackup, appDataBackup, eventsBackup };
+  };
+
+  const restoreFullAppBackupEnvelope = async (backup: any) => {
+    await db.transaction(
+      "rw",
+      db.table("riders"),
+      db.table("appData"),
+      async () => {
+        await db.table("riders").clear();
+        await db.table("appData").clear();
+        if (Array.isArray(backup.riders) && backup.riders.length > 0) await db.table("riders").bulkPut(backup.riders);
+        if (Array.isArray(backup.appData) && backup.appData.length > 0) await db.table("appData").bulkPut(backup.appData);
+      },
+    );
+
+    appStorage.keys().forEach((key) => {
+      if (key.startsWith("bmx_")) appStorage.removeItem(key);
+    });
+
+    const eventsToRestore = normalizeManagedEventsForSchema(Array.isArray(backup.managedEvents) ? backup.managedEvents : getRawManagedEvents());
+    appStorage.setItem(EVENT_LIST_KEY, JSON.stringify(eventsToRestore));
+    if (Array.isArray(backup.appData)) {
+      for (const row of backup.appData) {
+        if (row && typeof row.key === "string") appStorage.setItem(row.key, encodeStorageValue(row.value));
+      }
+    }
+  };
+
   const exportBackup = async (reason = "Manuelles Backup") => {
     try {
-      const ridersBackup = await db.table("riders").toArray();
-      const appDataBackup = await db.table("appData").toArray();
-      const eventsBackup = getRawManagedEvents();
-
-      const backup = createBackupEnvelope({
-        reason,
-        lastSaveAt,
-        managedEvents: normalizeManagedEventsForSchema(eventsBackup),
-        riders: ridersBackup,
-        appData: appDataBackup,
-      });
+      const { backup, ridersBackup, eventsBackup } = await buildFullAppBackupEnvelope(reason);
 
       const fileName = buildBackupFileName();
       const blob = new Blob([JSON.stringify(backup, null, 2)], {
@@ -5431,6 +5465,83 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     await exportBackup("Speichern / komplettes Datei-Backup");
   };
 
+  const saveOnlineFullAppState = async () => {
+    if (!isOnlineStorageConfigured()) {
+      window.alert("Online-Speicher ist vorbereitet, aber noch nicht konfiguriert. Bitte Firebase-Daten in src/config/firebaseConfig.ts eintragen und enabled auf true setzen.");
+      return;
+    }
+
+    try {
+      setOnlineStorageMessage("Online speichern läuft ...");
+      await saveCurrentState();
+      const { backup, ridersBackup, eventsBackup } = await buildFullAppBackupEnvelope("Online speichern");
+      const result = await saveOnlineAppState(backup, {
+        appName: APP_NAME,
+        appVersion: APP_VERSION,
+        riderCount: ridersBackup.length,
+        eventCount: eventsBackup.length,
+      });
+
+      if (!result.ok) throw new Error(result.message || "Online-Speichern fehlgeschlagen.");
+
+      const iso = result.updatedAt || new Date().toISOString();
+      await saveBoth("bmx_last_online_save_at", iso);
+      setOnlineStorageMessage(`Online gespeichert: ${formatDateTime(iso)}`);
+      setBackupMessage(`Online gespeichert: ${formatDateTime(iso)}`);
+      addChangeLog(`Online gespeichert: ${formatDateTime(iso)}`);
+    } catch (error: any) {
+      setOnlineStorageMessage("");
+      window.alert(`Online-Speichern fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+    }
+  };
+
+  const loadOnlineFullAppState = async () => {
+    if (!isOnlineStorageConfigured()) {
+      window.alert("Online-Speicher ist vorbereitet, aber noch nicht konfiguriert. Bitte Firebase-Daten in src/config/firebaseConfig.ts eintragen und enabled auf true setzen.");
+      return;
+    }
+
+    try {
+      setOnlineStorageMessage("Online laden läuft ...");
+      const result = await loadOnlineAppState();
+      if (!result.ok) throw new Error(result.message || "Online-Laden fehlgeschlagen.");
+      const backup = result.data;
+
+      const validation = validateBackupStructure(backup);
+      if (!validation.ok) {
+        throw new Error(validation.message || "Die Online-Daten sind unvollständig oder beschädigt.");
+      }
+
+      const backupSummary = getBackupSummary(backup);
+      const schemaNote = backupSummary.schemaNote;
+      const exportedAt = backupSummary.exportedAt;
+      const ok = window.confirm(
+        `Online-Daten laden?
+
+Stand: ${result.updatedAt || exportedAt}
+Rennen/Rennserien: ${backupSummary.eventCount}
+Teilnehmer: ${backupSummary.riderCount}
+Gespeicherte App-Daten: ${backupSummary.appDataCount}
+Backup-Version: ${backupSummary.backupVersion}
+Datenstruktur-Version: ${backupSummary.dataSchemaVersion}${schemaNote}
+
+Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig durch die Online-Daten ersetzt. Vorher wird ein Sicherheitsbackup erstellt.`,
+      );
+      if (!ok) {
+        setOnlineStorageMessage("");
+        return;
+      }
+
+      await exportBackup("Sicherheitsbackup vor Online-Laden");
+      await restoreFullAppBackupEnvelope(backup);
+      alert("Online-Daten erfolgreich geladen. Die bisherigen lokalen Daten auf diesem Gerät wurden ersetzt. Die App wird jetzt neu geladen.");
+      window.location.reload();
+    } catch (error: any) {
+      setOnlineStorageMessage("");
+      window.alert(`Online-Laden fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+    }
+  };
+
   const importBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -5450,7 +5561,17 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       const schemaNote = backupSummary.schemaNote;
       const exportedAt = backupSummary.exportedAt;
       const ok = window.confirm(
-        `Komplettes Backup importieren?\n\nDatei: ${file.name}\nErstellt: ${exportedAt}\nRennen/Rennserien: ${backupSummary.eventCount}\nTeilnehmer: ${backupSummary.riderCount}\nGespeicherte App-Daten: ${backupSummary.appDataCount}\nBackup-Version: ${backupSummary.backupVersion}\nDatenstruktur-Version: ${backupSummary.dataSchemaVersion}${schemaNote}\n\nAchtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig überschrieben.`,
+        `Komplettes Backup importieren?
+
+Datei: ${file.name}
+Erstellt: ${exportedAt}
+Rennen/Rennserien: ${backupSummary.eventCount}
+Teilnehmer: ${backupSummary.riderCount}
+Gespeicherte App-Daten: ${backupSummary.appDataCount}
+Backup-Version: ${backupSummary.backupVersion}
+Datenstruktur-Version: ${backupSummary.dataSchemaVersion}${schemaNote}
+
+Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig überschrieben.`,
       );
 
       if (!ok) {
@@ -5459,28 +5580,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       }
 
       await exportBackup("Sicherheitsbackup vor komplettem Backup-Import");
-
-      await db.transaction(
-        "rw",
-        db.table("riders"),
-        db.table("appData"),
-        async () => {
-          await db.table("riders").clear();
-          await db.table("appData").clear();
-          if (backup.riders.length > 0) await db.table("riders").bulkPut(backup.riders);
-          if (backup.appData.length > 0) await db.table("appData").bulkPut(backup.appData);
-        },
-      );
-
-      appStorage.keys().forEach((key) => {
-        if (key.startsWith("bmx_")) appStorage.removeItem(key);
-      });
-
-      const eventsToRestore = normalizeManagedEventsForSchema(Array.isArray(backup.managedEvents) ? backup.managedEvents : getRawManagedEvents());
-      appStorage.setItem(EVENT_LIST_KEY, JSON.stringify(eventsToRestore));
-      for (const row of backup.appData) {
-        appStorage.setItem(row.key, encodeStorageValue(row.value));
-      }
+      await restoreFullAppBackupEnvelope(backup);
 
       alert("Backup erfolgreich importiert. Die bisherigen lokalen Daten auf diesem Gerät wurden vollständig ersetzt. Die App wird jetzt neu geladen.");
       window.location.reload();
@@ -5740,8 +5840,11 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
         <div style={{ ...basePanelStyle, marginBottom: 16 }}>
           <h2 style={sectionTitleStyle}>Import / Export</h2>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "stretch" }}>
-            <button onClick={saveAndExportFullBackup} style={{ ...compactSaveButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-              Speichern
+            <button onClick={saveOnlineFullAppState} style={{ ...compactSaveButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              Online speichern
+            </button>
+            <button onClick={loadOnlineFullAppState} style={{ ...compactHomeButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              Online laden
             </button>
             <button onClick={saveAndExportFullBackup} style={{ ...compactPrimaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               Backup erstellen
@@ -5756,12 +5859,18 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
               />
             </label>
           </div>
-          <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-            Speichern und Backup exportieren immer die komplette App-Datei mit allen Rennen, Rennserien, Teilnehmern, Resultaten und Einstellungen. Beim Import werden die lokalen Daten auf diesem Gerät vollständig durch die Import-Datei ersetzt.
+          <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800, lineHeight: 1.35 }}>
+            Online speichern/laden ist vorbereitet und verwendet komplette App-Daten. Der lokale Speicher bleibt weiterhin aktiv. Backup erstellen lädt wie bisher eine komplette JSON-Datei herunter. Beim Import oder Online-Laden werden die lokalen Daten auf diesem Gerät vollständig ersetzt.
           </div>
-          {backupMessage && (
-            <div style={{ marginTop: 10, color: colors.muted }}>
-              {backupMessage}
+          {!isOnlineStorageConfigured() && (
+            <div style={{ marginTop: 8, color: "#92400e", background: colors.warningBg, border: `1px solid ${colors.warningBorder}`, borderRadius: 10, padding: "8px 10px", fontSize: 13, fontWeight: 900 }}>
+              Firebase ist vorbereitet, aber noch nicht konfiguriert. Trage Projekt-ID und API-Key in src/config/firebaseConfig.ts ein und setze enabled auf true.
+            </div>
+          )}
+          {(backupMessage || onlineStorageMessage) && (
+            <div style={{ marginTop: 10, color: colors.muted, display: "grid", gap: 4 }}>
+              {backupMessage && <div>{backupMessage}</div>}
+              {onlineStorageMessage && <div>{onlineStorageMessage}</div>}
             </div>
           )}
         </div>
