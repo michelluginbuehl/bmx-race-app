@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.2",
+    title: "Login-Weiterleitung korrigiert",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Fehler korrigiert, bei dem der Login erfolgreich geprüft wurde, die App danach aber auf der Login-Startseite stehen blieb.",
+      "Der Online-Status wird nach dem Login jetzt mit der frisch erhaltenen Firebase-Sitzung geprüft, ohne die Anmeldung versehentlich zurückzusetzen.",
+      "Nach erfolgreicher Anmeldung wird direkt die geschützte App-Startseite angezeigt.",
+      "Fehlermeldungen beim Login bleiben sichtbar, falls E-Mail, Passwort oder Firebase-Konfiguration nicht stimmen.",
+      "Keine Änderung an Rennlogik, Teilnehmerlogik oder Resultatberechnung.",
+    ],
+  },
+  {
     version: "v1.16.1",
     title: "Login bei jedem Start",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Die App zeigt bei jedem Öffnen, Neuladen oder nach dem Schliessen wieder zuerst die Login-Startseite.",
       "Eine frühere Firebase-Anmeldung wird nicht mehr automatisch wiederhergestellt.",

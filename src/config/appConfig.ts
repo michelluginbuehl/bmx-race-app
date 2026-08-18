@@ -1,6 +1,6 @@
-export const APP_VERSION = "v1.16.1";
+export const APP_VERSION = "v1.16.2";
 export const APP_NAME = "BMX Race Manager";
-export const APP_CHANGE_NOTE = "Login bei jedem Start";
+export const APP_CHANGE_NOTE = "Login-Weiterleitung korrigiert";
 
 export const DATA_SCHEMA_VERSION = 8;
 export const BACKUP_VERSION = 2;
