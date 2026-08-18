@@ -122,6 +122,9 @@ export default function App() {
   const [showEventCreateChoice, setShowEventCreateChoice] = useState(false);
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [eventParticipantSearch, setEventParticipantSearch] = useState("");
+  const [eventParticipantCategoryFilter, setEventParticipantCategoryFilter] = useState("all");
+  const [showEventParticipantCreateForm, setShowEventParticipantCreateForm] = useState(false);
+  const eventParticipantCreateKnownIdsRef = useRef<Set<string>>(new Set());
   const [masterParticipantSearch, setMasterParticipantSearch] = useState("");
   const [masterParticipantFilter, setMasterParticipantFilter] = useState<"active" | "trash" | "all">("active");
   const [duplicateOkKeys, setDuplicateOkKeys] = useState<string[]>([]);
@@ -132,7 +135,7 @@ export default function App() {
   const [manualResultOrder, setManualResultOrder] = useState<Record<string, string[]>>({});
   const [eventTileCounts, setEventTileCounts] = useState<Record<string, { total: number; races: Record<string, number> }>>({});
   const [participantQuickFilter, setParticipantQuickFilter] = useState<
-    "all" | "missing" | "duplicates" | "cruiser"
+    "all" | "selectedRace" | "notSelectedRace" | "missing" | "duplicates" | "cruiser"
   >("all");
   const [changeLog, setChangeLog] = useState<string[]>([]);
   const [changeLogFilter, setChangeLogFilter] = useState<string>("Alle");
@@ -1268,14 +1271,40 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     participant.gender,
   ].filter(Boolean).join(" ").toLowerCase();
 
+  const getEventParticipantSuggestionCategory = (participant: any) => {
+    const source = participant?.raw || participant;
+    return String(source?.category || getDerivedCategory(source) || "Ohne Kategorie");
+  };
+
+  const getEventParticipantCategoryOptions = () => {
+    const currentKeys = new Set(allRiders.map((rider: any) => getMasterParticipantKey(rider)));
+    const categories = getMasterParticipantGroups()
+      .filter((participant: any) => !currentKeys.has(participant.key))
+      .map(getEventParticipantSuggestionCategory)
+      .filter(Boolean);
+    return ["all", ...sortCategories(Array.from(new Set(categories)) as string[])];
+  };
+
+  const groupEventParticipantSuggestionsByCategory = (items: any[]) => {
+    return items.reduce((acc: Record<string, any[]>, participant: any) => {
+      const category = getEventParticipantSuggestionCategory(participant);
+      if (!acc[category]) acc[category] = [];
+      acc[category].push(participant);
+      return acc;
+    }, {});
+  };
+
   const getMasterParticipantSuggestions = () => {
     const query = eventParticipantSearch.trim().toLowerCase();
     const existingKeys = new Set(allRiders.map((rider: any) => getMasterParticipantKey(rider)));
-    const groups = getMasterParticipantGroups().filter((participant: any) => !existingKeys.has(participant.key));
+    let groups = getMasterParticipantGroups().filter((participant: any) => !existingKeys.has(participant.key));
+    if (eventParticipantCategoryFilter !== "all") {
+      groups = groups.filter((participant: any) => getEventParticipantSuggestionCategory(participant) === eventParticipantCategoryFilter);
+    }
     if (!query) return groups;
     const parts = query.split(/\s+/).filter(Boolean);
     return groups.filter((participant: any) => {
-      const text = getMasterParticipantSearchText(participant);
+      const text = `${getMasterParticipantSearchText(participant)} ${getEventParticipantSuggestionCategory(participant)}`.toLowerCase();
       return parts.every((part) => text.includes(part)) || text.includes(query);
     });
   };
@@ -1306,7 +1335,7 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     return [...eventCandidates, ...masterCandidates].sort((a, b) => a.label.localeCompare(b.label, "de-CH", { numeric: true }));
   }, [allRiders, masterParticipants, managedEvents, selectedRace]);
 
-  const addMasterParticipantToCurrentEvent = async (participant: any) => {
+  const addMasterParticipantToCurrentEvent = async (participant: any, addToSelectedRace = false) => {
     if (!currentEventId) {
       window.alert("Bitte zuerst ein Rennen oder eine Rennserie öffnen.");
       return;
@@ -1336,10 +1365,11 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       isCruiser: !!(source.cruiser || source.isCruiser || participant.cruiser),
       eventId: currentEventId || "legacy",
       ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`race${index + 1}`, false])),
+      ...(addToSelectedRace ? { [raceKeyMap[selectedRace]]: true } : {}),
     });
     await loadAllRiders();
     await loadRaceRiders();
-    addChangeLog(`Teilnehmer aus Hauptdatenbank hinzugefügt: ${source.name || participant.name}`);
+    addChangeLog(`Teilnehmer aus Hauptdatenbank hinzugefügt: ${source.name || participant.name}${addToSelectedRace ? ` (${selectedRace})` : ""}`);
   };
 
   const findEditedRiderAfterSave = (items: any[], original: any) => {
@@ -1548,9 +1578,71 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       return;
     }
     for (const participant of selected) {
-      await addMasterParticipantToCurrentEvent(participant);
+      await addMasterParticipantToCurrentEvent(participant, true);
     }
     setSelectedMasterParticipantKeys([]);
+  };
+
+  const selectVisibleMasterParticipantCategory = (category: string) => {
+    const categoryKeys = getMasterParticipantSuggestions()
+      .filter((participant: any) => getEventParticipantSuggestionCategory(participant) === category)
+      .map((participant: any) => participant.key);
+    setSelectedMasterParticipantKeys((prev) => Array.from(new Set([...prev, ...categoryKeys])));
+  };
+
+  const addVisibleMasterParticipantCategoryToCurrentRace = async (category: string) => {
+    const items = getMasterParticipantSuggestions().filter((participant: any) => getEventParticipantSuggestionCategory(participant) === category);
+    if (items.length === 0) return;
+    if (!window.confirm(`${items.length} Teilnehmer aus "${category}" zu ${selectedRace} hinzufügen?`)) return;
+    for (const participant of items) {
+      await addMasterParticipantToCurrentEvent(participant, true);
+    }
+    setSelectedMasterParticipantKeys((prev) => prev.filter((key) => !items.some((participant: any) => participant.key === key)));
+  };
+
+  const startEventParticipantCreate = async () => {
+    if (Object.keys(heats || {}).length > 0) {
+      window.alert("Motos sind bereits erstellt. Neue Teilnehmer bitte über Notfall / Reparatur → Teilnehmer nachträglich hinzufügen ergänzen, damit bestehende Gates geschützt bleiben.");
+      return;
+    }
+    const allRows = (await db.table("riders").toArray()).map(normalizeRider).filter((r: any) => !r.deletedAt).filter(belongsToCurrentEvent);
+    eventParticipantCreateKnownIdsRef.current = new Set(allRows.map((rider: any) => String(rider.id || "")).filter(Boolean));
+    setEditingRider(null);
+    setLastEditedMasterParticipantId("");
+    setShowEventParticipantCreateForm(true);
+    window.setTimeout(() => participantFormRef.current?.scrollIntoView({ behavior: "auto", block: "start" }), 0);
+  };
+
+  const markNewestCreatedParticipantForCurrentRace = async () => {
+    const flag = raceKeyMap[selectedRace];
+    const beforeIds = eventParticipantCreateKnownIdsRef.current;
+    const allRows = (await db.table("riders").toArray()).map(normalizeRider).filter((r: any) => !r.deletedAt).filter(belongsToCurrentEvent);
+    const created = allRows.filter((rider: any) => !beforeIds.has(String(rider.id || "")));
+    const target = created[created.length - 1];
+    if (!target?.id) return "";
+    await db.table("riders").update(target.id, { [flag]: true, eventId: currentEventId || "legacy" });
+    addChangeLog(`Neuer Teilnehmer direkt im Rennen erfasst und zu ${selectedRace} hinzugefügt: ${target.name || "Ohne Name"}`);
+    return String(target.id || "");
+  };
+
+  const handleEventParticipantFormChange = async () => {
+    const wasEditing = !!editingRider;
+    if (wasEditing) {
+      await handleRiderFormChange();
+      return;
+    }
+    const createdId = showEventParticipantCreateForm ? await markNewestCreatedParticipantForCurrentRace() : "";
+    setShowEventParticipantCreateForm(false);
+    await ensureCurrentEventRiderIdentities();
+    await loadMasterParticipants();
+    await loadAllRiders();
+    await loadRaceRiders();
+    if (createdId) {
+      setLastEditedMasterParticipantId(createdId);
+      window.setTimeout(() => {
+        (participantRowRefs.current[String(createdId)] || participantRowRefs.current[`master-${String(createdId)}`])?.scrollIntoView({ behavior: "auto", block: "center" });
+      }, 0);
+    }
   };
 
 
@@ -3471,6 +3563,10 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   const filteredAllRiders = useMemo(() => {
     return allRiders.filter((r: any) => {
       if (!matchesGlobalSearch(r)) return false;
+      if (participantQuickFilter === "selectedRace")
+        return !!r[raceKeyMap[selectedRace]];
+      if (participantQuickFilter === "notSelectedRace")
+        return !r[raceKeyMap[selectedRace]];
       if (participantQuickFilter === "duplicates")
         return duplicatePlateRiderIds.has(String(r.id || ""));
       if (participantQuickFilter === "cruiser")
@@ -3481,7 +3577,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       }
       return true;
     });
-  }, [allRiders, globalSearch, participantQuickFilter, duplicatePlateRiderIds]);
+  }, [allRiders, globalSearch, participantQuickFilter, duplicatePlateRiderIds, selectedRace]);
 
   const filteredGroupedAll = useMemo(() => {
     return filteredAllRiders.reduce((acc: any, r: any) => {
@@ -6896,87 +6992,156 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
           </div>
         </div>
 
-        <div ref={participantFormRef} style={{ ...basePanelStyle, marginBottom: 20 }}>
-          <h2 style={{ marginTop: 0, color: colors.title }}>{editingRider ? "Teilnehmer bearbeiten" : "Teilnehmer hinzufügen"}</h2>
+        <div ref={participantFormRef} style={{ ...basePanelStyle, marginBottom: 20, borderLeft: `6px solid ${colors.blueBtn}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ marginTop: 0, marginBottom: 6, color: colors.title }}>{editingRider ? "Teilnehmer bearbeiten" : "Teilnehmer für dieses Rennen"}</h2>
+              <p style={{ color: colors.muted, marginTop: 0, lineHeight: 1.35 }}>
+                Bestehende Teilnehmer suchen, direkt zu {selectedRace} hinzufügen oder vor dem Erstellen der Motos einen neuen Teilnehmer erfassen.
+              </p>
+            </div>
+            {!editingRider && (
+              <button
+                type="button"
+                onClick={startEventParticipantCreate}
+                disabled={Object.keys(heats || {}).length > 0 || raceClosed}
+                style={Object.keys(heats || {}).length > 0 || raceClosed ? compactDisabledButtonStyle : { ...actionSaveButtonStyle, minHeight: 52 }}
+                title={Object.keys(heats || {}).length > 0 ? "Nach Motos-Erstellung bitte die Notfall-Nachmeldung verwenden." : undefined}
+              >
+                + Neuer Teilnehmer
+              </button>
+            )}
+          </div>
+
           {editingRider ? (
             <>
               <p style={{ color: colors.muted, marginTop: -4 }}>
                 Die bestehende Teilnehmer-ID, Race-Häkchen und Resultat-Verknüpfungen bleiben beim Speichern erhalten.
               </p>
               <RiderForm
-                onChange={handleRiderFormChange}
+                onChange={handleEventParticipantFormChange}
                 editingRider={editingRider}
                 onCancelEdit={() => { setEditingRider(null); setLastEditedMasterParticipantId(""); }}
                 eventYear={participantEventYear}
                 currentEventId={currentEventId || "legacy"}
               />
             </>
+          ) : showEventParticipantCreateForm ? (
+            <div style={{ marginTop: 12, padding: 14, borderRadius: 16, border: `1px solid ${colors.greenBorder}`, background: colors.greenBg }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                <strong style={{ color: colors.title }}>Neuen Teilnehmer erfassen und direkt zu {selectedRace} hinzufügen</strong>
+                <button type="button" onClick={() => setShowEventParticipantCreateForm(false)} style={smallGhostButtonStyle}>Abbrechen</button>
+              </div>
+              <RiderForm
+                onChange={handleEventParticipantFormChange}
+                editingRider={null}
+                onCancelEdit={() => setShowEventParticipantCreateForm(false)}
+                eventYear={participantEventYear}
+                currentEventId={currentEventId || "legacy"}
+              />
+              <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+                Nach dem Speichern erhält der Teilnehmer automatisch eine stabile Teilnehmer-ID und wird in {selectedRace} ausgewählt.
+              </div>
+            </div>
           ) : (
             <>
-              <p style={{ color: colors.muted, marginTop: -4 }}>
-                Teilnehmer werden aus der Haupt-Teilnehmerdatenbank in dieses Rennen / diese Rennserie übernommen. Die Race-Häkchen setzt du danach unten in der Liste.
-              </p>
-              <div>
-                <label style={labelStyle}>Teilnehmer hinzufügen</label>
-                <input
-                  value={eventParticipantSearch}
-                  onChange={(e) => setEventParticipantSearch(e.target.value)}
-                  placeholder="Name, Startnummer oder Verein eingeben ..."
-                  style={inputStyle}
-                />
-                <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
-                    {getMasterParticipantSuggestions().length} Teilnehmer angezeigt · {selectedMasterParticipantKeys.length} ausgewählt
-                  </div>
-                  <button
-                    type="button"
-                    onClick={addSelectedMasterParticipantsToCurrentEvent}
-                    disabled={selectedMasterParticipantKeys.length === 0}
-                    style={selectedMasterParticipantKeys.length === 0 ? disabledButtonStyle : compactPrimaryButtonStyle}
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) minmax(220px, 0.55fr)", gap: 12, alignItems: "end", marginTop: 12 }}>
+                <div>
+                  <label style={labelStyle}>Teilnehmer suchen</label>
+                  <input
+                    value={eventParticipantSearch}
+                    onChange={(e) => setEventParticipantSearch(e.target.value)}
+                    placeholder="Name, Startnummer, Verein oder Kategorie eingeben ..."
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label style={labelStyle}>Kategorie-Filter</label>
+                  <select
+                    value={eventParticipantCategoryFilter}
+                    onChange={(e) => setEventParticipantCategoryFilter(e.target.value)}
+                    style={inputStyle}
                   >
-                    Ausgewählte hinzufügen
-                  </button>
+                    {getEventParticipantCategoryOptions().map((category) => (
+                      <option key={category} value={category}>{category === "all" ? "Alle Kategorien" : category}</option>
+                    ))}
+                  </select>
                 </div>
-                <div style={{ marginTop: 8, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflowY: "auto", overflowX: "hidden", background: "#fff", maxHeight: 360 }}>
-                  {getMasterParticipantSuggestions().length === 0 ? (
-                    <div style={{ padding: 10, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden.</div>
-                  ) : (
-                    getMasterParticipantSuggestions().map((participant: any) => {
-                      const checked = selectedMasterParticipantKeys.includes(participant.key);
-                      return (
-                    <div
-                      key={participant.key}
-                      style={{
-                        width: "100%",
-                        display: "grid",
-                        gridTemplateColumns: "34px 90px minmax(180px, 1fr) 130px minmax(120px, 1fr) auto",
-                        gap: 10,
-                        alignItems: "center",
-                        padding: "9px 10px",
-                        borderBottom: `1px solid ${colors.cardBorder}`,
-                        background: checked ? "#eef6ff" : "#fff",
-                        color: colors.text,
-                        textAlign: "left",
-                        fontSize: 13,
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleMasterParticipantSelection(participant.key)}
-                        aria-label={`${participant.name} auswählen`}
-                      />
-                      <strong>#{participant.plate || "-"}</strong>
-                      <span style={{ fontWeight: 800 }}>{participant.name}</span>
-                      <span>{participant.birthYear || "-"} | {participant.gender || "-"}</span>
-                      <span style={{ color: colors.muted }}>{participant.club || "-"}</span>
-                      <button type="button" onClick={() => addMasterParticipantToCurrentEvent(participant)} style={smallGhostButtonStyle}>hinzufügen</button>
-                    </div>
-                  );
-                    })
-                  )}
+              </div>
+
+              <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ color: colors.muted, fontSize: 13, fontWeight: 800 }}>
+                  {getMasterParticipantSuggestions().length} verfügbare Teilnehmer · {selectedMasterParticipantKeys.length} ausgewählt · Ziel: {selectedRace}
                 </div>
+                <button
+                  type="button"
+                  onClick={addSelectedMasterParticipantsToCurrentEvent}
+                  disabled={selectedMasterParticipantKeys.length === 0}
+                  style={selectedMasterParticipantKeys.length === 0 ? disabledButtonStyle : compactPrimaryButtonStyle}
+                >
+                  Ausgewählte zu {selectedRace} hinzufügen
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10, border: `1px solid ${colors.cardBorder}`, borderRadius: 16, overflowY: "auto", overflowX: "hidden", background: "#fff", maxHeight: 430 }}>
+                {getMasterParticipantSuggestions().length === 0 ? (
+                  <div style={{ padding: 14, color: colors.muted }}>Keine passenden Teilnehmer in der Hauptdatenbank gefunden. Mit „+ Neuer Teilnehmer“ kannst du direkt einen neuen Fahrer erfassen.</div>
+                ) : (
+                  sortCategories(Object.keys(groupEventParticipantSuggestionsByCategory(getMasterParticipantSuggestions()))).map((category) => {
+                    const categoryItems = groupEventParticipantSuggestionsByCategory(getMasterParticipantSuggestions())[category] || [];
+                    return (
+                      <div key={`event-suggestion-${category}`} style={{ borderBottom: `1px solid ${colors.cardBorder}` }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 12px", background: colors.tableHeadBg }}>
+                          <strong style={{ color: colors.title }}>{category} ({categoryItems.length})</strong>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button type="button" onClick={() => selectVisibleMasterParticipantCategory(category)} style={smallGhostButtonStyle}>Kategorie auswählen</button>
+                            <button type="button" onClick={() => addVisibleMasterParticipantCategoryToCurrentRace(category)} style={smallGhostButtonStyle}>Alle zu {selectedRace}</button>
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gap: 0 }}>
+                          {categoryItems.map((participant: any) => {
+                            const checked = selectedMasterParticipantKeys.includes(participant.key);
+                            return (
+                              <button
+                                type="button"
+                                key={participant.key}
+                                onClick={() => toggleMasterParticipantSelection(participant.key)}
+                                style={{
+                                  width: "100%",
+                                  display: "grid",
+                                  gridTemplateColumns: "38px 92px minmax(180px, 1fr) 120px minmax(110px, 0.8fr) auto",
+                                  gap: 10,
+                                  alignItems: "center",
+                                  padding: "10px 12px",
+                                  border: "none",
+                                  borderTop: `1px solid ${colors.cardBorder}`,
+                                  background: checked ? "#eef6ff" : "#fff",
+                                  color: colors.text,
+                                  textAlign: "left",
+                                  fontSize: 13,
+                                  boxSizing: "border-box",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <span style={{ fontWeight: 950, color: checked ? colors.blueBtn : colors.muted }}>{checked ? "✓" : "+"}</span>
+                                <strong>#{participant.plate || "-"}</strong>
+                                <span style={{ fontWeight: 900 }}>{participant.name}</span>
+                                <span>{participant.birthYear || "-"} | {participant.gender || "-"}</span>
+                                <span style={{ color: colors.muted }}>{participant.club || "-"}</span>
+                                <span
+                                  onClick={(e) => { e.stopPropagation(); addMasterParticipantToCurrentEvent(participant, true); }}
+                                  style={{ ...smallGhostButtonStyle, display: "inline-flex", justifyContent: "center" } as React.CSSProperties}
+                                >
+                                  zu {selectedRace}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </>
           )}
@@ -7095,7 +7260,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
         <div style={{ ...basePanelStyle }}>
           <h2 style={{ marginTop: 0, color: colors.title }}>
-            Teilnehmer gesamt ({allRiders.length})
+            Teilnehmer in dieser Rennserie / diesem Rennen ({allRiders.length})
           </h2>
 
           <div style={{ marginBottom: 10, color: colors.muted }}>
@@ -7107,7 +7272,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1.2fr repeat(4, auto)",
+              gridTemplateColumns: "minmax(260px, 1fr) repeat(6, auto)",
               gap: 10,
               alignItems: "center",
               marginBottom: 14,
@@ -7121,6 +7286,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
             />
             {[
               ["all", "Alle"],
+              ["selectedRace", `${selectedRace} ausgewählt`],
+              ["notSelectedRace", `${selectedRace} offen`],
               ["missing", "Fehlende Angaben"],
               ["duplicates", "Doppelte Nummern"],
               ["cruiser", "Cruiser"],
