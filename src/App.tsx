@@ -128,6 +128,7 @@ export default function App() {
   const eventParticipantCreateKnownIdsRef = useRef<Set<string>>(new Set());
   const [masterParticipantSearch, setMasterParticipantSearch] = useState("");
   const [masterParticipantFilter, setMasterParticipantFilter] = useState<"active" | "trash" | "all">("active");
+  const [masterParticipantDraftLookup, setMasterParticipantDraftLookup] = useState({ name: "", plate: "", birthYear: "", gender: "", club: "" });
   const [duplicateOkKeys, setDuplicateOkKeys] = useState<string[]>([]);
   const [showEmergencyTools, setShowEmergencyTools] = useState(false);
   const [lateAddParticipantValue, setLateAddParticipantValue] = useState("");
@@ -1401,12 +1402,107 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
 
   const getParticipantStableId = (rider: any) => String(rider?.participantId || rider?.masterId || rider?.id || "").trim();
 
-  const getRiderSharedDataPatch = (rider: any) => {
+  const readParticipantDraftFromForm = (container: HTMLElement | null) => {
+    const draft = { name: "", plate: "", birthYear: "", gender: "", club: "" };
+    if (!container) return draft;
+    const controls = Array.from(container.querySelectorAll("input, select, textarea")) as Array<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>;
+    controls.forEach((control) => {
+      const input = control as HTMLInputElement;
+      const type = String(input.type || "").toLowerCase();
+      if (["button", "submit", "file", "checkbox", "radio"].includes(type)) return;
+      const value = String(control.value || "").trim();
+      if (!value) return;
+      const fingerprint = [
+        control.getAttribute("name"),
+        control.getAttribute("id"),
+        control.getAttribute("placeholder"),
+        control.getAttribute("aria-label"),
+        control.closest("label")?.textContent,
+        control.previousElementSibling?.textContent,
+      ].filter(Boolean).join(" ").toLowerCase();
+
+      if (/startnummer|plate|nummer|nr\.?/.test(fingerprint)) {
+        draft.plate = draft.plate || value;
+      } else if (/jahrgang|geburtsjahr|birth/.test(fingerprint)) {
+        draft.birthYear = draft.birthYear || value;
+      } else if (/verein|club/.test(fingerprint)) {
+        draft.club = draft.club || value;
+      } else if (/geschlecht|gender|b\/g/.test(fingerprint)) {
+        draft.gender = draft.gender || value;
+      } else if (/name|fahrer|teilnehmer/.test(fingerprint)) {
+        draft.name = draft.name || value;
+      } else if (!draft.name && type !== "number" && type !== "date") {
+        draft.name = value;
+      }
+    });
+    return draft;
+  };
+
+  const handleMasterParticipantDraftInputCapture = (event: React.FormEvent<HTMLDivElement>) => {
+    const container = event.currentTarget;
+    window.setTimeout(() => {
+      setMasterParticipantDraftLookup(readParticipantDraftFromForm(container));
+    }, 0);
+  };
+
+  const seedMasterParticipantDraftLookup = (participant: any) => {
+    setMasterParticipantDraftLookup({
+      name: participant?.name || participant?.raw?.name || "",
+      plate: participant?.plate || participant?.raw?.plate || "",
+      birthYear: String(participant?.birthYear || participant?.raw?.birthYear || participant?.raw?.jahrgang || ""),
+      gender: participant?.gender || participant?.raw?.gender || participant?.raw?.geschlecht || "",
+      club: participant?.club || participant?.raw?.club || "",
+    });
+  };
+
+  const getParticipantEntrySuggestions = () => {
+    const draftName = normalizeParticipantName(masterParticipantDraftLookup.name);
+    if (draftName.length < 2) return [];
+    const draft = {
+      name: masterParticipantDraftLookup.name,
+      plate: masterParticipantDraftLookup.plate,
+      birthYear: masterParticipantDraftLookup.birthYear,
+      gender: masterParticipantDraftLookup.gender,
+    };
+    const sortedDraftName = getSortedNameKey(draft.name || "");
+    const editingStableId = getParticipantStableId(editingRider);
+    const editingKey = editingRider ? getMasterParticipantKey(editingRider) : "";
+
+    return getMasterParticipantGroups()
+      .filter((participant: any) => {
+        const stableId = String(participant.participantId || participant.masterId || participant.raw?.id || "");
+        return !(editingStableId && stableId === editingStableId) && (!editingKey || participant.key !== editingKey);
+      })
+      .map((participant: any) => {
+        const participantName = normalizeParticipantName(participant.name || "");
+        const sortedParticipantName = getSortedNameKey(participant.name || "");
+        const distance = getLevenshteinDistance(draftName, participantName);
+        let score = 0;
+        if (participantName === draftName) score += 110;
+        if (sortedDraftName && sortedDraftName === sortedParticipantName) score += 95;
+        if (participantName.startsWith(draftName)) score += 70;
+        if (participantName.includes(draftName) || draftName.includes(participantName)) score += 55;
+        if (Math.max(draftName.length, participantName.length) >= 5 && distance <= 2) score += 52;
+        if (Math.max(draftName.length, participantName.length) >= 8 && distance <= 3) score += 38;
+        draftName.split(" ").filter((part) => part.length >= 2).forEach((part) => {
+          if (participantName.includes(part)) score += 12;
+        });
+        if (String(draft.plate || "").trim() && String(draft.plate || "").trim() === String(participant.plate || "").trim()) score += 34;
+        if (String(draft.birthYear || "").trim() && String(draft.birthYear || "").trim() === String(participant.birthYear || "").trim()) score += 22;
+        if (String(draft.gender || "").trim() && getRiderGenderCode(draft) && getRiderGenderCode(draft) === getRiderGenderCode(participant)) score += 10;
+        if (areLikelyDuplicateParticipants({ ...draft, gender: getRiderGenderCode(draft) }, participant)) score += 40;
+        return { participant, score, distance };
+      })
+      .filter((entry: any) => entry.score >= 45)
+      .sort((a: any, b: any) => b.score - a.score || a.distance - b.distance || String(a.participant.name || "").localeCompare(String(b.participant.name || ""), "de-CH", { numeric: true }))
+      .slice(0, 6);
+  };
+
+  const getRiderSharedDataPatch = (rider: any, options?: { preservePlate?: boolean }) => {
     const birthYear = getRiderBirthYear(rider) || "";
     const gender = getRiderGenderCode(rider) || "";
-    const base = {
+    const baseWithoutPlate = {
       name: rider?.name || "",
-      plate: rider?.plate || "",
       birthYear,
       jahrgang: birthYear,
       gender,
@@ -1415,6 +1511,9 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       cruiser: !!(rider?.cruiser || rider?.isCruiser),
       isCruiser: !!(rider?.cruiser || rider?.isCruiser),
     };
+    const base = options?.preservePlate
+      ? baseWithoutPlate
+      : { ...baseWithoutPlate, plate: rider?.plate || "" };
     return {
       ...base,
       category: getDerivedCategory({ ...rider, ...base }),
@@ -1428,8 +1527,8 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     return (!!rowId && linkedIds.has(rowId)) || (!!stableId && rowStableId === stableId);
   };
 
-  const patchStoredRiderDataDeep = (value: any, linkedIds: Set<string>, stableId: string, updatedRider: any, idReplacement?: { oldId: string; newId: string }) => {
-    const patch = getRiderSharedDataPatch(updatedRider);
+  const patchStoredRiderDataDeep = (value: any, linkedIds: Set<string>, stableId: string, updatedRider: any, idReplacement?: { oldId: string; newId: string }, options?: { preservePlate?: boolean }) => {
+    const patch = getRiderSharedDataPatch(updatedRider, options);
     const visit = (node: any): any => {
       if (Array.isArray(node)) return node.map(visit);
       if (!node || typeof node !== "object") return node;
@@ -1454,6 +1553,16 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       return next;
     };
     return visit(value);
+  };
+
+  const isStoredRaceClosedForEvent = (eventId: string, race: RaceName) => {
+    try {
+      if (String(eventId || "legacy") === String(currentEventId || "legacy") && race === selectedRace) return !!raceClosed;
+      const key = scopedKeyForEvent(String(eventId || "legacy"), `bmx_${race.toLowerCase().replace(/\s+/g, "_")}_race_closed`);
+      return !!JSON.parse(appStorage.getItem(key) || "false");
+    } catch {
+      return false;
+    }
   };
 
   const saveEventRaceValue = async (eventId: string, race: RaceName, suffix: string, value: any) => {
@@ -1505,7 +1614,7 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
           if (raw === null) continue;
           try {
             const parsed = JSON.parse(raw || "{}");
-            const patched = patchStoredRiderDataDeep(parsed, linkedIds, stableId, edited, idReplacement);
+            const patched = patchStoredRiderDataDeep(parsed, linkedIds, stableId, edited, idReplacement, { preservePlate: isStoredRaceClosedForEvent(String(event.id || "legacy"), race) });
             await saveEventRaceValue(String(event.id || "legacy"), race, suffix, patched);
             if (String(event.id || "legacy") === String(currentEventId || "legacy") && race === selectedRace) {
               if (suffix === "heats") setHeats(patched);
@@ -1561,6 +1670,7 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     const original = editingRider ? { ...editingRider } : null;
     const editedId = original ? await preserveEditedRiderLinks(original) : String(lastEditedMasterParticipantId || "");
     setEditingRider(null);
+    setMasterParticipantDraftLookup({ name: "", plate: "", birthYear: "", gender: "", club: "" });
     await ensureCurrentEventRiderIdentities();
     await loadMasterParticipants();
     await loadAllRiders();
@@ -6380,6 +6490,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
       return true;
     });
     const groups = visibleActiveGroups;
+    const participantEntrySuggestions = getParticipantEntrySuggestions();
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
         {renderAppHeader()}
@@ -6463,7 +6574,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               ⚠ Mögliche Dubletten erkannt: {masterDuplicateKeys.size} Einträge in {masterDuplicateInfo.groupCount} Gruppe(n). Ähnliche Teilnehmer sind jeweils gleichfarbig markiert. Mit „Teilnehmer OK“ bestätigte Einträge werden nicht mehr als Dublette angezeigt.
             </div>
           )}
-          <div ref={participantFormRef} style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
+          <div ref={participantFormRef} onInputCapture={handleMasterParticipantDraftInputCapture} onChangeCapture={handleMasterParticipantDraftInputCapture} style={{ ...basePanelStyle, marginBottom: 18, background: "#fbfdff" }}>
             {editingRider && (
               <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 10, background: colors.greenBg, border: `1px solid ${colors.greenBorder}`, color: colors.title, fontWeight: 800 }}>
                 Bearbeitung aktiv · Teilnehmer-ID: {getParticipantStableId(editingRider) || "wird beim Speichern erstellt"}
@@ -6472,11 +6583,44 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             <RiderForm
               onChange={handleRiderFormChange}
               editingRider={editingRider}
-              onCancelEdit={() => { setEditingRider(null); setLastEditedMasterParticipantId(""); }}
+              onCancelEdit={() => { setEditingRider(null); setLastEditedMasterParticipantId(""); setMasterParticipantDraftLookup({ name: "", plate: "", birthYear: "", gender: "", club: "" }); }}
               eventYear={String(new Date().getFullYear())}
               currentEventId="master"
               masterMode
             />
+            {!editingRider && participantEntrySuggestions.length > 0 && (
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: `1px solid ${colors.warningBorder}`, background: colors.warningBg }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                  <strong style={{ color: colors.title }}>Ähnliche bereits gespeicherte Teilnehmer</strong>
+                  <span style={{ color: "#92400e", fontSize: 12, fontWeight: 900 }}>Bitte prüfen, bevor ein neuer Teilnehmer gespeichert wird.</span>
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {participantEntrySuggestions.map(({ participant, score }: any) => (
+                    <div key={`entry-suggestion-${participant.key}`} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "center", padding: "9px 10px", borderRadius: 12, border: `1px solid ${colors.cardBorder}`, background: "#fff" }}>
+                      <div>
+                        <strong>{participant.name || "Ohne Name"}</strong> · #{participant.plate || "-"} · {participant.birthYear || "-"} | {participant.gender || "-"} · {participant.club || "-"}
+                        <div style={{ color: colors.muted, fontSize: 12, fontWeight: 800 }}>
+                          Ähnlichkeit: {Math.min(100, Math.round(score))}% · ID: {String(participant.participantId || participant.masterId || participant.raw?.id || "-").slice(0, 8)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!window.confirm("Diesen bestehenden Teilnehmer bearbeiten statt einen neuen Eintrag zu erstellen?")) return;
+                          setSelectedMasterParticipant(null);
+                          setLastEditedMasterParticipantId(String(participant.raw?.id || ""));
+                          seedMasterParticipantDraftLookup(participant);
+                          setEditingRider(participant.raw);
+                        }}
+                        style={smallGhostButtonStyle}
+                      >
+                        Bestehenden bearbeiten
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           {groups.length === 0 && masterParticipantFilter !== "trash" ? (
             <div style={{ color: colors.muted }}>Keine passenden aktiven Teilnehmer gefunden.</div>
@@ -6530,6 +6674,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                               event.stopPropagation();
                               setSelectedMasterParticipant(null);
                               setLastEditedMasterParticipantId(String(participant.raw?.id || ""));
+                              seedMasterParticipantDraftLookup(participant);
                               setEditingRider(participant.raw);
                               window.setTimeout(() => {
                                 participantFormRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
