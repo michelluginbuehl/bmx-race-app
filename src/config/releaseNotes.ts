@@ -8,10 +8,24 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.4",
+    title: "Automatische Live-Aktualisierung",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Ein live veröffentlichtes aktuelles Rennen wird im Admin-Rennbetrieb automatisch alle 30 Sekunden veröffentlicht/aktualisiert.",
+      "Der manuelle Button bleibt als Jetzt live aktualisieren erhalten, ist aber im Normalbetrieb nicht mehr nötig.",
+      "Auf der Rennseite wird angezeigt, dass die automatische Live-Aktualisierung aktiv ist.",
+      "Beim Race abschliessen fragt die App neu, ob die öffentliche Live-Ansicht direkt beendet werden soll.",
+      "Wenn die Live-Ansicht nach Race-Abschluss weiter aktiv bleibt, wird sie weiterhin automatisch aktualisiert.",
+      "Keine Änderung an Rennlogik, Teilnehmerlogik oder Resultatberechnung.",
+    ],
+  },
+  {
     version: "v1.16.3",
     title: "Öffentliche Live-Rennansicht",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Öffentliche Zuschaueransicht ohne Login über den Link #live ergänzt.",
       "Auf der Rennseite kann das aktuell geöffnete Rennen live veröffentlicht, aktualisiert oder beendet werden.",
