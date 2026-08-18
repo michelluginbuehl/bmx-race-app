@@ -170,6 +170,7 @@ export default function App() {
   const [firebaseAuthPassword, setFirebaseAuthPassword] = useState("");
   const [firebaseAuthLoading, setFirebaseAuthLoading] = useState(false);
   const [firebaseAuthMessage, setFirebaseAuthMessage] = useState("");
+  const [firebaseAuthReady, setFirebaseAuthReady] = useState(false);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [loadedRace, setLoadedRace] = useState<RaceName | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -2339,13 +2340,22 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   useEffect(() => {
     let cancelled = false;
     const restoreFirebaseLogin = async () => {
-      const session = await getValidFirebaseAuthSession();
-      if (cancelled) return;
-      setFirebaseAuthSession(session);
-      setOnlineStorageAuthToken(session?.idToken || "");
-      if (session?.email) {
-        setFirebaseAuthEmail(session.email);
-        setFirebaseAuthMessage(`Angemeldet als ${session.email}`);
+      try {
+        const session = await getValidFirebaseAuthSession();
+        if (cancelled) return;
+        setFirebaseAuthSession(session);
+        setOnlineStorageAuthToken(session?.idToken || "");
+        if (session?.email) {
+          setFirebaseAuthEmail(session.email);
+          setFirebaseAuthMessage(`Angemeldet als ${session.email}`);
+        }
+      } catch {
+        if (!cancelled) {
+          setFirebaseAuthSession(null);
+          setOnlineStorageAuthToken("");
+        }
+      } finally {
+        if (!cancelled) setFirebaseAuthReady(true);
       }
     };
     restoreFirebaseLogin();
@@ -4226,6 +4236,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   const renderAppHeader = () => (
     <AppHeader
       onHomeClick={async () => {
+        if (!isFirebaseSignedIn) return;
         if (appShellView === "manager" && currentEventId && initialLoaded && hasUnsavedChanges) {
           const saved = await saveOnlineFullAppState();
           if (!saved) return;
@@ -6235,6 +6246,142 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   );
 
 
+  const renderLoginStartScreen = () => (
+    <div
+      style={{
+        padding: 20,
+        fontFamily: "Arial, sans-serif",
+        background: colors.pageBg,
+        minHeight: "100vh",
+        color: colors.text,
+        position: "relative",
+        maxWidth: 1320,
+        margin: "0 auto",
+      }}
+    >
+      <div style={{ position: "relative", zIndex: 1 }}>
+        {renderAppHeader()}
+
+        <div
+          style={{
+            minHeight: "calc(100vh - 260px)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            paddingTop: 48,
+          }}
+        >
+          <div
+            style={{
+              ...basePanelStyle,
+              width: "min(560px, 100%)",
+              borderRadius: 24,
+              padding: 24,
+              boxShadow: "0 18px 48px rgba(31, 42, 55, 0.18)",
+              border: `1px solid ${colors.cardBorderStrong}`,
+              background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 }}>
+              Geschützter Zugang
+            </div>
+            <h1 style={{ margin: "8px 0 8px", color: colors.title, fontSize: 30, lineHeight: 1.1 }}>
+              Anmeldung erforderlich
+            </h1>
+            <div style={{ fontSize: 15, fontWeight: 800, color: colors.muted, lineHeight: 1.45, marginBottom: 18 }}>
+              Die App wird erst nach erfolgreicher Firebase-Anmeldung angezeigt.
+            </div>
+
+            {!isOnlineStorageConfigured() && (
+              <div
+                style={{
+                  border: `1px solid ${colors.dangerBorder}`,
+                  background: colors.dangerBg,
+                  color: "#991b1b",
+                  borderRadius: 14,
+                  padding: "10px 12px",
+                  fontWeight: 900,
+                  marginBottom: 14,
+                }}
+              >
+                Online-Speicher ist nicht vollständig konfiguriert. Bitte Vercel Environment Variables prüfen.
+              </div>
+            )}
+
+            {!firebaseAuthReady ? (
+              <div
+                style={{
+                  border: `1px solid ${colors.cardBorder}`,
+                  background: colors.cardSoftBg,
+                  color: colors.muted,
+                  borderRadius: 14,
+                  padding: "14px 12px",
+                  fontWeight: 900,
+                }}
+              >
+                Anmeldung wird geprüft ...
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div>
+                    <label style={labelStyle}>E-Mail</label>
+                    <input
+                      value={firebaseAuthEmail}
+                      onChange={(e) => setFirebaseAuthEmail(e.target.value)}
+                      placeholder="deine E-Mail"
+                      autoComplete="username"
+                      style={{ ...inputStyle, minHeight: 48, fontSize: 17 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Passwort</label>
+                    <input
+                      type="password"
+                      value={firebaseAuthPassword}
+                      onChange={(e) => setFirebaseAuthPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") loginFirebaseAuth(); }}
+                      placeholder="Firebase Passwort"
+                      autoComplete="current-password"
+                      style={{ ...inputStyle, minHeight: 48, fontSize: 17 }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loginFirebaseAuth}
+                    disabled={firebaseAuthLoading || !isOnlineStorageConfigured()}
+                    style={firebaseAuthLoading || !isOnlineStorageConfigured() ? { ...compactDisabledButtonStyle, minHeight: 54 } : { ...compactPrimaryButtonStyle, minHeight: 54, fontSize: 17 }}
+                  >
+                    {firebaseAuthLoading ? "Anmelden ..." : "Anmelden"}
+                  </button>
+                </div>
+
+                {firebaseAuthMessage && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      border: `1px solid ${colors.warningBorder}`,
+                      background: colors.warningBg,
+                      borderRadius: 14,
+                      padding: "10px 12px",
+                      color: "#92400e",
+                      fontSize: 13,
+                      fontWeight: 900,
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    {firebaseAuthMessage}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+
   const backupWarningBar = null;
 
 
@@ -8205,6 +8352,10 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   const heatsCreated = Object.keys(heats || {}).length > 0;
   const finalsCreated = Object.keys(finals || {}).length > 0;
+
+  if (!firebaseAuthReady || !isFirebaseSignedIn) {
+    return renderLoginStartScreen();
+  }
 
   return (
     <div
