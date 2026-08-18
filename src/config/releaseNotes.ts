@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.0",
+    title: "Login-Startseite",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Beim Öffnen der App erscheint zuerst eine geschützte Startseite mit Header-Banner und Anmeldefenster.",
+      "Die eigentliche App, Startseite, Rennen, Teilnehmer, Resultate und Speicherfunktionen werden erst nach erfolgreichem Firebase Login angezeigt.",
+      "Während eine vorhandene Anmeldung geprüft wird, zeigt die App nur den Login-Bereich mit Hinweis Anmeldung wird geprüft.",
+      "Nach dem Abmelden wird die App wieder vollständig ausgeblendet und nur die Login-Startseite angezeigt.",
+      "Header-Banner bleibt sichtbar; Rennlogik, Teilnehmerlogik und Resultatberechnung wurden nicht geändert.",
+    ],
+  },
+  {
     version: "v1.15.9",
     title: "Firebase Login und geschützte Online-Daten",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Firebase Login mit E-Mail und Passwort ergänzt.",
       "Startseite zeigt im Speicherbereich den Status Angemeldet als ... oder Nicht angemeldet.",
