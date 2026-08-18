@@ -9,7 +9,7 @@ import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KE
 import { appStorage, encodeStorageValue } from "./utils/storage";
 import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
 import { createOnlineBackup, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, saveOnlineAppState, setOnlineStorageAuthToken, type OnlineBackupListItem, type OnlineStorageStatus } from "./utils/onlineStorage";
-import { getValidFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
+import { refreshFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
@@ -2338,30 +2338,12 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const restoreFirebaseLogin = async () => {
-      try {
-        const session = await getValidFirebaseAuthSession();
-        if (cancelled) return;
-        setFirebaseAuthSession(session);
-        setOnlineStorageAuthToken(session?.idToken || "");
-        if (session?.email) {
-          setFirebaseAuthEmail(session.email);
-          setFirebaseAuthMessage(`Angemeldet als ${session.email}`);
-        }
-      } catch {
-        if (!cancelled) {
-          setFirebaseAuthSession(null);
-          setOnlineStorageAuthToken("");
-        }
-      } finally {
-        if (!cancelled) setFirebaseAuthReady(true);
-      }
-    };
-    restoreFirebaseLogin();
-    return () => {
-      cancelled = true;
-    };
+    signOutFirebaseAuth();
+    setFirebaseAuthSession(null);
+    setOnlineStorageAuthToken("");
+    setFirebaseAuthPassword("");
+    setFirebaseAuthMessage("");
+    setFirebaseAuthReady(true);
   }, []);
 
   useEffect(() => {
@@ -5649,12 +5631,22 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       return null;
     }
 
-    const session = await getValidFirebaseAuthSession();
-    if (session?.idToken) {
-      setFirebaseAuthSession(session);
-      setOnlineStorageAuthToken(session.idToken);
-      if (session.email) setFirebaseAuthEmail(session.email);
-      return session;
+    if (firebaseAuthSession?.idToken) {
+      const expiresAtMs = new Date(firebaseAuthSession.expiresAt).getTime();
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs - Date.now() > 5 * 60 * 1000) {
+        setOnlineStorageAuthToken(firebaseAuthSession.idToken);
+        return firebaseAuthSession;
+      }
+
+      try {
+        const refreshedSession = await refreshFirebaseAuthSession(firebaseAuthSession);
+        setFirebaseAuthSession(refreshedSession);
+        setOnlineStorageAuthToken(refreshedSession.idToken);
+        if (refreshedSession.email) setFirebaseAuthEmail(refreshedSession.email);
+        return refreshedSession;
+      } catch {
+        signOutFirebaseAuth();
+      }
     }
 
     setFirebaseAuthSession(null);
@@ -6384,6 +6376,10 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   const backupWarningBar = null;
 
+
+  if (!firebaseAuthReady || !isFirebaseSignedIn) {
+    return renderLoginStartScreen();
+  }
 
   if (appShellView === "events") {
     const activeGroupedEvents = getEventGroupedByYear();
@@ -8352,10 +8348,6 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   const heatsCreated = Object.keys(heats || {}).length > 0;
   const finalsCreated = Object.keys(finals || {}).length > 0;
-
-  if (!firebaseAuthReady || !isFirebaseSignedIn) {
-    return renderLoginStartScreen();
-  }
 
   return (
     <div
