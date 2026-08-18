@@ -11,17 +11,32 @@ export type FirebaseOnlineStorageConfig = {
 };
 
 // Firebase Firestore REST-Konfiguration.
-// Die App nutzt Firebase nur als Online-Speicher; Hosting bleibt weiterhin Vercel.
-// Wichtig: Ohne Anmeldung funktionieren Online speichern/laden nur, wenn die Firestore-Regeln
-// den Zugriff für deine App erlauben, z. B. im Testmodus oder mit passenden Security Rules.
+// Die Werte werden über Vercel Environment Variables gesetzt, damit keine API Keys
+// direkt im GitHub-Repository stehen und GitHub Secret Scanning nicht anschlägt.
+// Benötigte Variablen in Vercel:
+// - VITE_FIREBASE_ENABLED=true
+// - VITE_FIREBASE_API_KEY=...
+// - VITE_FIREBASE_PROJECT_ID=...
+// - VITE_FIREBASE_APP_ID=...
+// Optional:
+// - VITE_FIREBASE_AUTH_DOMAIN=...
+// - VITE_FIREBASE_STORAGE_BUCKET=...
+// - VITE_FIREBASE_MESSAGING_SENDER_ID=...
+const env = (import.meta as any).env ?? {};
+
+const enabledFromEnv = String(env.VITE_FIREBASE_ENABLED ?? "").toLowerCase() === "true";
+const projectId = String(env.VITE_FIREBASE_PROJECT_ID ?? "").trim();
+const apiKey = String(env.VITE_FIREBASE_API_KEY ?? "").trim();
+const appId = String(env.VITE_FIREBASE_APP_ID ?? "").trim();
+
 export const firebaseOnlineStorageConfig: FirebaseOnlineStorageConfig = {
-  enabled: true,
-  projectId: "bmx-race-manager",
-  apiKey: "AIzaSyCEvcE99DSeXmkfuA0LyRZD1Spsk9J13H0",
-  appId: "1:126981692951:web:6a62ce562c260d7425c652",
-  authDomain: "bmx-race-manager.firebaseapp.com",
-  storageBucket: "bmx-race-manager.firebasestorage.app",
-  messagingSenderId: "126981692951",
+  enabled: enabledFromEnv && Boolean(projectId) && Boolean(apiKey) && Boolean(appId),
+  projectId,
+  apiKey,
+  appId,
+  authDomain: String(env.VITE_FIREBASE_AUTH_DOMAIN ?? "").trim() || undefined,
+  storageBucket: String(env.VITE_FIREBASE_STORAGE_BUCKET ?? "").trim() || undefined,
+  messagingSenderId: String(env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "").trim() || undefined,
   collectionPath: "bmxRaceManager",
   documentId: "mainAppState",
 };

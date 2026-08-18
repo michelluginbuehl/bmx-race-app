@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.15.2",
+    title: "Firebase-Konfiguration über Vercel Environment Variables",
+    date: "2026-08-18",
+    current: true,
+    items: [
+      "Firebase API Key und Projektwerte werden nicht mehr direkt im GitHub-Repository gespeichert.",
+      "Firebase-Konfiguration wird über Vercel Environment Variables geladen.",
+      "GitHub Secret-Scanning-Warnungen für src/config/firebaseConfig.ts werden dadurch künftig vermieden.",
+      "Online speichern/laden bleibt unverändert vorbereitet; Firestore muss im Firebase-Projekt als (default)-Datenbank erstellt sein.",
+      "Lokaler Speicher und Datei-Backup bleiben unverändert aktiv.",
+    ],
+  },
+  {
     version: "v1.15.1",
     title: "Online-Speicher aktiviert",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Firebase-Projekt bmx-race-manager in der App-Konfiguration aktiviert.",
       "Online speichern und Online laden verwenden jetzt Firestore REST und komplette App-Daten.",
