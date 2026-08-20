@@ -77,12 +77,14 @@ const BMX_AGE_CATEGORIES = [
 ] as const;
 
 const CRUISER_CATEGORY = "Cruiser";
+const PLAUSCH_CATEGORIES = ["Plausch 1", "Plausch 2", "Plausch 3"] as const;
+const SPECIAL_CATEGORY_OPTIONS = [...PLAUSCH_CATEGORIES, CRUISER_CATEGORY] as const;
+const BOYS_16_PLUS_CATEGORY = "Boys 16+ / Girls 17+";
 const EVENT_LIST_KEY = STORAGE_KEYS.managedEvents;
 const MAX_RIDERS_PER_RACE_CATEGORY = 32;
 const SEMIFINAL_MIN_RIDERS = 20;
 const FINAL_DISPLAY_ROUND_ORDER = [
   "Manuelle Rangliste",
-  "4. Vorlauf",
   "Halbfinal 1",
   "Halbfinal 2",
   "D-Final",
@@ -92,7 +94,6 @@ const FINAL_DISPLAY_ROUND_ORDER = [
 ] as const;
 const FINAL_QUALIFYING_DISPLAY_ROUND_ORDER = [
   "Manuelle Rangliste",
-  "4. Vorlauf",
   "Halbfinal 1",
   "Halbfinal 2",
   "D-Final",
@@ -101,7 +102,6 @@ const FINAL_QUALIFYING_DISPLAY_ROUND_ORDER = [
 ] as const;
 const FINAL_PRE_A_DISPLAY_ROUND_ORDER = [
   "Manuelle Rangliste",
-  "4. Vorlauf",
   "D-Final",
   "C-Final",
   "B-Final",
@@ -176,6 +176,8 @@ export default function App() {
   const [masterParticipantSearch, setMasterParticipantSearch] = useState("");
   const [masterParticipantFilter, setMasterParticipantFilter] = useState<"active" | "trash" | "all">("active");
   const [masterParticipantDraftLookup, setMasterParticipantDraftLookup] = useState({ name: "", plate: "", birthYear: "", gender: "", club: "" });
+  const [participantSpecialCategoryDraft, setParticipantSpecialCategoryDraft] = useState<string>("");
+  const [participantSpecialCategoryDraftDirty, setParticipantSpecialCategoryDraftDirty] = useState(false);
   const [duplicateOkKeys, setDuplicateOkKeys] = useState<string[]>([]);
   const [showEmergencyTools, setShowEmergencyTools] = useState(false);
   const [lateAddParticipantValue, setLateAddParticipantValue] = useState("");
@@ -184,7 +186,7 @@ export default function App() {
   const [manualResultOrder, setManualResultOrder] = useState<Record<string, string[]>>({});
   const [eventTileCounts, setEventTileCounts] = useState<Record<string, { total: number; races: Record<string, number> }>>({});
   const [participantQuickFilter, setParticipantQuickFilter] = useState<
-    "all" | "selectedRace" | "notSelectedRace" | "missing" | "duplicates" | "cruiser"
+    "all" | "selectedRace" | "notSelectedRace" | "missing" | "duplicates" | "cruiser" | "plausch"
   >("all");
   const [changeLog, setChangeLog] = useState<string[]>([]);
   const [changeLogFilter, setChangeLogFilter] = useState<string>("Alle");
@@ -356,8 +358,31 @@ export default function App() {
     return eventYear - birthYear;
   };
 
-  const getDerivedCategory = (rider: any) => {
+  const isPlauschCategory = (category: any) =>
+    PLAUSCH_CATEGORIES.includes(String(category || "").trim() as any);
+
+  const normalizeSpecialCategoryValue = (value: any) => {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    const lower = text.toLowerCase();
+    const plausch = PLAUSCH_CATEGORIES.find((category) => category.toLowerCase() === lower);
+    if (plausch) return plausch;
+    if (lower.includes("cruiser")) return CRUISER_CATEGORY;
+    return "";
+  };
+
+  const getSpecialCategoryValue = (rider: any) => {
+    const explicit = normalizeSpecialCategoryValue(rider?.specialCategory || rider?.plauschCategory);
+    if (explicit) return explicit;
+    const category = normalizeSpecialCategoryValue(rider?.category);
+    if (category) return category;
     if (rider?.cruiser || rider?.isCruiser) return CRUISER_CATEGORY;
+    return "";
+  };
+
+  const getDerivedCategory = (rider: any) => {
+    const specialCategory = getSpecialCategoryValue(rider);
+    if (specialCategory) return specialCategory;
 
     const gender = getRiderGenderCode(rider);
     const age = getRiderAge(rider);
@@ -389,11 +414,17 @@ export default function App() {
   };
 
   const getCategorySortValue = (category: string) => {
-    const lower = String(category || "").toLowerCase();
-    if (lower.includes("cruiser")) return 9999;
+    const normalizedSpecial = normalizeSpecialCategoryValue(category);
+    if (isPlauschCategory(normalizedSpecial)) {
+      return -100 + PLAUSCH_CATEGORIES.indexOf(normalizedSpecial as any);
+    }
     const fixedIndex = BMX_AGE_CATEGORIES.findIndex(
       (cat) => cat.label === category,
     );
+    if (normalizedSpecial === CRUISER_CATEGORY) {
+      const boys16Index = BMX_AGE_CATEGORIES.findIndex((cat) => cat.label === BOYS_16_PLUS_CATEGORY);
+      return (boys16Index >= 0 ? boys16Index * 10 : 50) - 1;
+    }
     if (fixedIndex >= 0) return fixedIndex * 10;
     const numbers = String(category || "").match(/\d+/g);
     if (!numbers || numbers.length === 0) return 5000;
@@ -1573,6 +1604,7 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   const getRiderSharedDataPatch = (rider: any, options?: { preservePlate?: boolean }) => {
     const birthYear = getRiderBirthYear(rider) || "";
     const gender = getRiderGenderCode(rider) || "";
+    const specialCategory = getSpecialCategoryValue(rider);
     const baseWithoutPlate = {
       name: rider?.name || "",
       birthYear,
@@ -1580,8 +1612,10 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       gender,
       geschlecht: gender,
       club: rider?.club || "",
-      cruiser: !!(rider?.cruiser || rider?.isCruiser),
-      isCruiser: !!(rider?.cruiser || rider?.isCruiser),
+      cruiser: specialCategory === CRUISER_CATEGORY,
+      isCruiser: specialCategory === CRUISER_CATEGORY,
+      specialCategory,
+      plauschCategory: isPlauschCategory(specialCategory) ? specialCategory : "",
     };
     const base = options?.preservePlate
       ? baseWithoutPlate
@@ -1716,6 +1750,52 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     }
   };
 
+  const findSavedRiderByDraft = async (draft: any, eventIdHint?: string) => {
+    const nameKey = normalizeParticipantName(draft?.name || "");
+    const plate = String(draft?.plate || "").trim();
+    const birthYear = String(draft?.birthYear || "").trim();
+    const gender = String(getRiderGenderCode(draft) || draft?.gender || "").trim();
+    const rows = (await db.table("riders").toArray()).map(normalizeRider).filter((rider: any) => !rider.deletedAt);
+    const scored = rows
+      .filter((rider: any) => !eventIdHint || String(rider.eventId || "") === String(eventIdHint))
+      .map((rider: any) => {
+        let score = 0;
+        if (nameKey && normalizeParticipantName(rider.name || "") === nameKey) score += 60;
+        if (plate && String(rider.plate || "").trim() === plate) score += 25;
+        if (birthYear && String(getRiderBirthYear(rider) || "").trim() === birthYear) score += 10;
+        if (gender && String(getRiderGenderCode(rider) || "").trim() === gender) score += 5;
+        return { rider, score };
+      })
+      .filter((entry: any) => entry.score >= 60)
+      .sort((a: any, b: any) => b.score - a.score);
+    return scored[0]?.rider || null;
+  };
+
+  const applySpecialCategoryToRider = async (riderId: string, specialCategoryValue: string) => {
+    if (!riderId) return "";
+    const originalRow = await db.table("riders").get(riderId);
+    if (!originalRow) return "";
+    const normalizedSpecial = normalizeSpecialCategoryValue(specialCategoryValue);
+    const specialPatch = {
+      specialCategory: normalizedSpecial,
+      plauschCategory: isPlauschCategory(normalizedSpecial) ? normalizedSpecial : "",
+      cruiser: normalizedSpecial === CRUISER_CATEGORY,
+      isCruiser: normalizedSpecial === CRUISER_CATEGORY,
+    };
+    const edited = {
+      ...originalRow,
+      ...specialPatch,
+      category: getDerivedCategory({ ...originalRow, ...specialPatch }),
+    };
+    await db.table("riders").update(riderId, {
+      ...specialPatch,
+      category: edited.category,
+    });
+    await syncRiderSharedDataToAllReferences(originalRow, edited);
+    if (normalizedSpecial) addChangeLog(`Spezial-Kategorie gesetzt: ${edited.name || "Teilnehmer"} → ${normalizedSpecial}`);
+    return String(riderId);
+  };
+
   const preserveEditedRiderLinks = async (original: any) => {
     if (!original?.id) return "";
     const originalId = String(original.id);
@@ -1740,8 +1820,21 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
 
   const handleRiderFormChange = async () => {
     const original = editingRider ? { ...editingRider } : null;
-    const editedId = original ? await preserveEditedRiderLinks(original) : String(lastEditedMasterParticipantId || "");
+    const draftBeforeSave = { ...masterParticipantDraftLookup };
+    const specialBeforeSave = participantSpecialCategoryDraft;
+    const originalSpecial = getSpecialCategoryValue(original);
+    const shouldApplySpecial = participantSpecialCategoryDraftDirty || !!originalSpecial;
+    let editedId = original ? await preserveEditedRiderLinks(original) : String(lastEditedMasterParticipantId || "");
+    if (!editedId && shouldApplySpecial) {
+      const saved =
+        (await findSavedRiderByDraft(draftBeforeSave, appShellView === "masterParticipants" ? "master" : currentEventId || "legacy")) ||
+        (await findSavedRiderByDraft(draftBeforeSave));
+      editedId = String(saved?.id || "");
+    }
+    if (editedId && shouldApplySpecial) await applySpecialCategoryToRider(editedId, specialBeforeSave);
     setEditingRider(null);
+    setParticipantSpecialCategoryDraft("");
+    setParticipantSpecialCategoryDraftDirty(false);
     setMasterParticipantDraftLookup({ name: "", plate: "", birthYear: "", gender: "", club: "" });
     await ensureCurrentEventRiderIdentities();
     await loadMasterParticipants();
@@ -1800,6 +1893,8 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     const allRows = (await db.table("riders").toArray()).map(normalizeRider).filter((r: any) => !r.deletedAt).filter(belongsToCurrentEvent);
     eventParticipantCreateKnownIdsRef.current = new Set(allRows.map((rider: any) => String(rider.id || "")).filter(Boolean));
     setEditingRider(null);
+    setParticipantSpecialCategoryDraft("");
+    setParticipantSpecialCategoryDraftDirty(false);
     setLastEditedMasterParticipantId("");
     setShowEventParticipantCreateForm(true);
     window.setTimeout(() => participantFormRef.current?.scrollIntoView({ behavior: "auto", block: "start" }), 0);
@@ -1823,8 +1918,13 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       await handleRiderFormChange();
       return;
     }
+    const specialBeforeSave = participantSpecialCategoryDraft;
+    const shouldApplySpecial = participantSpecialCategoryDraftDirty;
     const createdId = showEventParticipantCreateForm ? await markNewestCreatedParticipantForCurrentRace() : "";
+    if (createdId && shouldApplySpecial) await applySpecialCategoryToRider(createdId, specialBeforeSave);
     setShowEventParticipantCreateForm(false);
+    setParticipantSpecialCategoryDraft("");
+    setParticipantSpecialCategoryDraftDirty(false);
     await ensureCurrentEventRiderIdentities();
     await loadMasterParticipants();
     await loadAllRiders();
@@ -2001,6 +2101,7 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     "Jahrgang",
     "Geschlecht",
     "Cruiser",
+    "Spezial-Kategorie",
     "Kategorie",
     "Race1",
     "Race2",
@@ -2097,7 +2198,8 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
         Verein: participant.club || "",
         Jahrgang: participant.birthYear || "",
         Geschlecht: participant.gender || "",
-        Cruiser: formatExcelBoolean(participant.cruiser),
+        Cruiser: formatExcelBoolean(getSpecialCategoryValue(raw) === CRUISER_CATEGORY),
+        "Spezial-Kategorie": getSpecialCategoryValue(raw),
         Kategorie: getDerivedCategory(raw),
         Race1: formatExcelBoolean(raw.race1),
         Race2: formatExcelBoolean(raw.race2),
@@ -2144,6 +2246,7 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       { Feld: "Teilnehmer ID", Beschreibung: "Bestehende ID nicht ändern. Neue Teilnehmer können leer bleiben; beim Import wird automatisch eine neue Teilnehmer-ID vergeben." },
       { Feld: "Geschlecht", Beschreibung: "B für Boys / männlich, G für Girls / weiblich." },
       { Feld: "Cruiser und Race-Spalten", Beschreibung: "x, ja, yes, true oder 1 bedeutet aktiv." },
+      { Feld: "Spezial-Kategorie", Beschreibung: "Optional: Cruiser, Plausch 1, Plausch 2 oder Plausch 3. Diese Kategorie übersteuert die automatische Alterskategorie." },
       { Feld: "Resultate", Beschreibung: "Resultate und Gesamtwertung bleiben in der App geschützt. Beim Import werden nur Stammdaten synchronisiert." },
     ];
     const infoWs = XLSX.utils.json_to_sheet(infoRows);
@@ -2157,8 +2260,8 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
 
   const downloadExcelTemplate = () => {
     const rows = [
-      { "Teilnehmer ID": "", Name: "Max Muster", Startnummer: "23", Verein: "BMX Club", Jahrgang: "2014", Geschlecht: "B", Cruiser: "", Kategorie: "", Race1: "x", Race2: "x", Race3: "", Race4: "", Race5: "", Race6: "", Race7: "", Race8: "", Race9: "", Race10: "", "Resultate Übersicht": "", "Gesamtwertung Übersicht": "" },
-      { "Teilnehmer ID": "", Name: "Lina Beispiel", Startnummer: "41", Verein: "BMX Club", Jahrgang: "2015", Geschlecht: "G", Cruiser: "x", Kategorie: "", Race1: "x", Race2: "", Race3: "", Race4: "", Race5: "", Race6: "", Race7: "", Race8: "", Race9: "", Race10: "", "Resultate Übersicht": "", "Gesamtwertung Übersicht": "" },
+      { "Teilnehmer ID": "", Name: "Max Muster", Startnummer: "23", Verein: "BMX Club", Jahrgang: "2014", Geschlecht: "B", Cruiser: "", "Spezial-Kategorie": "", Kategorie: "", Race1: "x", Race2: "x", Race3: "", Race4: "", Race5: "", Race6: "", Race7: "", Race8: "", Race9: "", Race10: "", "Resultate Übersicht": "", "Gesamtwertung Übersicht": "" },
+      { "Teilnehmer ID": "", Name: "Lina Beispiel", Startnummer: "41", Verein: "BMX Club", Jahrgang: "2015", Geschlecht: "G", Cruiser: "x", "Spezial-Kategorie": "Cruiser", Kategorie: "", Race1: "x", Race2: "", Race3: "", Race4: "", Race5: "", Race6: "", Race7: "", Race8: "", Race9: "", Race10: "", "Resultate Übersicht": "", "Gesamtwertung Übersicht": "" },
     ];
     const ws = XLSX.utils.json_to_sheet(rows, { header: masterParticipantExcelHeaders });
     ws["!cols"] = [{ wch: 40 }, { wch: 28 }, { wch: 14 }, { wch: 24 }, { wch: 10 }, { wch: 11 }, { wch: 9 }, { wch: 28 }, ...Array.from({ length: 10 }, () => ({ wch: 8 })), { wch: 40 }, { wch: 35 }];
@@ -2209,8 +2312,16 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
         const genderRaw = String(getExcelCell(row, ["Geschlecht", "Gender"])).trim().toUpperCase();
         const gender = genderRaw.startsWith("G") || genderRaw.startsWith("W") || genderRaw.startsWith("F") ? "G" : genderRaw.startsWith("B") || genderRaw.startsWith("M") ? "B" : genderRaw;
         const cruiser = parseExcelBoolean(getExcelCell(row, ["Cruiser"]));
+        const categoryFromExcel = String(getExcelCell(row, ["Kategorie", "Category"])).trim();
+        const specialCategory = normalizeSpecialCategoryValue(getExcelCell(row, ["Spezial-Kategorie", "SpezialKategorie", "Special Category", "Plausch"])) || normalizeSpecialCategoryValue(categoryFromExcel) || (cruiser ? CRUISER_CATEGORY : "");
         const participantId = String(getExcelCell(row, ["Teilnehmer ID", "Participant ID", "ID"])).trim();
         const racePatch = Object.fromEntries(RACES.map((race) => [raceKeyMap[race], parseExcelBoolean(getExcelCell(row, [race.replace(" ", ""), race, raceKeyMap[race]]))]));
+        const specialPatch = {
+          cruiser: specialCategory === CRUISER_CATEGORY,
+          isCruiser: specialCategory === CRUISER_CATEGORY,
+          specialCategory,
+          plauschCategory: isPlauschCategory(specialCategory) ? specialCategory : "",
+        };
         const patch = {
           name,
           plate,
@@ -2219,8 +2330,8 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
           jahrgang: birthYear,
           gender,
           geschlecht: gender,
-          cruiser,
-          isCruiser: cruiser,
+          ...specialPatch,
+          category: getDerivedCategory({ birthYear, gender, geschlecht: gender, jahrgang: birthYear, category: categoryFromExcel, ...specialPatch }),
           ...racePatch,
         };
         const key = getMasterParticipantKey(patch);
@@ -2422,6 +2533,11 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       });
     }, 60);
   }, [editingRider?.id, viewMode, appShellView]);
+
+  useEffect(() => {
+    setParticipantSpecialCategoryDraft(editingRider ? getSpecialCategoryValue(editingRider) : "");
+    setParticipantSpecialCategoryDraftDirty(false);
+  }, [editingRider?.id]);
 
   useEffect(() => {
     const existing = getRawManagedEvents();
@@ -3930,7 +4046,9 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       if (participantQuickFilter === "duplicates")
         return duplicatePlateRiderIds.has(String(r.id || ""));
       if (participantQuickFilter === "cruiser")
-        return isCruiserCategory(r.category);
+        return getSpecialCategoryValue(r) === CRUISER_CATEGORY;
+      if (participantQuickFilter === "plausch")
+        return isPlauschCategory(getSpecialCategoryValue(r));
       if (participantQuickFilter === "missing") {
         const issue = getRiderValidationIssues([r]);
         return issue.missing.length > 0;
@@ -3988,9 +4106,11 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       ["#eef8f8", "#21747a", "#a9dfe3"],
     ];
     const index = Math.abs(String(category || "").split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0)) % palette.length;
-    const [background, color, borderColor] = String(category || "").toLowerCase().includes("cruiser")
+    const [background, color, borderColor] = normalizeSpecialCategoryValue(category) === CRUISER_CATEGORY
       ? ["#111827", "#ffffff", "#111827"]
-      : palette[index];
+      : isPlauschCategory(normalizeSpecialCategoryValue(category))
+        ? ["#fff7ed", "#9a3412", "#fdba74"]
+        : palette[index];
     return {
       display: "inline-flex",
       alignItems: "center",
@@ -4437,6 +4557,25 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     return base ? `${base} ${race}` : race;
   };
 
+  const renderSpecialCategorySelector = (note?: string) => (
+    <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: `1px solid ${colors.cardBorder}`, background: "#fff" }}>
+      <label style={labelStyle}>Spezial-Kategorie</label>
+      <select
+        value={participantSpecialCategoryDraft}
+        onChange={(e) => { setParticipantSpecialCategoryDraft(e.target.value); setParticipantSpecialCategoryDraftDirty(true); }}
+        style={inputStyle}
+      >
+        <option value="">Automatische Kategorie nach Jahrgang/Geschlecht</option>
+        {SPECIAL_CATEGORY_OPTIONS.map((category) => (
+          <option key={category} value={category}>{category}</option>
+        ))}
+      </select>
+      <div style={{ ...helperTextStyle, marginTop: 6 }}>
+        {note || "Plausch 1–3 und Cruiser werden wie eigene Kategorien gewertet. Plausch-Kategorien starten im Programm zuerst; Cruiser startet direkt vor Boys 16+ / Girls 17+."}
+      </div>
+    </div>
+  );
+
   const renderAppHeader = () => (
     <AppHeader
       onHomeClick={async () => {
@@ -4734,8 +4873,11 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   };
 
   const getVisibleAFinalRoundNames = (rounds: Record<string, any[]> | undefined) => {
-    if (!rounds?.["A-Final"]?.length) return [] as string[];
-    return ["A-Final"];
+    if (!rounds) return [] as string[];
+    return ["4. Vorlauf", "A-Final"].filter((roundName) => {
+      const heat = rounds[roundName];
+      return Array.isArray(heat) && heat.length > 0;
+    });
   };
 
   const renderFinalRoundCard = (cat: string, roundName: string) => {
@@ -7688,11 +7830,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             <RiderForm
               onChange={handleRiderFormChange}
               editingRider={editingRider}
-              onCancelEdit={() => { setEditingRider(null); setLastEditedMasterParticipantId(""); setMasterParticipantDraftLookup({ name: "", plate: "", birthYear: "", gender: "", club: "" }); }}
+              onCancelEdit={() => { setEditingRider(null); setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setLastEditedMasterParticipantId(""); setMasterParticipantDraftLookup({ name: "", plate: "", birthYear: "", gender: "", club: "" }); }}
               eventYear={String(new Date().getFullYear())}
               currentEventId="master"
               masterMode
             />
+            {renderSpecialCategorySelector()}
             {!editingRider && participantEntrySuggestions.length > 0 && (
               <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: `1px solid ${colors.warningBorder}`, background: colors.warningBg }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
@@ -7879,7 +8022,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                     <h2 style={{ margin: 0, color: colors.title }}>{selectedMasterParticipant.name}</h2>
                     <div style={{ color: colors.muted, fontWeight: 700, marginTop: 4 }}>
                       #{selectedMasterParticipant.plate || "-"} · {selectedMasterParticipant.birthYear || "-"} | {selectedMasterParticipant.gender || "-"} · {selectedMasterParticipant.club || "-"}
-                      {selectedMasterParticipant.cruiser ? " · Cruiser" : ""}
+                      {getSpecialCategoryValue(selectedMasterParticipant.raw || selectedMasterParticipant) ? ` · ${getSpecialCategoryValue(selectedMasterParticipant.raw || selectedMasterParticipant)}` : ""}
                     </div>
                   </div>
                   <button onClick={() => setSelectedMasterParticipant(null)} style={smallGhostButtonStyle}>Schliessen</button>
@@ -8009,7 +8152,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     });
 
     const formatRows = [
-      { count: "1–8", motos: "3 Motos + 4. Moto", finals: "Kein A/B-Final. Der 4. Moto ist der Endlauf." },
+      { count: "1–8", motos: "3 Motos + 4. Moto", finals: "Kein A/B-Final. Der 4. Moto ist der Endlauf und wird im Finalblock gefahren." },
       { count: "9–16", motos: "3 Motos", finals: "A-Final und B-Final nach Moto-Punkten." },
       { count: "17–19", motos: "3 Motos", finals: "A-, B- und C-Final nach Moto-Punkten." },
       { count: "20", motos: "3 Motos", finals: "Top 16 zuerst in zwei Halbfinals. Nach fertigen Halbfinalresultaten wird C-Final für die restlichen 4 Fahrer freigeschaltet." },
@@ -8059,7 +8202,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <li>Ab 20 Teilnehmern gehen die besten 16 Fahrer nach den Motos in zwei Halbfinals.</li>
               <li>Aus den Halbfinals kommen die besten 4 Fahrer pro Halbfinal in den A-Final; die restlichen gewerteten Fahrer kommen in den B-Final.</li>
               <li>C- und D-Finals werden bei Halbfinal-Kategorien erst freigeschaltet, wenn die Halbfinalresultate vollständig erfasst sind und die Finals freigeschaltet werden.</li>
-              <li>Die operative Final-Darstellung läuft nach dem Freischalten zuerst D-Final, C-Final und B-Final je Kategorie; alle A-Finals werden am Schluss gesammelt angezeigt.</li>
+              <li>Die operative Final-Darstellung läuft nach dem Freischalten zuerst D-Final, C-Final und B-Final je Kategorie; alle A-Finals und 4. Motos werden am Schluss gesammelt angezeigt.</li>
+              <li>Plausch 1, Plausch 2 und Plausch 3 sind eigene Spezial-Kategorien und starten im Programm vor allen regulären Alterskategorien.</li>
+              <li>Cruiser bleibt eine eigene Spezial-Kategorie und startet direkt vor Boys 16+ / Girls 17+.</li>
             </ul>
           </div>
 
@@ -8748,24 +8893,26 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <RiderForm
                 onChange={handleEventParticipantFormChange}
                 editingRider={editingRider}
-                onCancelEdit={() => { setEditingRider(null); setLastEditedMasterParticipantId(""); }}
+                onCancelEdit={() => { setEditingRider(null); setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setLastEditedMasterParticipantId(""); }}
                 eventYear={participantEventYear}
                 currentEventId={currentEventId || "legacy"}
               />
+              {renderSpecialCategorySelector()}
             </>
           ) : showEventParticipantCreateForm ? (
             <div style={{ marginTop: 12, padding: 14, borderRadius: 16, border: `1px solid ${colors.greenBorder}`, background: colors.greenBg }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                 <strong style={{ color: colors.title }}>Neuen Teilnehmer erfassen und direkt zu {selectedRace} hinzufügen</strong>
-                <button type="button" onClick={() => setShowEventParticipantCreateForm(false)} style={smallGhostButtonStyle}>Abbrechen</button>
+                <button type="button" onClick={() => { setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setShowEventParticipantCreateForm(false); }} style={smallGhostButtonStyle}>Abbrechen</button>
               </div>
               <RiderForm
                 onChange={handleEventParticipantFormChange}
                 editingRider={null}
-                onCancelEdit={() => setShowEventParticipantCreateForm(false)}
+                onCancelEdit={() => { setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setShowEventParticipantCreateForm(false); }}
                 eventYear={participantEventYear}
                 currentEventId={currentEventId || "legacy"}
               />
+              {renderSpecialCategorySelector("Nach dem Speichern wird der neue Teilnehmer direkt dieser Spezial-Kategorie zugeordnet, falls hier eine Auswahl gesetzt ist.")}
               <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
                 Nach dem Speichern erhält der Teilnehmer automatisch eine stabile Teilnehmer-ID und wird in {selectedRace} ausgewählt.
               </div>
@@ -8992,7 +9139,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           <div style={{ marginBottom: 10, color: colors.muted }}>
             Häkchen setzen, bei welchen Rennen der Fahrer startet. Kategorien
             werden automatisch aus Rennjahr, Jahrgang und Geschlecht berechnet.
-            Cruiser wird separat gewertet.
+            Cruiser und Plausch 1–3 werden separat gewertet.
           </div>
 
           <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
@@ -9017,6 +9164,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 ["missing", "Fehlende Angaben"],
                 ["duplicates", "Doppelte Nummern"],
                 ["cruiser", "Cruiser"],
+                ["plausch", "Plausch"],
               ].map(([key, label]) => {
                 const active = participantQuickFilter === key;
                 return (
@@ -9824,7 +9972,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           <div id="finallaeufe" style={{ marginTop: 40, scrollMarginTop: 120 }}>
             <h2 style={{ color: colors.title }}>🏁 Finals</h2>
             <div style={{ ...helperTextStyle, marginBottom: 14 }}>
-              Bei Halbfinal-Kategorien werden C- und D-Finals erst nach vollständig erfassten Halbfinals freigeschaltet. Danach erscheinen zuerst D-, C- und B-Finals je Kategorie; alle A-Finals werden am Schluss gesammelt angezeigt.
+              Bei Halbfinal-Kategorien werden C- und D-Finals erst nach vollständig erfassten Halbfinals freigeschaltet. Danach erscheinen zuerst D-, C- und B-Finals je Kategorie; alle A-Finals sowie 4. Motos werden am Schluss gesammelt angezeigt.
             </div>
 
             {sortCategories(Object.keys(finals)).map((cat) => {
@@ -9843,7 +9991,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
             {sortCategories(Object.keys(finals)).some((cat) => getVisibleAFinalRoundNames(finals[cat]).length > 0) && (
               <div style={{ marginTop: 34, paddingTop: 16, borderTop: `4px solid ${colors.finalABorder}` }}>
-                <h2 style={{ color: colors.title }}>🏆 A-Finals am Schluss</h2>
+                <h2 style={{ color: colors.title }}>🏆 A-Finals / 4. Motos am Schluss</h2>
                 {sortCategories(Object.keys(finals)).map((cat) => {
                   const roundNames = getVisibleAFinalRoundNames(finals[cat]);
                   if (roundNames.length === 0) return null;
