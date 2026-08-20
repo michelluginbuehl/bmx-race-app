@@ -8,10 +8,24 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.5",
+    title: "Halbfinal-Logik & Renn-Reglement",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "Maximal 32 Teilnehmer pro Kategorie/Laufgruppe erlaubt; zu grosse Kategorien werden mit klarer Fehlermeldung blockiert.",
+      "Ab 20 Teilnehmern werden automatisch zwei Halbfinals für die besten 16 Fahrer nach den Motos erstellt.",
+      "Bei 20–24 Teilnehmern fahren die restlichen Fahrer direkt C-Final; bei 25–32 Teilnehmern werden die restlichen Fahrer auf C- und D-Final verteilt.",
+      "Nach erfassten Halbfinalresultaten können A- und B-Finals über den neuen Button A/B-Finals erstellen erzeugt werden.",
+      "DNS in einem Final-/Endresultat wird nicht mehr in der Race-Rangliste geführt und erhält keine Gesamtwertungspunkte.",
+      "Die App-Seite Renn-Reglement wurde mit einer vollständigen Übersicht der aktuellen Rennlogik ergänzt.",
+    ],
+  },
+  {
     version: "v1.16.4",
     title: "Automatische Live-Aktualisierung",
     date: "2026-08-18",
-    current: true,
+    current: false,
     items: [
       "Ein live veröffentlichtes aktuelles Rennen wird im Admin-Rennbetrieb automatisch alle 30 Sekunden veröffentlicht/aktualisiert.",
       "Der manuelle Button bleibt als Jetzt live aktualisieren erhalten, ist aber im Normalbetrieb nicht mehr nötig.",
