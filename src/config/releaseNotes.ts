@@ -8,10 +8,21 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.11.1",
+    title: "Live-Ansicht Text bereinigt",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "Hinweistext Startliste: manuell aktualisieren oder automatische Sicherheitsprüfung alle 1 Stunde aus der öffentlichen Live-Ansicht entfernt.",
+      "Live-Aktualisierungslogik bleibt unverändert: vor dem Rennen sparsam, während Motos/Finals 30-Sekunden-Meta-Prüfung.",
+      "Keine Änderung an Rennlogik, Einteilung, Punktewertung, Login oder Online-Speicher.",
+    ],
+  },
+  {
     version: "v1.11",
     title: "Optimierte Live-Aktualisierung",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "Öffentliche Live-Ansicht nutzt neu ein kleines Meta-Dokument zur Prüfung statt bei jeder Aktualisierung den kompletten Live-Stand zu laden.",
       "Admin-App erhöht bei jeder Live-Veröffentlichung eine liveVersion; Zuschauer laden den vollständigen Live-Stand nur, wenn sich diese Version geändert hat.",
