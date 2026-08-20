@@ -78,6 +78,36 @@ const BMX_AGE_CATEGORIES = [
 
 const CRUISER_CATEGORY = "Cruiser";
 const EVENT_LIST_KEY = STORAGE_KEYS.managedEvents;
+const MAX_RIDERS_PER_RACE_CATEGORY = 32;
+const SEMIFINAL_MIN_RIDERS = 20;
+const FINAL_DISPLAY_ROUND_ORDER = [
+  "Manuelle Rangliste",
+  "4. Vorlauf",
+  "D-Final",
+  "C-Final",
+  "Halbfinal 1",
+  "Halbfinal 2",
+  "B-Final",
+  "A-Final",
+] as const;
+const RACE_RANKING_ROUND_ORDER = [
+  "Manuelle Rangliste",
+  "4. Vorlauf",
+  "A-Final",
+  "B-Final",
+  "C-Final",
+  "D-Final",
+] as const;
+const FINAL_RESULT_ROUND_NAMES = [
+  "Manuelle Rangliste",
+  "Halbfinal 1",
+  "Halbfinal 2",
+  "A-Final",
+  "B-Final",
+  "C-Final",
+  "D-Final",
+  "4. Vorlauf",
+] as const;
 
 
 export default function App() {
@@ -2865,6 +2895,51 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
       (cat) => getEffectiveFinalCategory(cat) === finalCategory,
     );
 
+  const getEffectiveRaceCategoryCounts = (items: any[]) => {
+    const counts: Record<string, number> = {};
+    (items || []).forEach((rider: any) => {
+      const category = getEffectiveHeatCategory(rider.category || "Ohne Kategorie");
+      counts[category] = (counts[category] || 0) + 1;
+    });
+    return counts;
+  };
+
+  const getTooLargeRaceCategories = (items: any[]) =>
+    Object.entries(getEffectiveRaceCategoryCounts(items))
+      .filter(([, count]) => count > MAX_RIDERS_PER_RACE_CATEGORY)
+      .map(([category, count]) => ({ category, count }));
+
+  const hasDnsStatus = (row: any) => String(row?.status || "").toUpperCase() === "DNS";
+
+  const createStartListRows = (rows: any[]) =>
+    (rows || []).map((row: any, index: number) => ({
+      ...row,
+      startPos: index + 1,
+      riderId: String(row.riderId || row.id || ""),
+    }));
+
+  const buildSemiFinalProgram = (ranking: any[]) => {
+    const top16 = ranking.slice(0, 16);
+    const remaining = ranking.slice(16, MAX_RIDERS_PER_RACE_CATEGORY);
+    const semi1Indexes = [0, 3, 4, 7, 8, 11, 12, 15];
+    const semi2Indexes = [1, 2, 5, 6, 9, 10, 13, 14];
+    const program: Record<string, any[]> = {
+      "Halbfinal 1": createStartListRows(semi1Indexes.map((index) => top16[index]).filter(Boolean)),
+      "Halbfinal 2": createStartListRows(semi2Indexes.map((index) => top16[index]).filter(Boolean)),
+    };
+
+    if (remaining.length > 0) program["C-Final"] = createStartListRows(remaining.slice(0, 8));
+    if (remaining.length > 8) program["D-Final"] = createStartListRows(remaining.slice(8, 16));
+
+    return program;
+  };
+
+  const isSemifinalProgram = (rounds: Record<string, any[]> | undefined) =>
+    !!rounds?.["Halbfinal 1"] || !!rounds?.["Halbfinal 2"];
+
+  const sortSemiFinalRowsForQualification = (rows: any[]) =>
+    sortRaceResultRows((rows || []).filter((row: any) => !hasDnsStatus(row)));
+
   const getCombinedFinalRanking = (finalCategory: string) => {
     const combined: any[] = [];
 
@@ -2992,6 +3067,18 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
         ]
           .filter(Boolean)
           .join("\n"),
+      );
+      return false;
+    }
+
+    const tooLargeCategories = getTooLargeRaceCategories(riders);
+    if (tooLargeCategories.length > 0) {
+      alert(
+        [
+          `Maximal ${MAX_RIDERS_PER_RACE_CATEGORY} Teilnehmer pro Kategorie/Laufgruppe erlaubt.`,
+          "Bitte Teilnehmer reduzieren oder Kategorien anders aufteilen.",
+          `\nZu grosse Kategorien:\n${tooLargeCategories.map((entry) => `${entry.category}: ${entry.count} Teilnehmer`).join("\n")}`,
+        ].join("\n"),
       );
       return false;
     }
@@ -3472,6 +3559,15 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
 
     const existingCount = countUniqueHeatCategoryRiders(categoryHeats);
     const nextCount = Math.max(existingCount + 1, raceRidersAfter.filter((row: any) => getEffectiveHeatCategory(row.category) === heatCategory).length);
+    if (nextCount > MAX_RIDERS_PER_RACE_CATEGORY) {
+      window.alert(
+        `Teilnehmer kann nicht hinzugefügt werden. Für die Kategorie "${heatCategory}" wären danach ${nextCount} Teilnehmer vorhanden. Maximal erlaubt sind ${MAX_RIDERS_PER_RACE_CATEGORY}.`,
+      );
+      await rollbackLateAdd();
+      await loadAllRiders();
+      await loadRaceRiders();
+      return;
+    }
     const capacity = getCategoryHeatGroupCapacity(categoryHeats);
     const categoryHasSavedData = Object.keys(results || {}).some((key) => key.startsWith(`${heatCategory}_`)) || !!finals[getEffectiveFinalCategory(rider.category)] || Object.keys(finalResults || {}).some((key) => key.startsWith(`${getEffectiveFinalCategory(rider.category)}_`));
     const needsRebuild = !categoryHeats.length || capacity < nextCount;
@@ -3657,6 +3753,76 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     });
   };
 
+  const createMainFinalsFromSemifinals = async () => {
+    if (raceClosed) {
+      alert("Dieses Race ist abgeschlossen. Für Änderungen Race zuerst wieder öffnen.");
+      return;
+    }
+
+    const nextFinals: Record<string, Record<string, any[]>> = { ...(finals || {}) };
+    const nextFinalResults: Record<string, any[]> = { ...(finalResults || {}) };
+    const warnings: string[] = [];
+    let createdCount = 0;
+
+    sortCategories(Object.keys(nextFinals || {})).forEach((finalCategory) => {
+      const rounds = nextFinals[finalCategory] || {};
+      if (!isSemifinalProgram(rounds) || rounds["A-Final"] || rounds["B-Final"]) return;
+
+      const semi1Start = rounds["Halbfinal 1"] || [];
+      const semi2Start = rounds["Halbfinal 2"] || [];
+      const semi1Results = finalResults[`${finalCategory}_Halbfinal 1`] || [];
+      const semi2Results = finalResults[`${finalCategory}_Halbfinal 2`] || [];
+
+      if (semi1Results.length < semi1Start.length || semi2Results.length < semi2Start.length) {
+        warnings.push(`${getFinalCategoryLabel(finalCategory)}: Halbfinalresultate noch nicht vollständig erfasst.`);
+        return;
+      }
+
+      const semi1Sorted = sortSemiFinalRowsForQualification(semi1Results);
+      const semi2Sorted = sortSemiFinalRowsForQualification(semi2Results);
+      const aFinalRows = createStartListRows([
+        ...semi1Sorted.slice(0, 4),
+        ...semi2Sorted.slice(0, 4),
+      ]);
+      const bFinalRows = createStartListRows([
+        ...semi1Sorted.slice(4, 8),
+        ...semi2Sorted.slice(4, 8),
+      ]);
+
+      if (aFinalRows.length === 0) {
+        warnings.push(`${getFinalCategoryLabel(finalCategory)}: Aus den Halbfinals konnten keine A-Final-Fahrer ermittelt werden.`);
+        return;
+      }
+
+      nextFinals[finalCategory] = {
+        ...rounds,
+        "A-Final": aFinalRows,
+        ...(bFinalRows.length > 0 ? { "B-Final": bFinalRows } : {}),
+      };
+      delete nextFinalResults[`${finalCategory}_A-Final`];
+      delete nextFinalResults[`${finalCategory}_B-Final`];
+      createdCount += 1;
+    });
+
+    if (createdCount === 0) {
+      window.alert(
+        warnings.length
+          ? `A-/B-Finals konnten noch nicht erstellt werden:\n\n${warnings.join("\n")}`
+          : "Es gibt keine offenen Halbfinals, aus denen A-/B-Finals erstellt werden können.",
+      );
+      return;
+    }
+
+    if (warnings.length > 0) {
+      window.alert(`Einige Kategorien wurden übersprungen:\n\n${warnings.join("\n")}`);
+    }
+
+    setFinals(orderRecordByCategories(nextFinals));
+    setFinalResults(nextFinalResults);
+    setFinalManualOrder({});
+    addChangeLog(`${selectedRace}: A-/B-Finals aus Halbfinals erstellt`);
+  };
+
   const createFinals = async () => {
     if (raceClosed) {
       alert(
@@ -3669,6 +3835,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       await exportBackup("Sicherheitsbackup vor Finals neu erstellen");
     }
     const all: any = {};
+    const tooLargeCategories: string[] = [];
 
     getFinalRaceCategories().forEach((finalCategory) => {
       const categoryRiders = riders.filter(
@@ -3676,6 +3843,11 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       );
       const ranking = getCombinedFinalRanking(finalCategory);
       if (ranking.length === 0) return;
+
+      if (categoryRiders.length > MAX_RIDERS_PER_RACE_CATEGORY || ranking.length > MAX_RIDERS_PER_RACE_CATEGORY) {
+        tooLargeCategories.push(`${getFinalCategoryLabel(finalCategory)}: ${Math.max(categoryRiders.length, ranking.length)} Teilnehmer`);
+        return;
+      }
 
       if (categoryRiders.length <= 8) {
         const fourthMoto = ranking.map((r: any, index: number) => ({
@@ -3686,12 +3858,21 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
         all[finalCategory] = {
           "4. Vorlauf": fourthMoto,
         };
+      } else if (categoryRiders.length >= SEMIFINAL_MIN_RIDERS) {
+        all[finalCategory] = buildSemiFinalProgram(ranking);
       } else {
         all[finalCategory] = generateFinals(ranking);
       }
     });
 
-    setFinals(all);
+    if (tooLargeCategories.length > 0) {
+      window.alert(
+        `Finals können nicht erstellt werden. Maximal ${MAX_RIDERS_PER_RACE_CATEGORY} Teilnehmer pro Kategorie/Laufgruppe erlaubt.\n\n${tooLargeCategories.join("\n")}`,
+      );
+      return;
+    }
+
+    setFinals(orderRecordByCategories(all));
     setFinalResults({});
     setFinalManualOrder({});
     setManualResultsMode(false);
@@ -4298,6 +4479,13 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     } else if (roundName === "C-Final") {
       background = colors.finalC;
       border = colors.finalCBorder;
+    } else if (roundName === "D-Final") {
+      background = "#fff7ed";
+      border = "#fdba74";
+    } else if (roundName.startsWith("Halbfinal")) {
+      background = "#ecfeff";
+      border = "#67e8f9";
+      borderWidth = 3;
     } else if (roundName === "4. Vorlauf") {
       background = colors.fourthMotoBg;
       border = colors.fourthMotoBorder;
@@ -4528,7 +4716,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     });
 
   const buildFinalCategoryRanking = (cat: string, useManualOrder = true) => {
-    const roundOrder = ["Manuelle Rangliste", "A-Final", "B-Final", "C-Final", "4. Vorlauf"];
+    const roundOrder = RACE_RANKING_ROUND_ORDER;
     const ranking: any[] = [];
     let globalRank = 1;
 
@@ -4536,6 +4724,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       const finalCategory = getEffectiveFinalCategory(cat);
       const saved = finalResults[`${finalCategory}_${roundName}`] || [];
       saved.forEach((r: any) => {
+        if (hasDnsStatus(r)) return;
         const riderData = riders.find(
           (x: any) => String(x.id) === String(r.riderId),
         );
@@ -4712,6 +4901,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     if (label === "A-Final") return [255, 233, 168];
     if (label === "B-Final") return [232, 241, 255];
     if (label === "C-Final") return [241, 232, 255];
+    if (label === "D-Final") return [255, 239, 219];
+    if (String(label).startsWith("Halbfinal")) return [226, 245, 255];
     if (label === "4. Vorlauf") return [231, 255, 243];
     return [245, 247, 250];
   };
@@ -4898,7 +5089,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
       let currentY = 52;
 
-      ["Manuelle Rangliste", "4. Vorlauf", "C-Final", "B-Final", "A-Final"].forEach((roundName) => {
+      FINAL_DISPLAY_ROUND_ORDER.forEach((roundName) => {
         const heat = rounds[roundName];
         if (!heat || !heat.length) return;
 
@@ -5171,10 +5362,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   };
 
 
-  const getRoundNameFromFinalResultKey = (key: string) => {
-    const roundOrder = ["Manuelle Rangliste", "A-Final", "B-Final", "C-Final", "4. Vorlauf"];
-    return roundOrder.find((roundName) => key.endsWith(`_${roundName}`)) || "";
-  };
+  const getRoundNameFromFinalResultKey = (key: string) =>
+    FINAL_RESULT_ROUND_NAMES.find((roundName) => key.endsWith(`_${roundName}`)) || "";
 
   const buildRaceCategoryRankingFromStoredFinals = (
     race: RaceName,
@@ -5182,7 +5371,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     parsedFinalResults: Record<string, any[]>,
     savedFinalOrder: Record<string, string[]>,
   ) => {
-    const roundOrder = ["Manuelle Rangliste", "A-Final", "B-Final", "C-Final", "4. Vorlauf"];
+    const roundOrder = RACE_RANKING_ROUND_ORDER;
     const ranking: any[] = [];
     let globalRank = 1;
 
@@ -5193,6 +5382,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
         if (getRoundNameFromFinalResultKey(key) !== roundName) return;
         const value = Array.isArray(parsedFinalResults[key]) ? parsedFinalResults[key] : [];
         value.forEach((entry: any) => {
+          if (hasDnsStatus(entry)) return;
           const riderData = allRiders.find((x: any) => String(x.id) === String(entry.riderId));
           const originalCategory = riderData?.category || entry.originalCategory || entry.category || "";
           if (originalCategory !== category) return;
@@ -5410,6 +5600,9 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       warnings.push("Finals wurden noch nicht erstellt.");
 
     Object.keys(finals || {}).forEach((cat) => {
+      if (isSemifinalProgram(finals[cat]) && !finals[cat]?.["A-Final"]) {
+        warnings.push(`${getFinalCategoryLabel(cat)}: A-/B-Finals wurden aus den Halbfinals noch nicht erstellt.`);
+      }
       Object.keys(finals[cat] || {}).forEach((roundName) => {
         const startList = finals[cat][roundName] || [];
         const saved = finalResults[`${cat}_${roundName}`] || [];
@@ -6232,7 +6425,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
     const publicFinals = sortCategories(Object.keys(finals || {})).map((category) => ({
       category: getFinalCategoryLabel(category),
-      rounds: ["Manuelle Rangliste", "4. Vorlauf", "C-Final", "B-Final", "A-Final"].map((roundName) => {
+      rounds: FINAL_DISPLAY_ROUND_ORDER.map((roundName) => {
         const heat = finals?.[category]?.[roundName] || [];
         const key = `${category}_${roundName}`;
         const result = Array.isArray(finalResults?.[key]) ? finalResults[key] : [];
@@ -6917,7 +7110,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             <button onClick={() => setAppShellView("masterParticipants")} style={secondaryButtonStyle}>Teilnehmer</button>
             <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <button onClick={() => setAppShellView("guide")} style={smallGhostButtonStyle}>Anleitung</button>
-              <button onClick={() => setAppShellView("regulations")} style={smallGhostButtonStyle}>Reglement</button>
+              <button onClick={() => setAppShellView("regulations")} style={smallGhostButtonStyle}>Renn-Reglement</button>
               <button onClick={() => { setAppShellView("dataCheck"); setTimeout(() => runDataIntegrityCheck(), 0); }} style={smallGhostButtonStyle}>Daten prüfen</button>
               <button onClick={() => setAppShellView("history")} style={smallGhostButtonStyle}>History / Speicher & Import</button>
             </div>
@@ -7718,29 +7911,57 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
       return { rank, points: getOverallPointsForRank(rank) };
     });
 
+    const formatRows = [
+      { count: "1–8", motos: "3 Motos + 4. Moto", finals: "Kein A/B-Final. Der 4. Moto ist der Endlauf." },
+      { count: "9–16", motos: "3 Motos", finals: "A-Final und B-Final nach Moto-Punkten." },
+      { count: "17–19", motos: "3 Motos", finals: "A-, B- und C-Final nach Moto-Punkten." },
+      { count: "20", motos: "3 Motos", finals: "Top 16 in zwei Halbfinals, restliche 4 Fahrer direkt in C-Final." },
+      { count: "21–24", motos: "3 Motos", finals: "Top 16 in zwei Halbfinals, restliche 5–8 Fahrer direkt in C-Final." },
+      { count: "25–32", motos: "3 Motos", finals: "Top 16 in zwei Halbfinals, Plätze 17–24 in C-Final, Plätze 25–32 in D-Final." },
+      { count: ">32", motos: "Nicht erlaubt", finals: "App bricht mit Fehlermeldung ab." },
+    ];
+
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
         {renderAppHeader()}
         <div style={{ ...basePanelStyle, marginBottom: 16, background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <h2 style={{ ...sectionTitleStyle, fontSize: 24 }}>Reglement</h2>
-              <div style={helperTextStyle}>Zusammenfassung der aktuell in der App hinterlegten Wertungslogik.</div>
+              <h2 style={{ ...sectionTitleStyle, fontSize: 24 }}>Renn-Reglement</h2>
+              <div style={helperTextStyle}>Übersicht der aktuell in der App hinterlegten Renn- und Wertungslogik.</div>
             </div>
             <button onClick={() => setAppShellView("events")} style={secondaryButtonStyle}>Zurück zur Startseite</button>
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 14, alignItems: "start" }}>
+        <div style={{ ...basePanelStyle, marginBottom: 14 }}>
+          <h3 style={{ marginTop: 0, color: colors.title }}>Rennformat nach Teilnehmerzahl</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 1.6fr", gap: 0, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ ...tableHeaderStyle, position: "static" }}>Teilnehmer</div>
+            <div style={{ ...tableHeaderStyle, position: "static" }}>Vorlauf</div>
+            <div style={{ ...tableHeaderStyle, position: "static" }}>Final-/Halbfinal-Logik</div>
+            {formatRows.map((row) => (
+              <React.Fragment key={row.count}>
+                <div style={{ ...tableCellStyle, padding: "10px 12px", fontWeight: 950 }}>{row.count}</div>
+                <div style={{ ...tableCellStyle, padding: "10px 12px", fontWeight: 800 }}>{row.motos}</div>
+                <div style={{ ...tableCellStyle, padding: "10px 12px", fontWeight: 800 }}>{row.finals}</div>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 14, alignItems: "start" }}>
           <div style={{ ...basePanelStyle }}>
-            <h3 style={{ marginTop: 0, color: colors.title }}>Race-Wertung</h3>
+            <h3 style={{ marginTop: 0, color: colors.title }}>Motos, Finals und Halbfinals</h3>
             <ul style={{ marginBottom: 0, lineHeight: 1.7, fontWeight: 800 }}>
-              <li>In den Motos werden eingegebene Ränge als Rangpunkte gezählt.</li>
-              <li>DNF und DNS zählen im einzelnen Race mit 10 Punkten.</li>
-              <li>DSQ zählt im einzelnen Race mit 50 Punkten und wird dadurch ans Ende gesetzt.</li>
-              <li>Finalresultate bestimmen die endgültige Race-Rangliste.</li>
-              <li>B-Final wird hinter A-Final gewertet: Gewinner B-Final entspricht Rang 9.</li>
-              <li>C-Final wird entsprechend hinter B-Final gewertet.</li>
+              <li>Pro Kategorie oder zusammengelegter Laufgruppe sind maximal {MAX_RIDERS_PER_RACE_CATEGORY} Teilnehmer erlaubt.</li>
+              <li>Die App erstellt grundsätzlich 3 Motos. Pro Laufgruppe sind maximal 8 Fahrer vorgesehen.</li>
+              <li>In den Motos werden eingegebene Ränge als Rangpunkte gezählt: 1. Platz = 1 Punkt, 2. Platz = 2 Punkte usw.</li>
+              <li>DNF zählt in den Motos mit 10 Punkten, DSQ mit 50 Punkten.</li>
+              <li>DNS in einem Final-/Endresultat wird nicht in der Race-Rangliste geführt und erhält keine Gesamtwertungspunkte für dieses Rennen.</li>
+              <li>Ab 20 Teilnehmern gehen die besten 16 Fahrer nach den Motos in zwei Halbfinals.</li>
+              <li>Aus den Halbfinals kommen die besten 4 Fahrer pro Halbfinal in den A-Final; die restlichen gewerteten Fahrer kommen in den B-Final.</li>
+              <li>Fahrer ab Rang 17 nach den Motos fahren je nach Anzahl C-Final und D-Final.</li>
             </ul>
           </div>
 
@@ -7756,28 +7977,28 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 </React.Fragment>
               ))}
             </div>
-            <div style={{ ...helperTextStyle, marginTop: 10 }}>Ab Rang 10 wird die Punktzahl nach der hinterlegten Formel weiter reduziert.</div>
+            <div style={{ ...helperTextStyle, marginTop: 10 }}>Ab Rang 10 wird die Punktzahl nach der hinterlegten Formel weiter reduziert. DNS wird nicht gewertet.</div>
           </div>
         </div>
 
         <div style={{ ...basePanelStyle, marginTop: 14 }}>
-          <h3 style={{ marginTop: 0, color: colors.title }}>Gesamtwertung und Streichresultate</h3>
+          <h3 style={{ marginTop: 0, color: colors.title }}>Endrangliste und Gesamtwertung</h3>
           <ul style={{ marginBottom: 0, lineHeight: 1.7, fontWeight: 800 }}>
+            <li>Finalresultate bestimmen die endgültige Race-Rangliste.</li>
+            <li>A-Final steht vor B-Final, B-Final vor C-Final, C-Final vor D-Final.</li>
+            <li>Halbfinals sind Qualifikationsläufe und erscheinen nicht als eigene Endranglisten-Blöcke.</li>
+            <li>Bei Kategorien mit 1–8 Teilnehmern zählt der 4. Moto als Endlauf.</li>
             <li>Bei einer Rennserie wird eingestellt, wie viele Rennen zur Gesamtwertung zählen.</li>
-            <li>Für jeden Fahrer werden die besten Resultate gemäss Einstellung gezählt.</li>
-            <li>Nicht zählende Resultate werden als Streichresultate in Klammern angezeigt.</li>
             <li>Für die Gesamtwertung werden nur abgeschlossene Rennen berücksichtigt.</li>
-            <li>Bei Punktegleichheit entscheidet zuerst das bessere Streichresultat.</li>
-            <li>Gibt es mehrere Streichresultate, werden diese nacheinander verglichen.</li>
-            <li>Danach entscheidet das beste Einzelresultat, danach das letzte gefahrene Resultat.</li>
-            <li>Bei vollständiger Serie werden Fahrer mit zu wenigen Resultaten nicht mehr in der Gesamtwertung geführt.</li>
+            <li>Nicht zählende Resultate werden als Streichresultate in Klammern angezeigt.</li>
+            <li>Bei Punktegleichheit entscheidet zuerst das bessere Streichresultat, danach weitere Streichresultate, danach das beste Einzelresultat und danach das letzte gefahrene Resultat.</li>
           </ul>
         </div>
 
         <div style={{ ...basePanelStyle, marginTop: 14, borderLeft: `6px solid ${colors.warningBorder}`, background: colors.warningBg }}>
           <h3 style={{ marginTop: 0, color: colors.title }}>Hinweis</h3>
           <div style={{ ...helperTextStyle, color: "#92400e" }}>
-            Dieses Reglement beschreibt die in der App umgesetzte Logik. Falls eure Rennserie ein offizielles Vereins- oder Verbandsreglement hat, sollte diese Seite entsprechend angepasst werden.
+            Dieses Renn-Reglement beschreibt die in der App umgesetzte Logik. Falls eure Rennserie ein offizielles Vereins- oder Verbandsreglement hat, sollte diese Seite entsprechend angepasst werden.
           </div>
         </div>
         {versionFooter}
@@ -8959,6 +9180,18 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             >
               Finals erstellen
             </button>
+            <button
+              onClick={createMainFinalsFromSemifinals}
+              disabled={raceClosed || !Object.values(finals || {}).some((rounds: any) => isSemifinalProgram(rounds) && !rounds?.["A-Final"])}
+              style={
+                raceClosed || !Object.values(finals || {}).some((rounds: any) => isSemifinalProgram(rounds) && !rounds?.["A-Final"])
+                  ? compactDisabledButtonStyle
+                  : { ...compactPrimaryButtonStyle, minHeight: 52 }
+              }
+              title="Nach erfassten Halbfinalresultaten A- und B-Finals erstellen"
+            >
+              A/B-Finals erstellen
+            </button>
             <button onClick={exportFinalsStartPdf} style={{ ...compactHomeButtonStyle, minHeight: 52 }}>
               Finals PDF
             </button>
@@ -9499,7 +9732,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                   {getFinalCategoryLabel(cat)}
                 </h3>
 
-                {["Manuelle Rangliste", "4. Vorlauf", "C-Final", "B-Final", "A-Final"].map(
+                {FINAL_DISPLAY_ROUND_ORDER.map(
                   (roundName) => {
                     const heat = finals[cat]?.[roundName];
                     if (!heat || heat.length === 0) return null;
