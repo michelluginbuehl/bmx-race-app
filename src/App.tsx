@@ -8,7 +8,7 @@ import ReleaseNotes from "./components/ReleaseNotes";
 import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KEYS } from "./config/appConfig";
 import { appStorage, encodeStorageValue } from "./utils/storage";
 import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
-import { createOnlineBackup, deactivatePublicLiveRace, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, loadPublicLiveRace, publishPublicLiveRace, saveOnlineAppState, setOnlineStorageAuthToken, type OnlineBackupListItem, type OnlineStorageStatus, type PublicLiveRacePayload } from "./utils/onlineStorage";
+import { createOnlineBackup, deactivatePublicLiveRace, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, loadPublicLiveRace, loadPublicLiveRaceMeta, publishPublicLiveRace, saveOnlineAppState, setOnlineStorageAuthToken, type OnlineBackupListItem, type OnlineStorageStatus, type PublicLiveRaceMeta, type PublicLiveRacePayload } from "./utils/onlineStorage";
 import { refreshFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -125,6 +125,30 @@ const FINAL_RESULT_ROUND_NAMES = [
   "4. Vorlauf",
 ] as const;
 
+const PUBLIC_LIVE_RACE_REFRESH_SECONDS = 30;
+const PUBLIC_LIVE_STARTLIST_REFRESH_SECONDS = 3600;
+const PUBLIC_LIVE_BACKGROUND_REFRESH_SECONDS = 300;
+
+const publicLiveHasRaceProgram = (liveRace: any, meta?: PublicLiveRaceMeta | null): boolean => {
+  if (meta?.hasRaceProgram === true || liveRace?.hasRaceProgram === true) return true;
+
+  const hasMotos = Array.isArray(liveRace?.motos) && liveRace.motos.some((categoryBlock: any) =>
+    Array.isArray(categoryBlock?.runs) && categoryBlock.runs.some((run: any) =>
+      Array.isArray(run?.races) && run.races.length > 0,
+    ),
+  );
+  const hasFinals = Array.isArray(liveRace?.finals) && liveRace.finals.some((categoryBlock: any) =>
+    Array.isArray(categoryBlock?.rounds) && categoryBlock.rounds.length > 0,
+  );
+
+  return hasMotos || hasFinals;
+};
+
+const getPublicLiveRefreshSeconds = (liveRace: any, meta?: PublicLiveRaceMeta | null, tabVisible = true): number => {
+  if (!tabVisible) return PUBLIC_LIVE_BACKGROUND_REFRESH_SECONDS;
+  return publicLiveHasRaceProgram(liveRace, meta) ? PUBLIC_LIVE_RACE_REFRESH_SECONDS : PUBLIC_LIVE_STARTLIST_REFRESH_SECONDS;
+};
+
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState<RaceName>("Race 1");
@@ -229,9 +253,12 @@ export default function App() {
   const [dataRepairMessage, setDataRepairMessage] = useState("");
   const [isPublicLiveView, setIsPublicLiveView] = useState(() => typeof window !== "undefined" && window.location.hash.toLowerCase() === "#live");
   const [publicLiveRace, setPublicLiveRace] = useState<PublicLiveRacePayload | null>(null);
+  const [publicLiveMeta, setPublicLiveMeta] = useState<PublicLiveRaceMeta | null>(null);
   const [publicLiveLoading, setPublicLiveLoading] = useState(false);
   const [publicLiveMessage, setPublicLiveMessage] = useState("");
   const [publicLiveCheckedAt, setPublicLiveCheckedAt] = useState("");
+  const [publicLiveFullLoadedAt, setPublicLiveFullLoadedAt] = useState("");
+  const [publicLiveTabVisible, setPublicLiveTabVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
   const [adminLiveRace, setAdminLiveRace] = useState<PublicLiveRacePayload | null>(null);
   const [liveRaceMessage, setLiveRaceMessage] = useState("");
   const [liveRaceLoading, setLiveRaceLoading] = useState(false);
@@ -306,6 +333,7 @@ export default function App() {
     window.addEventListener("hashchange", updateLiveRoute);
     return () => window.removeEventListener("hashchange", updateLiveRoute);
   }, []);
+
 
   const getRiderGenderCode = (rider: any) => {
     const value = String(rider?.gender || rider?.geschlecht || "")
@@ -451,10 +479,10 @@ export default function App() {
       });
     });
 
-  const scrollToSection = (id: string) => {
+  const scrollToSection = (id: string, block: ScrollLogicalPosition = "start") => {
     document
       .getElementById(id)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      ?.scrollIntoView({ behavior: "smooth", block });
   };
 
   const addChangeLog = (text: string) => {
@@ -3127,6 +3155,9 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
   const getFinalEntryKey = (cat: string, roundName: string) =>
     `final|${cat}_${roundName}`;
 
+  const getRaceFlowSectionId = (entryKey: string) =>
+    `race-flow-${String(entryKey || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+
   const getFinalFlowRoundNames = (rounds: Record<string, any[]> | undefined, aFinalBlock = false) => {
     if (!rounds) return [] as string[];
     const order = aFinalBlock
@@ -3144,12 +3175,13 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
       sortCategories(Object.keys(heats || {})).forEach((cat) => {
         ((heats?.[cat]?.[runIndex] || []) as any[]).forEach((group: any[], heatIndex: number) => {
           const resultKey = `${cat}_${runIndex}_${heatIndex}`;
+          const entryKey = getMotoEntryKey(cat, runIndex, heatIndex);
           entries.push({
-            key: getMotoEntryKey(cat, runIndex, heatIndex),
+            key: entryKey,
             type: "moto",
             category: cat,
             label: `Moto ${runIndex + 1} · Race ${getSequentialHeatRaceNumber(heats, cat, runIndex, heatIndex)}`,
-            sectionId: `vorlauf-${runIndex + 1}`,
+            sectionId: getRaceFlowSectionId(entryKey),
             startList: group || [],
             result: Array.isArray(resultData[resultKey]) ? resultData[resultKey] : [],
           });
@@ -3161,12 +3193,13 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     finalCategories.forEach((cat) => {
       getFinalFlowRoundNames(finals?.[cat], false).forEach((roundName) => {
         const resultKey = `${cat}_${roundName}`;
+        const entryKey = getFinalEntryKey(cat, roundName);
         entries.push({
-          key: getFinalEntryKey(cat, roundName),
+          key: entryKey,
           type: "final",
           category: cat,
           label: `${getRoundDisplayName(roundName)} · ${getFinalCategoryLabel(cat)}`,
-          sectionId: "finallaeufe",
+          sectionId: getRaceFlowSectionId(entryKey),
           startList: finals?.[cat]?.[roundName] || [],
           result: Array.isArray(finalResultData[resultKey]) ? finalResultData[resultKey] : [],
         });
@@ -3175,12 +3208,13 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     finalCategories.forEach((cat) => {
       getFinalFlowRoundNames(finals?.[cat], true).forEach((roundName) => {
         const resultKey = `${cat}_${roundName}`;
+        const entryKey = getFinalEntryKey(cat, roundName);
         entries.push({
-          key: getFinalEntryKey(cat, roundName),
+          key: entryKey,
           type: "final",
           category: cat,
           label: `${getRoundDisplayName(roundName)} · ${getFinalCategoryLabel(cat)}`,
-          sectionId: "finallaeufe",
+          sectionId: getRaceFlowSectionId(entryKey),
           startList: finals?.[cat]?.[roundName] || [],
           result: Array.isArray(finalResultData[resultKey]) ? finalResultData[resultKey] : [],
         });
@@ -3210,7 +3244,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     const next = getNextOpenRaceFlowEntryAfter(currentKey, entries);
     setActiveRaceEntryKey(next?.key || "");
     if (next?.sectionId) {
-      window.setTimeout(() => scrollToSection(next.sectionId), 120);
+      window.setTimeout(() => scrollToSection(`${next.sectionId}-input`, "center"), 260);
     }
   };
 
@@ -3674,6 +3708,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     setManualResultsMode(false);
     setManualResultOrder({});
     addChangeLog(`${selectedRace}: Manuelle Rangliste erstellt`);
+    triggerAutomaticLivePublish(750);
     setTimeout(() => scrollToSection("resultate"), 0);
   };
 
@@ -3707,6 +3742,7 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     setManualResultsMode(false);
     setManualResultOrder({});
     addChangeLog(`${selectedRace}: Motos erstellt`);
+    triggerAutomaticLivePublish(750);
   };
 
   const getFirstFreeGate = (group: any[]) => {
@@ -3991,6 +4027,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     const startList = heats?.[cat]?.[run]?.[heatIndex] || [];
     if (isCompleteRaceEntry(startList, data)) {
       activateNextRaceFlowEntryAfter(entryKey, nextResults, finalResults);
+      triggerAutomaticLivePublish(650);
     } else {
       setActiveRaceEntryKey(entryKey);
     }
@@ -4014,6 +4051,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     const startList = finals?.[cat]?.[roundName] || [];
     if (isCompleteRaceEntry(startList, data)) {
       activateNextRaceFlowEntryAfter(entryKey, results, nextFinalResults);
+      triggerAutomaticLivePublish(650);
     } else {
       setActiveRaceEntryKey(entryKey);
     }
@@ -4216,6 +4254,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     setManualResultsMode(false);
     setManualResultOrder({});
     addChangeLog(`${selectedRace}: Finals erstellt`);
+    triggerAutomaticLivePublish(750);
   };
 
   const groupedAll = useMemo(() => {
@@ -5119,6 +5158,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
     return (
       <details
+        id={getRaceFlowSectionId(entryKey)}
         key={key}
         open={isRaceFlowEntryActive(entryKey)}
         onToggle={(event) => {
@@ -5157,7 +5197,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
           {renderSavedResult(result)}
         </div>
 
-        <div style={{ marginTop: 16 }}>
+        <div id={`${getRaceFlowSectionId(entryKey)}-input`} style={{ marginTop: 16, scrollMarginTop: 120 }}>
           <HeatInput
             heat={heat}
             value={result}
@@ -6945,9 +6985,13 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         })).filter((categoryBlock) => categoryBlock.rows.length > 0)
       : [];
 
+    const publicLiveHasRaceProgram = publicMotos.length > 0 || publicFinals.length > 0;
+
     return {
-      publicVersion: 1,
+      publicVersion: 3,
       active: true,
+      refreshSeconds: publicLiveHasRaceProgram ? PUBLIC_LIVE_RACE_REFRESH_SECONDS : PUBLIC_LIVE_STARTLIST_REFRESH_SECONDS,
+      hasRaceProgram: publicLiveHasRaceProgram,
       publishedAt: nowIso,
       updatedAt: nowIso,
       appName: APP_NAME,
@@ -7010,7 +7054,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
       const payload = buildPublicLiveRacePayload();
       const result = await publishPublicLiveRace(payload);
       if (!result.ok) throw new Error(result.message || "Live-Rennen konnte nicht veröffentlicht werden.");
-      const updatedPayload = { ...payload, updatedAt: result.updatedAt || payload.updatedAt, active: true };
+      const updatedPayload = { ...payload, updatedAt: result.updatedAt || payload.updatedAt, liveVersion: result.liveVersion || payload.liveVersion, active: true };
       setAdminLiveRace(updatedPayload);
       setLiveRaceMessage(
         manual
@@ -7033,6 +7077,17 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   liveAutoPublishCallbackRef.current = async () => {
     await publishCurrentRaceLiveSnapshot({ manual: false, showLoading: false, saveLocalFirst: false });
+  };
+
+  const triggerAutomaticLivePublish = (delayMs = 500) => {
+    if (!firebaseAuthReady || !isFirebaseSignedIn || !isCurrentRaceLive) return;
+    if (liveAutoPublishInProgressRef.current) return;
+    liveAutoPublishInProgressRef.current = true;
+    window.setTimeout(() => {
+      liveAutoPublishCallbackRef.current().finally(() => {
+        liveAutoPublishInProgressRef.current = false;
+      });
+    }, delayMs);
   };
 
   const publishCurrentRaceLive = async () => {
@@ -7075,28 +7130,98 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     try {
       if (showLoading) setPublicLiveLoading(true);
       const result = await loadPublicLiveRace();
-      setPublicLiveCheckedAt(new Date().toISOString());
+      const checkedIso = new Date().toISOString();
+      setPublicLiveCheckedAt(checkedIso);
       if (result.ok && result.active && result.data) {
         setPublicLiveRace(result.data);
+        setPublicLiveMeta({
+          liveVersion: Number(result.data.liveVersion || 0),
+          active: true,
+          updatedAt: result.updatedAt || result.data.updatedAt,
+          appName: result.data.appName,
+          appVersion: result.data.appVersion,
+          eventId: result.data.eventId,
+          eventName: result.data.eventName,
+          raceName: result.data.raceName,
+          raceStatus: result.data.raceStatus,
+          participantCount: result.data.participantCount,
+          hasRaceProgram: publicLiveHasRaceProgram(result.data),
+        });
+        setPublicLiveFullLoadedAt(checkedIso);
         setPublicLiveMessage(result.message);
       } else {
         setPublicLiveRace(null);
+        setPublicLiveMeta(null);
+        setPublicLiveFullLoadedAt("");
         setPublicLiveMessage(result.message || "Aktuell ist kein Rennen live veröffentlicht.");
       }
     } catch (error: any) {
       setPublicLiveRace(null);
+      setPublicLiveMeta(null);
       setPublicLiveMessage(error?.message || "Live-Rennen konnte nicht geladen werden.");
     } finally {
       if (showLoading) setPublicLiveLoading(false);
     }
   };
 
+  const checkPublicLiveRaceMeta = async () => {
+    try {
+      const result = await loadPublicLiveRaceMeta();
+      setPublicLiveCheckedAt(new Date().toISOString());
+
+      if (!result.ok) {
+        setPublicLiveMessage(result.message || "Live-Status konnte nicht geprüft werden.");
+        return;
+      }
+
+      if (!result.exists && publicLiveRace) {
+        await refreshPublicLiveRace(false);
+        return;
+      }
+
+      if (!result.active || !result.data) {
+        setPublicLiveRace(null);
+        setPublicLiveMeta(result.data || null);
+        setPublicLiveFullLoadedAt("");
+        setPublicLiveMessage(result.message || "Aktuell ist kein Rennen live veröffentlicht.");
+        return;
+      }
+
+      setPublicLiveMeta(result.data);
+      const currentVersion = Number(publicLiveRace?.liveVersion || 0);
+      const nextVersion = Number(result.data.liveVersion || 0);
+      const versionChanged = nextVersion > 0 && nextVersion !== currentVersion;
+      const updatedAtChanged = Boolean(result.data.updatedAt && publicLiveRace?.updatedAt && result.data.updatedAt !== publicLiveRace.updatedAt);
+
+      if (!publicLiveRace || versionChanged || updatedAtChanged) {
+        await refreshPublicLiveRace(false);
+      } else {
+        setPublicLiveMessage("Live-Status geprüft. Keine neuen Daten vorhanden.");
+      }
+    } catch (error: any) {
+      setPublicLiveMessage(error?.message || "Live-Status konnte nicht geprüft werden.");
+    }
+  };
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const updateVisibility = () => setPublicLiveTabVisible(document.visibilityState !== "hidden");
+    updateVisibility();
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => document.removeEventListener("visibilitychange", updateVisibility);
+  }, []);
+
   useEffect(() => {
     if (!isPublicLiveView) return;
     refreshPublicLiveRace(true);
-    const timer = window.setInterval(() => refreshPublicLiveRace(false), 30_000);
-    return () => window.clearInterval(timer);
   }, [isPublicLiveView]);
+
+  useEffect(() => {
+    if (!isPublicLiveView) return;
+    const intervalSeconds = getPublicLiveRefreshSeconds(publicLiveRace, publicLiveMeta, publicLiveTabVisible);
+    const timer = window.setInterval(() => void checkPublicLiveRaceMeta(), intervalSeconds * 1000);
+    return () => window.clearInterval(timer);
+  }, [isPublicLiveView, publicLiveRace?.liveVersion, publicLiveRace?.updatedAt, publicLiveMeta?.liveVersion, publicLiveMeta?.hasRaceProgram, publicLiveTabVisible]);
 
   useEffect(() => {
     if (!firebaseAuthReady || !isFirebaseSignedIn || appShellView !== "manager" || !currentEventId) return;
@@ -7105,17 +7230,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   useEffect(() => {
     if (!firebaseAuthReady || !isFirebaseSignedIn || appShellView !== "manager" || !currentEventId || !isCurrentRaceLive) return;
-    const publishAutomatically = () => {
-      if (liveAutoPublishInProgressRef.current) return;
-      liveAutoPublishInProgressRef.current = true;
-      liveAutoPublishCallbackRef.current().finally(() => {
-        liveAutoPublishInProgressRef.current = false;
-      });
-    };
+    const hasRaceProgram = Object.keys(heats || {}).length > 0 || Object.keys(finals || {}).length > 0;
+    if (hasRaceProgram) return;
 
-    const timer = window.setInterval(publishAutomatically, 30_000);
-    return () => window.clearInterval(timer);
-  }, [firebaseAuthReady, isFirebaseSignedIn, appShellView, currentEventId, selectedRace, isCurrentRaceLive]);
+    const timer = window.setTimeout(() => triggerAutomaticLivePublish(0), 1200);
+    return () => window.clearTimeout(timer);
+  }, [firebaseAuthReady, isFirebaseSignedIn, appShellView, currentEventId, selectedRace, isCurrentRaceLive, riders]);
 
   useEffect(() => {
     if (appShellView !== "events") return;
@@ -7489,7 +7609,18 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             <div>
               <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Öffentliche Live-Ansicht</div>
               <h1 style={{ margin: "6px 0", color: colors.title, fontSize: 30 }}>BMX Race Manager Live</h1>
-              <div style={{ color: colors.muted, fontWeight: 900 }}>Aktualisierung automatisch alle 30 Sekunden</div>
+              <div style={{ color: colors.muted, fontWeight: 900 }}>
+                {getPublicLiveRefreshSeconds(publicLiveRace, publicLiveMeta, publicLiveTabVisible) === PUBLIC_LIVE_BACKGROUND_REFRESH_SECONDS
+                  ? "Browser im Hintergrund: sparsame Live-Prüfung alle 5 Minuten"
+                  : publicLiveHasRaceProgram(publicLiveRace, publicLiveMeta)
+                    ? "Rennen live: alle 30 Sekunden kleine Meta-Prüfung; komplette Daten nur bei Änderung"
+                    : "Startliste: manuell aktualisieren oder automatische Sicherheitsprüfung alle 1 Stunde"}
+              </div>
+              <div style={{ color: colors.muted, fontWeight: 800, fontSize: 13, marginTop: 4 }}>
+                Live-Version: {publicLiveMeta?.liveVersion || publicLiveRace?.liveVersion || "-"}
+                {publicLiveFullLoadedAt ? ` · Voll geladen: ${formatDateTime(publicLiveFullLoadedAt)}` : ""}
+                {publicLiveCheckedAt ? ` · Geprüft: ${formatDateTime(publicLiveCheckedAt)}` : ""}
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button type="button" onClick={() => refreshPublicLiveRace(true)} disabled={publicLiveLoading} style={publicLiveLoading ? compactDisabledButtonStyle : compactHomeButtonStyle}>
@@ -7506,7 +7637,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           <div style={{ ...basePanelStyle, textAlign: "center", padding: 34 }}>
             <h2 style={{ marginTop: 0, color: colors.title }}>Aktuell ist kein Rennen live veröffentlicht</h2>
             <div style={{ color: colors.muted, fontWeight: 900, lineHeight: 1.45 }}>
-              Sobald die Rennleitung ein Rennen live aktiviert, erscheinen hier Motos, Startlisten, Resultate und Finals.
+              Sobald die Rennleitung ein Rennen live aktiviert, erscheinen hier zuerst die Startliste und danach Motos, Resultate und Finals.
             </div>
             {publicLiveMessage && <div style={{ marginTop: 14, color: colors.muted, fontWeight: 800 }}>{publicLiveMessage}</div>}
           </div>
@@ -7537,6 +7668,23 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 </div>
               </div>
             </div>
+
+            {(!publicLiveRace.motos?.length && !publicLiveRace.finals?.length && publicLiveRace.categories?.length > 0) && (
+              <div style={{ ...basePanelStyle, marginBottom: 18 }}>
+                <h2 style={{ ...sectionTitleStyle }}>Aktuelle Startliste</h2>
+                <div style={{ color: colors.muted, fontWeight: 900, marginBottom: 12 }}>
+                  Motos wurden noch nicht erstellt. Sichtbar ist die aktuelle Teilnehmerliste nach Kategorien.
+                </div>
+                <div style={{ display: "grid", gap: 12 }}>
+                  {publicLiveRace.categories.map((categoryBlock: any) => (
+                    <div key={`live-category-${categoryBlock.category}`} style={publicLivePanelStyle}>
+                      <h3 style={{ margin: "0 0 8px", color: colors.title }}>{categoryBlock.category}</h3>
+                      {renderPublicLiveRows(categoryBlock.riders || [], "start")}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {publicLiveRace.motos?.length > 0 && (
               <div style={{ ...basePanelStyle, marginBottom: 18 }}>
@@ -7641,7 +7789,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             )}
 
-            {(!publicLiveRace.motos?.length && !publicLiveRace.finals?.length && !publicLiveRace.finalRankings?.length) && (
+            {(!publicLiveRace.motos?.length && !publicLiveRace.finals?.length && !publicLiveRace.finalRankings?.length && !publicLiveRace.categories?.length) && (
               <div style={{ ...basePanelStyle, textAlign: "center", padding: 24 }}>
                 <h2 style={{ marginTop: 0, color: colors.title }}>Live-Rennen ist aktiv</h2>
                 <div style={{ color: colors.muted, fontWeight: 900 }}>Motos oder Resultate wurden noch nicht veröffentlicht.</div>
@@ -9853,12 +10001,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                   {isCurrentRaceLive ? `Dieses Rennen ist live veröffentlicht` : adminLiveRace?.active ? `Anderes Rennen ist live: ${adminLiveRace.eventName} · ${adminLiveRace.raceName}` : "Kein Rennen live veröffentlicht"}
                 </div>
                 <div style={{ color: colors.muted, fontSize: 13, fontWeight: 850, marginTop: 4 }}>
-                  Öffentlich sichtbar: Motos, Startlisten, Resultate und Finals. Nicht sichtbar: Teilnehmerdatenbank, Gesamtwertung, Backups und Bearbeitung.
-                  {isCurrentRaceLive ? " Automatische Live-Aktualisierung alle 30 Sekunden ist aktiv." : ""}
+                  Öffentlich sichtbar: Motos, Startlisten, Resultate und Finals. Vor dem Rennen wird die Startliste nur manuell bzw. stündlich nachgeladen; während dem Rennen aktualisiert die Zuschaueransicht alle 30 Sekunden.
+                  {isCurrentRaceLive ? " Die Admin-App veröffentlicht automatisch nach Moto-/Laufabschluss und bei Startlistenänderungen vor der Moto-Erstellung." : ""}
                 </div>
                 {liveRaceMessage && <div style={{ color: colors.muted, fontSize: 13, fontWeight: 850, marginTop: 4 }}>{liveRaceMessage}</div>}
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
                 <button type="button" onClick={publishCurrentRaceLive} disabled={liveRaceLoading || !isFirebaseSignedIn} style={liveRaceLoading || !isFirebaseSignedIn ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 42 }}>
                   {isCurrentRaceLive ? "Jetzt live aktualisieren" : "Dieses Rennen live veröffentlichen"}
                 </button>
@@ -10269,6 +10417,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
                         return (
                           <details
+                            id={getRaceFlowSectionId(entryKey)}
                             key={key}
                             open={isRaceFlowEntryActive(entryKey)}
                             onToggle={(event) => {
@@ -10306,7 +10455,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                               {renderSavedResult(result)}
                             </div>
 
-                            <div style={{ marginTop: 16 }}>
+                            <div id={`${getRaceFlowSectionId(entryKey)}-input`} style={{ marginTop: 16, scrollMarginTop: 120 }}>
                               <HeatInput
                                 heat={group}
                                 value={result}
