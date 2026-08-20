@@ -8,16 +8,28 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.12.1",
+    title: "Live-Ansicht bereinigt und Rennmenü kompakter",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "Beamer-/TV-Modus aus der öffentlichen Live-Ansicht entfernt.",
+      "Live-Ansicht bleibt mit Fahrer-Suche, Mein Fahrer, Kategorie-Filter und QR-Code erhalten.",
+      "Obere Rennseiten-Buttonleiste unter dem Header kompakter gestaltet, damit Home, Speichern, Motos erstellen und weitere Rennaktionen besser über die verfügbare Breite passen.",
+      "Keine Änderung an Rennlogik, Einteilung, Punktewertung, Login oder Online-Speicher.",
+    ],
+  },
+  {
     version: "v1.12",
     title: "Datenprüfung, Live-Suche, PDF-Layout und Konfliktschutz",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "Datenprüfung erweitert: Teilnehmer-IDs, doppelte Startnummern pro Kategorie, Kategorien über 32 Fahrer, verwaiste Moto-/Final-Einträge und Halbfinal-/Finalstatus werden geprüft.",
       "Datenprüfung zeigt neu Fehler-, Warnungs-, Info- und Reparatur-Zähler.",
       "Öffentliche Live-Ansicht ergänzt: Fahrer-/Startnummer-Suche, Button Mein Fahrer, Kategorie-Filter und automatische Scrollposition zum aktuellen Lauf.",
       "Mein Fahrer zeigt Motos, Finals, Resultate und den nächsten Einsatz eines Fahrers an.",
-      "Beamer-/TV-Modus und QR-Code zur Live-Ansicht ergänzt.",
+      "QR-Code zur Live-Ansicht ergänzt.",
       "Hinweis Live beendet klarer dargestellt.",
       "PDF-Layout mit modernerem Kopfbereich, Race-/Ort-/Datum-Information und sauberer Trennlinie verbessert.",
       "Konfliktschutz für mehrere Geräte ergänzt: App warnt, wenn Online-Daten seit der letzten bekannten Speicherung von einem anderen Gerät geändert wurden.",
