@@ -165,6 +165,7 @@ export default function App() {
   const [raceClosed, setRaceClosed] = useState(false);
   const [selectedRiderInfo, setSelectedRiderInfo] = useState<any | null>(null);
   const [raceNavigationOpen, setRaceNavigationOpen] = useState(false);
+  const [activeRaceEntryKey, setActiveRaceEntryKey] = useState<string>("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [eventSearch, setEventSearch] = useState("");
   const [showEventCreateChoice, setShowEventCreateChoice] = useState(false);
@@ -3107,6 +3108,173 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     return `${finalCategory} + ${originals.filter((cat) => cat !== finalCategory).join(" + ")}`;
   };
 
+  type RaceFlowEntry = {
+    key: string;
+    type: "moto" | "final";
+    category: string;
+    label: string;
+    sectionId: string;
+    startList: any[];
+    result: any[];
+  };
+
+  const isCompleteRaceEntry = (startList: any[] = [], result: any[] = []) =>
+    startList.length > 0 && result.length >= startList.length;
+
+  const getMotoEntryKey = (cat: string, runIndex: number, heatIndex: number) =>
+    `moto|${cat}_${runIndex}_${heatIndex}`;
+
+  const getFinalEntryKey = (cat: string, roundName: string) =>
+    `final|${cat}_${roundName}`;
+
+  const getFinalFlowRoundNames = (rounds: Record<string, any[]> | undefined, aFinalBlock = false) => {
+    if (!rounds) return [] as string[];
+    const order = aFinalBlock
+      ? ["4. Vorlauf", "A-Final"]
+      : ["Manuelle Rangliste", "Halbfinal 1", "Halbfinal 2", "D-Final", "C-Final", "B-Final"];
+    return order.filter((roundName) => Array.isArray(rounds[roundName]) && rounds[roundName].length > 0);
+  };
+
+  const getRaceFlowEntries = (overrideResults?: any, overrideFinalResults?: any): RaceFlowEntry[] => {
+    const resultData = overrideResults || results || {};
+    const finalResultData = overrideFinalResults || finalResults || {};
+    const entries: RaceFlowEntry[] = [];
+
+    [0, 1, 2].forEach((runIndex) => {
+      sortCategories(Object.keys(heats || {})).forEach((cat) => {
+        ((heats?.[cat]?.[runIndex] || []) as any[]).forEach((group: any[], heatIndex: number) => {
+          const resultKey = `${cat}_${runIndex}_${heatIndex}`;
+          entries.push({
+            key: getMotoEntryKey(cat, runIndex, heatIndex),
+            type: "moto",
+            category: cat,
+            label: `Moto ${runIndex + 1} · Race ${getSequentialHeatRaceNumber(heats, cat, runIndex, heatIndex)}`,
+            sectionId: `vorlauf-${runIndex + 1}`,
+            startList: group || [],
+            result: Array.isArray(resultData[resultKey]) ? resultData[resultKey] : [],
+          });
+        });
+      });
+    });
+
+    const finalCategories = sortCategories(Object.keys(finals || {}));
+    finalCategories.forEach((cat) => {
+      getFinalFlowRoundNames(finals?.[cat], false).forEach((roundName) => {
+        const resultKey = `${cat}_${roundName}`;
+        entries.push({
+          key: getFinalEntryKey(cat, roundName),
+          type: "final",
+          category: cat,
+          label: `${getRoundDisplayName(roundName)} · ${getFinalCategoryLabel(cat)}`,
+          sectionId: "finallaeufe",
+          startList: finals?.[cat]?.[roundName] || [],
+          result: Array.isArray(finalResultData[resultKey]) ? finalResultData[resultKey] : [],
+        });
+      });
+    });
+    finalCategories.forEach((cat) => {
+      getFinalFlowRoundNames(finals?.[cat], true).forEach((roundName) => {
+        const resultKey = `${cat}_${roundName}`;
+        entries.push({
+          key: getFinalEntryKey(cat, roundName),
+          type: "final",
+          category: cat,
+          label: `${getRoundDisplayName(roundName)} · ${getFinalCategoryLabel(cat)}`,
+          sectionId: "finallaeufe",
+          startList: finals?.[cat]?.[roundName] || [],
+          result: Array.isArray(finalResultData[resultKey]) ? finalResultData[resultKey] : [],
+        });
+      });
+    });
+
+    return entries;
+  };
+
+  const getFirstOpenRaceFlowEntry = (entries = getRaceFlowEntries()) =>
+    entries.find((entry) => !isCompleteRaceEntry(entry.startList, entry.result));
+
+  const getResolvedActiveRaceEntryKey = (entries = getRaceFlowEntries()) => {
+    const active = entries.find((entry) => entry.key === activeRaceEntryKey);
+    if (active && !isCompleteRaceEntry(active.startList, active.result)) return active.key;
+    return getFirstOpenRaceFlowEntry(entries)?.key || "";
+  };
+
+  const getNextOpenRaceFlowEntryAfter = (currentKey: string, entries = getRaceFlowEntries()) => {
+    const currentIndex = entries.findIndex((entry) => entry.key === currentKey);
+    const ordered = currentIndex >= 0 ? entries.slice(currentIndex + 1) : entries;
+    return ordered.find((entry) => !isCompleteRaceEntry(entry.startList, entry.result)) || getFirstOpenRaceFlowEntry(entries) || null;
+  };
+
+  const activateNextRaceFlowEntryAfter = (currentKey: string, overrideResults?: any, overrideFinalResults?: any) => {
+    const entries = getRaceFlowEntries(overrideResults, overrideFinalResults);
+    const next = getNextOpenRaceFlowEntryAfter(currentKey, entries);
+    setActiveRaceEntryKey(next?.key || "");
+    if (next?.sectionId) {
+      window.setTimeout(() => scrollToSection(next.sectionId), 120);
+    }
+  };
+
+  const isRaceFlowEntryActive = (entryKey: string) =>
+    getResolvedActiveRaceEntryKey() === entryKey;
+
+  const isRaceFlowEntryAtGate = (entryKey: string) => {
+    const entries = getRaceFlowEntries();
+    const activeKey = getResolvedActiveRaceEntryKey(entries);
+    const activeIndex = entries.findIndex((entry) => entry.key === activeKey);
+    if (activeIndex < 0) return false;
+    const nextOpen = entries.slice(activeIndex + 1).find((entry) => !isCompleteRaceEntry(entry.startList, entry.result));
+    return nextOpen?.key === entryKey;
+  };
+
+  const getRaceFlowBadgeLabel = (entryKey: string, complete: boolean) => {
+    if (complete) return "abgeschlossen";
+    if (isRaceFlowEntryActive(entryKey)) return "läuft jetzt";
+    if (isRaceFlowEntryAtGate(entryKey)) return "ans Gate";
+    return "wartet";
+  };
+
+  const getRaceFlowWrapperStyle = (base: React.CSSProperties, entryKey: string, complete: boolean): React.CSSProperties => {
+    if (isRaceFlowEntryActive(entryKey)) {
+      return {
+        ...base,
+        border: `4px solid ${colors.blueBtn}`,
+        background: "#eaf2ff",
+        boxShadow: "0 10px 26px rgba(37,99,235,0.18)",
+      };
+    }
+    if (isRaceFlowEntryAtGate(entryKey)) {
+      return {
+        ...base,
+        border: `4px solid ${colors.redBtn}`,
+        background: "#fff1f1",
+        boxShadow: "0 10px 26px rgba(220,38,38,0.14)",
+      };
+    }
+    if (complete) {
+      return { ...base, opacity: 0.92 };
+    }
+    return base;
+  };
+
+  const getRaceFlowBadgeStyle = (entryKey: string, complete: boolean): React.CSSProperties => {
+    const base: React.CSSProperties = {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      minWidth: 96,
+      padding: "5px 10px",
+      borderRadius: 999,
+      fontSize: 12,
+      fontWeight: 1000,
+      textTransform: "uppercase",
+      letterSpacing: 0.4,
+    };
+    if (complete) return { ...base, background: colors.greenBg, color: colors.greenBtn, border: `1px solid ${colors.greenBorder}` };
+    if (isRaceFlowEntryActive(entryKey)) return { ...base, background: colors.blueBtn, color: "#fff", border: `1px solid ${colors.blueBtn}` };
+    if (isRaceFlowEntryAtGate(entryKey)) return { ...base, background: colors.redBtn, color: "#fff", border: `1px solid ${colors.redBtn}` };
+    return { ...base, background: colors.grayBtn, color: colors.grayBtnText, border: `1px solid ${colors.cardBorder}` };
+  };
+
   useEffect(() => {
     const availableCategories = originalRaceCategories();
     setCategoryMergeTargets((prev) => {
@@ -3123,6 +3291,20 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
     });
     if (cruiserMergeTarget && !mergeableCruiserTargets.includes(cruiserMergeTarget)) setCruiserMergeTarget("");
   }, [riders, cruiserMergeTarget, mergeableCruiserTargets]);
+
+  useEffect(() => {
+    const entries = getRaceFlowEntries();
+    if (entries.length === 0) {
+      if (activeRaceEntryKey) setActiveRaceEntryKey("");
+      return;
+    }
+    const active = entries.find((entry) => entry.key === activeRaceEntryKey);
+    if (!active || isCompleteRaceEntry(active.startList, active.result)) {
+      const firstOpen = getFirstOpenRaceFlowEntry(entries);
+      const nextKey = firstOpen?.key || "";
+      if (nextKey !== activeRaceEntryKey) setActiveRaceEntryKey(nextKey);
+    }
+  }, [heats, results, finals, finalResults, selectedRace]);
 
   const getDuplicatePlateKey = (category: string, plate: string) =>
     `${String(category || "Ohne Kategorie").trim()}|||${String(plate || "").trim()}`;
@@ -3799,10 +3981,19 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       return;
     }
     const key = `${cat}_${run}_${heatIndex}`;
-    setResults((prev: any) => ({
-      ...prev,
+    const entryKey = getMotoEntryKey(cat, run, heatIndex);
+    const nextResults = {
+      ...(results || {}),
       [key]: data,
-    }));
+    };
+    setResults(nextResults);
+
+    const startList = heats?.[cat]?.[run]?.[heatIndex] || [];
+    if (isCompleteRaceEntry(startList, data)) {
+      activateNextRaceFlowEntryAfter(entryKey, nextResults, finalResults);
+    } else {
+      setActiveRaceEntryKey(entryKey);
+    }
   };
 
   const saveFinalResult = (cat: string, roundName: string, data: any[]) => {
@@ -3813,10 +4004,19 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       return;
     }
     const key = `${cat}_${roundName}`;
-    setFinalResults((prev: any) => ({
-      ...prev,
+    const entryKey = getFinalEntryKey(cat, roundName);
+    const nextFinalResults = {
+      ...(finalResults || {}),
       [key]: data,
-    }));
+    };
+    setFinalResults(nextFinalResults);
+
+    const startList = finals?.[cat]?.[roundName] || [];
+    if (isCompleteRaceEntry(startList, data)) {
+      activateNextRaceFlowEntryAfter(entryKey, results, nextFinalResults);
+    } else {
+      setActiveRaceEntryKey(entryKey);
+    }
   };
 
   const getRacePenaltyOrder = (row: any) => {
@@ -4914,19 +5114,41 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     const key = `${cat}_${roundName}`;
     const result = finalResults[key] || [];
 
+    const entryKey = getFinalEntryKey(cat, roundName);
+    const complete = isCompleteRaceEntry(heat, result);
+
     return (
-      <div
+      <details
         key={key}
-        style={getFinalCardStyle(roundName, result.length > 0)}
+        open={isRaceFlowEntryActive(entryKey)}
+        onToggle={(event) => {
+          if ((event.currentTarget as HTMLDetailsElement).open) setActiveRaceEntryKey(entryKey);
+        }}
+        style={getRaceFlowWrapperStyle(getFinalCardStyle(roundName, result.length > 0), entryKey, complete)}
       >
-        <strong
+        <summary
           style={{
-            color: colors.title,
-            fontSize: roundName === "A-Final" || roundName === "Manuelle Rangliste" ? 22 : 18,
+            cursor: "pointer",
+            listStyle: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
           }}
         >
-          {getRoundDisplayName(roundName)}
-        </strong>
+          <strong
+            style={{
+              color: colors.title,
+              fontSize: roundName === "A-Final" || roundName === "Manuelle Rangliste" ? 22 : 18,
+            }}
+          >
+            {getRoundDisplayName(roundName)}
+          </strong>
+          <span style={getRaceFlowBadgeStyle(entryKey, complete)}>
+            {getRaceFlowBadgeLabel(entryKey, complete)}
+          </span>
+        </summary>
 
         <div
           style={{ display: "flex", gap: 20, marginTop: 10 }}
@@ -4945,7 +5167,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
             }
           />
         </div>
-      </div>
+      </details>
     );
   };
 
@@ -6670,7 +6892,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           const key = `${category}_${runIndex}_${heatIndex}`;
           const result = Array.isArray(results?.[key]) ? results[key] : [];
           return {
+            flowKey: getMotoEntryKey(category, runIndex, heatIndex),
             raceNumber: getSequentialHeatRaceNumber(heats, category, runIndex, heatIndex),
+            resultComplete: isCompleteRaceEntry(group || [], result),
             startList: [...(group || [])]
               .sort((a: any, b: any) => Number(a.startPos || 99) - Number(b.startPos || 99))
               .map((rider: any) => getPublicRiderRow(rider)),
@@ -6685,7 +6909,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
       const key = `${category}_${roundName}`;
       const result = Array.isArray(finalResults?.[key]) ? finalResults[key] : [];
       return {
+        flowKey: getFinalEntryKey(category, roundName),
         name: getRoundDisplayName(roundName),
+        resultComplete: isCompleteRaceEntry(heat, result),
         startList: [...heat]
           .sort((a: any, b: any) => Number(a.startPos || 99) - Number(b.startPos || 99))
           .map((rider: any) => getPublicRiderRow(rider)),
@@ -7190,6 +7416,58 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     </div>
   );
 
+  const getPublicLiveFlowState = (liveRace: any) => {
+    const entries: any[] = [];
+    (liveRace?.motos || []).forEach((categoryBlock: any) => {
+      (categoryBlock.runs || []).forEach((run: any) => {
+        (run.races || []).forEach((race: any) => {
+          entries.push({
+            key: race.flowKey || `moto|${categoryBlock.category}|${run.name}|${race.raceNumber}`,
+            complete: Boolean(race.resultComplete || ((race.results || []).length > 0 && (race.results || []).length >= (race.startList || []).length)),
+          });
+        });
+      });
+    });
+    (liveRace?.finals || []).forEach((categoryBlock: any) => {
+      (categoryBlock.rounds || []).forEach((round: any) => {
+        entries.push({
+          key: round.flowKey || `final|${categoryBlock.category}|${round.name}`,
+          complete: Boolean(round.resultComplete || ((round.results || []).length > 0 && (round.results || []).length >= (round.startList || []).length)),
+        });
+      });
+    });
+    const openEntries = entries.filter((entry) => !entry.complete);
+    return {
+      activeKey: openEntries[0]?.key || "",
+      gateKey: openEntries[1]?.key || "",
+    };
+  };
+
+  const getPublicLiveRaceCardStyle = (flowKey: string, flowState: { activeKey: string; gateKey: string }, complete: boolean): React.CSSProperties => {
+    if (flowKey && flowKey === flowState.activeKey) {
+      return { border: `4px solid ${colors.blueBtn}`, borderRadius: 14, padding: 12, background: "#eaf2ff", boxShadow: "0 10px 26px rgba(37,99,235,0.18)" };
+    }
+    if (flowKey && flowKey === flowState.gateKey) {
+      return { border: `4px solid ${colors.redBtn}`, borderRadius: 14, padding: 12, background: "#fff1f1", boxShadow: "0 10px 26px rgba(220,38,38,0.14)" };
+    }
+    return { border: `1px solid ${complete ? colors.greenBorder : colors.cardBorder}`, borderRadius: 14, padding: 12, background: complete ? colors.greenBg : colors.cardSoftBg };
+  };
+
+  const getPublicLiveFlowLabel = (flowKey: string, flowState: { activeKey: string; gateKey: string }, complete: boolean) => {
+    if (complete) return "abgeschlossen";
+    if (flowKey && flowKey === flowState.activeKey) return "läuft jetzt";
+    if (flowKey && flowKey === flowState.gateKey) return "ans Gate";
+    return "wartet";
+  };
+
+  const getPublicLiveFlowLabelStyle = (flowKey: string, flowState: { activeKey: string; gateKey: string }, complete: boolean): React.CSSProperties => {
+    const base: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 96, padding: "5px 10px", borderRadius: 999, fontSize: 12, fontWeight: 1000, textTransform: "uppercase", letterSpacing: 0.4, marginRight: 8 };
+    if (complete) return { ...base, background: colors.greenBg, color: colors.greenBtn, border: `1px solid ${colors.greenBorder}` };
+    if (flowKey && flowKey === flowState.activeKey) return { ...base, background: colors.blueBtn, color: "#fff", border: `1px solid ${colors.blueBtn}` };
+    if (flowKey && flowKey === flowState.gateKey) return { ...base, background: colors.redBtn, color: "#fff", border: `1px solid ${colors.redBtn}` };
+    return { ...base, background: colors.grayBtn, color: colors.grayBtnText, border: `1px solid ${colors.cardBorder}` };
+  };
+
   const renderPublicLiveView = () => (
     <div
       style={{
@@ -7232,7 +7510,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             </div>
             {publicLiveMessage && <div style={{ marginTop: 14, color: colors.muted, fontWeight: 800 }}>{publicLiveMessage}</div>}
           </div>
-        ) : (
+        ) : (() => {
+          const liveFlowState = getPublicLiveFlowState(publicLiveRace);
+          return (
           <>
             <div style={{ ...basePanelStyle, marginBottom: 18 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 12 }}>
@@ -7271,17 +7551,28 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                             <h4 style={{ margin: "4px 0 8px", color: colors.title }}>{run.name}</h4>
                             <div style={{ display: "grid", gap: 12 }}>
                               {run.races.map((race: any) => (
-                                <div key={`${categoryBlock.category}-${run.name}-${race.raceNumber}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
-                                  <strong style={{ color: colors.title }}>Race {race.raceNumber}</strong>
-                                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 }}>
-                                    <div>
-                                      <strong>Startliste</strong>
-                                      {renderPublicLiveRows(race.startList || [], "start")}
-                                    </div>
-                                    <div>
-                                      <strong>Resultat</strong>
-                                      {renderPublicLiveRows(race.results || [], "result")}
-                                    </div>
+                                <div
+                                  key={`${categoryBlock.category}-${run.name}-${race.raceNumber}`}
+                                  style={getPublicLiveRaceCardStyle(race.flowKey, liveFlowState, Boolean(race.resultComplete))}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                                    <strong style={{ color: colors.title }}>Race {race.raceNumber}</strong>
+                                    <span style={getPublicLiveFlowLabelStyle(race.flowKey, liveFlowState, Boolean(race.resultComplete))}>
+                                      {getPublicLiveFlowLabel(race.flowKey, liveFlowState, Boolean(race.resultComplete))}
+                                    </span>
+                                  </div>
+                                  <div style={{ marginTop: 10 }}>
+                                    {(race.results || []).length > 0 ? (
+                                      <>
+                                        <strong>Resultat</strong>
+                                        {renderPublicLiveRows(race.results || [], "result")}
+                                      </>
+                                    ) : (
+                                      <>
+                                        <strong>Startliste / Gate</strong>
+                                        {renderPublicLiveRows(race.startList || [], "start")}
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                               ))}
@@ -7304,17 +7595,28 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                       <h3 style={{ margin: "0 0 10px", color: colors.title }}>{categoryBlock.category}</h3>
                       <div style={{ display: "grid", gap: 12 }}>
                         {categoryBlock.rounds.map((round: any) => (
-                          <div key={`${categoryBlock.category}-${round.name}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: colors.cardSoftBg }}>
-                            <strong style={{ color: colors.title }}>{round.name}</strong>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 }}>
-                              <div>
-                                <strong>Startliste</strong>
-                                {renderPublicLiveRows(round.startList || [], "start")}
-                              </div>
-                              <div>
-                                <strong>Resultat</strong>
-                                {renderPublicLiveRows(round.results || [], "result")}
-                              </div>
+                          <div
+                            key={`${categoryBlock.category}-${round.name}`}
+                            style={getPublicLiveRaceCardStyle(round.flowKey, liveFlowState, Boolean(round.resultComplete))}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                              <strong style={{ color: colors.title }}>{round.name}</strong>
+                              <span style={getPublicLiveFlowLabelStyle(round.flowKey, liveFlowState, Boolean(round.resultComplete))}>
+                                {getPublicLiveFlowLabel(round.flowKey, liveFlowState, Boolean(round.resultComplete))}
+                              </span>
+                            </div>
+                            <div style={{ marginTop: 10 }}>
+                              {(round.results || []).length > 0 ? (
+                                <>
+                                  <strong>Resultat</strong>
+                                  {renderPublicLiveRows(round.results || [], "result")}
+                                </>
+                              ) : (
+                                <>
+                                  <strong>Startliste / Gate</strong>
+                                  {renderPublicLiveRows(round.startList || [], "start")}
+                                </>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -7346,7 +7648,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             )}
           </>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
@@ -9961,14 +10264,36 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                         const key = `${cat}_${runIndex}_${heatIndex}`;
                         const result = results[key] || [];
 
+                        const entryKey = getMotoEntryKey(cat, runIndex, heatIndex);
+                        const complete = isCompleteRaceEntry(group, result);
+
                         return (
-                          <div
+                          <details
                             key={key}
-                            style={getRaceCardStyle(result.length > 0)}
+                            open={isRaceFlowEntryActive(entryKey)}
+                            onToggle={(event) => {
+                              if ((event.currentTarget as HTMLDetailsElement).open) setActiveRaceEntryKey(entryKey);
+                            }}
+                            style={getRaceFlowWrapperStyle(getRaceCardStyle(result.length > 0), entryKey, complete)}
                           >
-                            <strong style={{ color: colors.title }}>
-                              Race {getSequentialHeatRaceNumber(heats, cat, runIndex, heatIndex)}
-                            </strong>
+                            <summary
+                              style={{
+                                cursor: "pointer",
+                                listStyle: "none",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 12,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <strong style={{ color: colors.title }}>
+                                Race {getSequentialHeatRaceNumber(heats, cat, runIndex, heatIndex)}
+                              </strong>
+                              <span style={getRaceFlowBadgeStyle(entryKey, complete)}>
+                                {getRaceFlowBadgeLabel(entryKey, complete)}
+                              </span>
+                            </summary>
 
                             <div
                               style={{
@@ -9990,7 +10315,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                                 }
                               />
                             </div>
-                          </div>
+                          </details>
                         );
                       },
                     )}
@@ -10005,7 +10330,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           <div id="finallaeufe" style={{ marginTop: 40, scrollMarginTop: 120 }}>
             <h2 style={{ color: colors.title }}>🏁 Finals</h2>
             <div style={{ ...helperTextStyle, marginBottom: 14 }}>
-              Bei Halbfinal-Kategorien werden C- und D-Finals erst nach vollständig erfassten Halbfinals freigeschaltet. Danach erscheinen zuerst D-, C- und B-Finals je Kategorie; alle A-Finals sowie 4. Motos werden am Schluss gesammelt angezeigt.
+              Der 4. Moto wird nur im Finalblock gefahren. Abgeschlossene Läufe klappen automatisch zu; der nächste offene Lauf bleibt geöffnet. Bei Halbfinal-Kategorien werden C- und D-Finals erst nach vollständig erfassten Halbfinals freigeschaltet. Danach erscheinen zuerst D-, C- und B-Finals je Kategorie; alle A-Finals sowie 4. Motos werden am Schluss gesammelt angezeigt.
             </div>
 
             {sortCategories(Object.keys(finals)).map((cat) => {
