@@ -259,6 +259,12 @@ export default function App() {
   const [publicLiveCheckedAt, setPublicLiveCheckedAt] = useState("");
   const [publicLiveFullLoadedAt, setPublicLiveFullLoadedAt] = useState("");
   const [publicLiveTabVisible, setPublicLiveTabVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
+  const [publicLiveSearch, setPublicLiveSearch] = useState("");
+  const [publicLiveCategoryFilter, setPublicLiveCategoryFilter] = useState("all");
+  const [publicLiveMyRiderQuery, setPublicLiveMyRiderQuery] = useState("");
+  const [publicLiveTvMode, setPublicLiveTvMode] = useState(false);
+  const [deviceName, setDeviceName] = useState(() => appStorage.getItem("bmx_device_name") || "");
+  const [saveConflictMessage, setSaveConflictMessage] = useState("");
   const [adminLiveRace, setAdminLiveRace] = useState<PublicLiveRacePayload | null>(null);
   const [liveRaceMessage, setLiveRaceMessage] = useState("");
   const [liveRaceLoading, setLiveRaceLoading] = useState(false);
@@ -333,6 +339,11 @@ export default function App() {
     window.addEventListener("hashchange", updateLiveRoute);
     return () => window.removeEventListener("hashchange", updateLiveRoute);
   }, []);
+
+  useEffect(() => {
+    if (!deviceName.trim()) return;
+    appStorage.setItem("bmx_device_name", deviceName.trim());
+  }, [deviceName]);
 
 
   const getRiderGenderCode = (rider: any) => {
@@ -1012,6 +1023,96 @@ export default function App() {
         if (eventId !== "master" && eventId !== "legacy" && !eventIds.has(eventId)) {
           issues.push({ level: "warning", title: "Teilnehmer in unbekanntem Rennen", detail: `${rider.name || "Unbekannt"} verweist auf Event ${eventId}.`, repairable: true });
         }
+      });
+
+      const findKnownRider = (eventRiders: any[], row: any) => {
+        const rowId = String(row?.riderId || row?.id || "");
+        const stableId = String(row?.participantId || row?.masterId || "");
+        return eventRiders.find((rider: any) =>
+          (rowId && String(rider.id || "") === rowId) ||
+          (stableId && String(rider.participantId || rider.masterId || "") === stableId)
+        );
+      };
+
+      events.forEach((event) => {
+        const eventRiders = ridersRaw.filter((rider: any) => !rider.deletedAt && String(rider.eventId || "") === String(event.id));
+        const raceCount = getManagedEventRaceCount(event.id, event.type);
+
+        RACES.slice(0, raceCount).forEach((race) => {
+          const flag = raceKeyMap[race];
+          const raceRiders = eventRiders.filter((rider: any) => !!rider[flag]);
+          const categoryMap = new Map<string, any[]>();
+          raceRiders.forEach((rider: any) => {
+            const category = String(rider.category || getDerivedCategory(rider) || "Ohne Kategorie").trim();
+            categoryMap.set(category, [...(categoryMap.get(category) || []), rider]);
+          });
+
+          categoryMap.forEach((items, category) => {
+            if (items.length > MAX_RIDERS_PER_RACE_CATEGORY) {
+              issues.push({ level: "error", title: "Kategorie mit zu vielen Teilnehmern", detail: `${event.name} · ${race} · ${category}: ${items.length} Teilnehmer. Maximal erlaubt sind ${MAX_RIDERS_PER_RACE_CATEGORY}.` });
+            }
+
+            const plateGroups = new Map<string, any[]>();
+            items.forEach((rider: any) => {
+              const plate = String(rider.plate || "").trim();
+              if (!plate) return;
+              plateGroups.set(plate, [...(plateGroups.get(plate) || []), rider]);
+            });
+            plateGroups.forEach((duplicates, plate) => {
+              if (duplicates.length > 1) {
+                issues.push({ level: "warning", title: "Doppelte Startnummer pro Kategorie", detail: `${event.name} · ${race} · ${category} · #${plate}: ${duplicates.map((rider: any) => rider.name || "Unbekannt").join(", ")}` });
+              }
+            });
+          });
+
+          const heatsData = getStoredRaceDataForEvent(event.id, race, "heats", {});
+          Object.entries(heatsData || {}).forEach(([category, runGroups]: [string, any]) => {
+            (Array.isArray(runGroups) ? runGroups : []).forEach((motoRuns: any[], runIndex: number) => {
+              (Array.isArray(motoRuns) ? motoRuns : []).forEach((heat: any[], heatIndex: number) => {
+                (Array.isArray(heat) ? heat : []).forEach((entry: any) => {
+                  if (!findKnownRider(eventRiders, entry)) {
+                    issues.push({ level: "warning", title: "Moto-Eintrag ohne Teilnehmer-Verknüpfung", detail: `${event.name} · ${race} · ${category} · Moto ${runIndex + 1} / Lauf ${heatIndex + 1}: ${entry?.name || "Unbekannt"} (#${entry?.plate || "-"}).`, repairable: false });
+                  }
+                });
+              });
+            });
+          });
+
+          const resultData = getStoredRaceDataForEvent(event.id, race, "results", {});
+          Object.entries(resultData || {}).forEach(([key, rows]: [string, any]) => {
+            (Array.isArray(rows) ? rows : []).forEach((entry: any) => {
+              if (!findKnownRider(eventRiders, entry)) {
+                issues.push({ level: "warning", title: "Moto-Resultat ohne Teilnehmer-Verknüpfung", detail: `${event.name} · ${race} · ${key}: ${entry?.name || "Unbekannt"} (#${entry?.plate || "-"}).` });
+              }
+            });
+          });
+
+          const finalsData = getStoredRaceDataForEvent(event.id, race, "finals", {});
+          const finalResultsData = getStoredRaceDataForEvent(event.id, race, "final_results", {});
+          Object.entries(finalsData || {}).forEach(([category, rounds]: [string, any]) => {
+            const hasHalfFinals = !!rounds?.["Halbfinal 1"]?.length || !!rounds?.["Halbfinal 2"]?.length;
+            const half1Complete = !rounds?.["Halbfinal 1"]?.length || (Array.isArray(finalResultsData?.[`${category}_Halbfinal 1`]) && finalResultsData[`${category}_Halbfinal 1`].length >= rounds["Halbfinal 1"].length);
+            const half2Complete = !rounds?.["Halbfinal 2"]?.length || (Array.isArray(finalResultsData?.[`${category}_Halbfinal 2`]) && finalResultsData[`${category}_Halbfinal 2`].length >= rounds["Halbfinal 2"].length);
+            if (hasHalfFinals && (!rounds?.["A-Final"]?.length || !rounds?.["B-Final"]?.length) && (!half1Complete || !half2Complete)) {
+              issues.push({ level: "info", title: "Halbfinal-Kategorie noch nicht freigeschaltet", detail: `${event.name} · ${race} · ${category}: A/B-Finals werden erst nach vollständigen Halbfinalresultaten erstellt.` });
+            }
+            Object.entries(rounds || {}).forEach(([roundName, heat]: [string, any]) => {
+              (Array.isArray(heat) ? heat : []).forEach((entry: any) => {
+                if (!findKnownRider(eventRiders, entry)) {
+                  issues.push({ level: "warning", title: "Final-Eintrag ohne Teilnehmer-Verknüpfung", detail: `${event.name} · ${race} · ${category} · ${roundName}: ${entry?.name || "Unbekannt"} (#${entry?.plate || "-"}).` });
+                }
+              });
+            });
+          });
+
+          Object.entries(finalResultsData || {}).forEach(([key, rows]: [string, any]) => {
+            (Array.isArray(rows) ? rows : []).forEach((entry: any) => {
+              if (!findKnownRider(eventRiders, entry)) {
+                issues.push({ level: "warning", title: "Finalresultat ohne Teilnehmer-Verknüpfung", detail: `${event.name} · ${race} · ${key}: ${entry?.name || "Unbekannt"} (#${entry?.plate || "-"}).` });
+              }
+            });
+          });
+        });
       });
 
       appRows.forEach((row: any) => {
@@ -5318,31 +5419,41 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   ) => {
     const pageWidth = doc.internal.pageSize.getWidth();
 
+    doc.setFillColor(31, 42, 55);
+    doc.roundedRect(10, 8, pageWidth - 20, 16, 3, 3, "F");
+    doc.setFontSize(9);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`${APP_NAME} · ${APP_VERSION}`, 14, 18);
+
     doc.setFillColor(245, 248, 252);
-    doc.roundedRect(10, 8, pageWidth - 20, 34, 3, 3, "F");
+    doc.roundedRect(10, 26, pageWidth - 20, 22, 3, 3, "F");
+    doc.setDrawColor(210, 220, 230);
+    doc.roundedRect(10, 26, pageWidth - 20, 22, 3, 3, "S");
 
-    doc.setFontSize(18);
+    doc.setFontSize(17);
     doc.setTextColor(31, 42, 55);
-    doc.text(title, 14, 18);
+    doc.text(title, 14, 35);
 
-    doc.setFontSize(12);
-    doc.text(subtitle, 14, 27);
+    doc.setFontSize(10);
+    doc.setTextColor(78, 91, 111);
+    doc.text(subtitle, 14, 43);
 
-    const logoSize = 30;
+    const logoSize = 28;
     const logoX = pageWidth - 14 - logoSize;
-    const logoY = 10;
+    const logoY = 12;
 
     if (showEventInfo) {
-      const eventInfoWidth = 60;
-      const eventInfoX = logoX - eventInfoWidth - 4;
+      const eventInfoWidth = eventLogo ? 72 : 90;
+      const eventInfoX = logoX - eventInfoWidth - 6;
 
       doc.setFillColor(232, 241, 255);
-      doc.roundedRect(eventInfoX, 10, eventInfoWidth, 28, 3, 3, "F");
+      doc.roundedRect(eventInfoX, 12, eventInfoWidth, 31, 3, 3, "F");
 
-      doc.setFontSize(9);
+      doc.setFontSize(8);
       doc.setTextColor(31, 42, 55);
-      doc.text(`Ort: ${eventLocation || "-"}`, eventInfoX + 3, 20);
+      doc.text(`Ort: ${eventLocation || "-"}`, eventInfoX + 3, 21);
       doc.text(`Datum: ${eventDate || "-"}`, eventInfoX + 3, 29);
+      doc.text(`Race: ${selectedRace || "-"}`, eventInfoX + 3, 37);
     }
 
     if (eventLogo) {
@@ -5355,8 +5466,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       }
     }
 
-    doc.setDrawColor(210, 220, 230);
-    doc.line(10, 44, pageWidth - 10, 44);
+    doc.setDrawColor(170, 184, 202);
+    doc.line(10, 51, pageWidth - 10, 51);
   };
 
   const pageHeight = (doc: jsPDF) => doc.internal.pageSize.getHeight();
@@ -6457,7 +6568,9 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
         ? " Lokale Daten sind neuer als der Online-Stand."
         : "";
       const backupNote = backupResult.ok ? ` Online-Backups: ${backupResult.backups.length}.` : " Online-Backups konnten nicht geprüft werden.";
-      const message = `${statusResult.message}${statusResult.updatedAt ? ` Stand: ${formatDateTime(statusResult.updatedAt)}.` : ""}${localNewerNote}${backupNote}`;
+      const deviceNote = statusResult.savedByDevice ? ` Zuletzt gespeichert von: ${statusResult.savedByDevice}.` : "";
+      const revisionNote = statusResult.saveRevision ? ` Revision: ${statusResult.saveRevision}.` : "";
+      const message = `${statusResult.message}${statusResult.updatedAt ? ` Stand: ${formatDateTime(statusResult.updatedAt)}.` : ""}${deviceNote}${revisionNote}${localNewerNote}${backupNote}`;
       setOnlineStorageMessage(message);
       if (showAlert) window.alert(message);
       return { statusResult, backupResult };
@@ -6471,11 +6584,61 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     }
   };
 
+  const getEffectiveDeviceName = () => {
+    const current = deviceName.trim();
+    if (current) return current;
+    const fallback = typeof navigator !== "undefined" && /ipad|iphone|mobile/i.test(navigator.userAgent) ? "iPad / Mobilgerät" : "Browser-Gerät";
+    setDeviceName(fallback);
+    appStorage.setItem("bmx_device_name", fallback);
+    return fallback;
+  };
+
+  const isOnlineStatusNewerThanLastKnownSave = (status?: OnlineStorageStatus | null) => {
+    if (!status?.exists || !status.updatedAt) return false;
+    const onlineTime = new Date(status.updatedAt).getTime();
+    const knownTime = lastOnlineSaveAt ? new Date(lastOnlineSaveAt).getTime() : 0;
+    return Number.isFinite(onlineTime) && onlineTime > knownTime + 1500;
+  };
+
+  const checkOnlineSaveConflictBeforeSave = async () => {
+    const status = await getOnlineAppStateStatus();
+    setOnlineStatus(status);
+    setOnlineStatusCheckedAt(new Date().toISOString());
+    if (!status.ok || !status.exists || !isOnlineStatusNewerThanLastKnownSave(status)) return { canSave: true, status };
+
+    const message = `Online-Konflikt erkannt.
+
+Der Online-Stand wurde seit deiner letzten bekannten Speicherung geändert.
+
+Online: ${formatDateTime(status.updatedAt)}${status.savedByDevice ? ` · Gerät: ${status.savedByDevice}` : ""}
+Dieses Gerät: ${lastSaveAt ? formatDateTime(lastSaveAt) : "unbekannt"}
+
+Bitte wählen:
+1 = Meine lokale Version trotzdem online speichern
+2 = Online-Version laden
+3 = Abbrechen`;
+    const choice = window.prompt(message, "3");
+    const normalized = String(choice || "").trim();
+    if (normalized === "1") {
+      setSaveConflictMessage("Konflikt bewusst überschrieben. Lokale Version wurde online gespeichert.");
+      return { canSave: true, status };
+    }
+    if (normalized === "2") {
+      await loadOnlineFullAppState();
+      return { canSave: false, status };
+    }
+    setSaveConflictMessage("Speichern abgebrochen, weil online ein neuerer Stand vorhanden ist.");
+    return { canSave: false, status };
+  };
+
   const saveOnlineFullAppState = async () => {
     const authSession = await ensureOnlineAuthSession("Online speichern");
     if (!authSession) return false;
 
     try {
+      const conflictCheck = await checkOnlineSaveConflictBeforeSave();
+      if (!conflictCheck.canSave) return false;
+
       setOnlineStorageMessage("Online speichern läuft ...");
       await saveCurrentState();
       const { backup, ridersBackup, eventsBackup } = await buildFullAppBackupEnvelope("Online speichern");
@@ -6484,6 +6647,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
         appVersion: APP_VERSION,
         riderCount: ridersBackup.length,
         eventCount: eventsBackup.length,
+        saveRevision: Number(conflictCheck.status?.saveRevision || 0) + 1,
+        savedByDevice: getEffectiveDeviceName(),
       });
 
       if (!result.ok) throw new Error(result.message || "Online-Speichern fehlgeschlagen.");
@@ -6492,7 +6657,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       await saveBoth("bmx_last_online_save_at", iso);
       setLastOnlineSaveAt(iso);
       setHasUnsavedChanges(false);
-      setOnlineStatus({ ok: true, exists: true, message: "Online-Daten vorhanden.", updatedAt: iso, appVersion: APP_VERSION, riderCount: ridersBackup.length, eventCount: eventsBackup.length });
+      setOnlineStatus({ ok: true, exists: true, message: "Online-Daten vorhanden.", updatedAt: iso, appVersion: APP_VERSION, riderCount: ridersBackup.length, eventCount: eventsBackup.length, saveRevision: Number(conflictCheck.status?.saveRevision || 0) + 1, savedByDevice: getEffectiveDeviceName() });
       setOnlineStatusCheckedAt(new Date().toISOString());
 
       let liveNote = "";
@@ -6655,11 +6820,14 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       setOnlineStorageMessage("Backup wird online und als Datei erstellt ...");
       await saveCurrentState();
       const { backup, ridersBackup, eventsBackup } = await buildFullAppBackupEnvelope(`Backup: ${finalLabel}`);
+      const statusBeforeBackup = await getOnlineAppStateStatus();
       const meta = {
         appName: APP_NAME,
         appVersion: APP_VERSION,
         riderCount: ridersBackup.length,
         eventCount: eventsBackup.length,
+        saveRevision: Number(statusBeforeBackup?.saveRevision || 0) + 1,
+        savedByDevice: getEffectiveDeviceName(),
       };
 
       const mainResult = await saveOnlineAppState(backup, meta);
@@ -6674,7 +6842,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       await saveBoth("bmx_last_online_save_at", iso);
       setLastOnlineSaveAt(iso);
       setHasUnsavedChanges(false);
-      setOnlineStatus({ ok: true, exists: true, message: "Online-Daten vorhanden.", updatedAt: iso, appVersion: APP_VERSION, riderCount: ridersBackup.length, eventCount: eventsBackup.length });
+      setOnlineStatus({ ok: true, exists: true, message: "Online-Daten vorhanden.", updatedAt: iso, appVersion: APP_VERSION, riderCount: ridersBackup.length, eventCount: eventsBackup.length, saveRevision: meta.saveRevision, savedByDevice: meta.savedByDevice });
       setOnlineStatusCheckedAt(new Date().toISOString());
       setOnlineBackups(result.backups || []);
       if (result.backupId) setSelectedOnlineBackupId(result.backupId);
@@ -7363,7 +7531,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         minHeight: "100vh",
         color: colors.text,
         position: "relative",
-        maxWidth: 1320,
+        maxWidth: publicLiveTvMode ? 1800 : 1320,
         margin: "0 auto",
       }}
     >
@@ -7507,11 +7675,13 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     boxShadow: "0 8px 20px rgba(23,32,51,0.07)",
   };
 
-  const renderPublicLiveRows = (rows: any[], mode: "start" | "result") => (
-    <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
-      {rows.length === 0 ? (
-        <div style={{ color: colors.muted, fontWeight: 800, padding: "8px 0" }}>Noch nicht erfasst</div>
-      ) : rows.map((row: any, index: number) => (
+  const renderPublicLiveRows = (rows: any[], mode: "start" | "result") => {
+    const visibleRows = filterPublicLiveRows(rows);
+    return (
+    <div style={{ display: "grid", gap: publicLiveTvMode ? 8 : 4, marginTop: 8 }}>
+      {visibleRows.length === 0 ? (
+        <div style={{ color: colors.muted, fontWeight: 800, padding: "8px 0" }}>{publicLiveSearchTerm ? "Keine passenden Fahrer in diesem Lauf" : "Noch nicht erfasst"}</div>
+      ) : visibleRows.map((row: any, index: number) => (
         <div
           key={`${mode}-${row.plate}-${row.name}-${index}`}
           style={{
@@ -7519,8 +7689,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             gridTemplateColumns: mode === "start" ? "48px 76px minmax(140px, 1fr) minmax(90px, 0.7fr)" : "48px 76px minmax(140px, 1fr) minmax(80px, 0.6fr)",
             gap: 8,
             alignItems: "center",
-            minHeight: 32,
-            padding: "6px 8px",
+            minHeight: publicLiveTvMode ? 44 : 32,
+            padding: publicLiveTvMode ? "9px 10px" : "6px 8px",
+            fontSize: publicLiveTvMode ? 20 : undefined,
             borderRadius: 10,
             background: index % 2 === 0 ? colors.cardSoftBg : colors.cardBg,
             border: `1px solid ${colors.cardBorder}`,
@@ -7534,7 +7705,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         </div>
       ))}
     </div>
-  );
+    );
+  };
 
   const getPublicLiveFlowState = (liveRace: any) => {
     const entries: any[] = [];
@@ -7588,6 +7760,169 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     return { ...base, background: colors.grayBtn, color: colors.grayBtnText, border: `1px solid ${colors.cardBorder}` };
   };
 
+  const normalizePublicLiveSearchValue = (value: any) =>
+    String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
+  const getPublicLiveRowSearchText = (row: any) => normalizePublicLiveSearchValue([
+    row?.plate,
+    row?.name,
+    row?.club,
+    row?.category,
+    row?.status,
+  ].filter(Boolean).join(" "));
+
+  const publicLiveSearchTerm = normalizePublicLiveSearchValue(publicLiveSearch);
+  const publicLiveMyRiderTerm = normalizePublicLiveSearchValue(publicLiveMyRiderQuery || publicLiveSearch);
+
+  const publicLiveCategoryOptions = useMemo(() => {
+    const values = new Set<string>();
+    (publicLiveRace?.categories || []).forEach((block: any) => values.add(String(block.category || "Ohne Kategorie")));
+    (publicLiveRace?.motos || []).forEach((block: any) => values.add(String(block.category || "Ohne Kategorie")));
+    (publicLiveRace?.finals || []).forEach((block: any) => values.add(String(block.category || "Ohne Kategorie")));
+    (publicLiveRace?.finalRankings || []).forEach((block: any) => values.add(String(block.category || "Ohne Kategorie")));
+    return ["all", ...sortCategories(Array.from(values))];
+  }, [publicLiveRace]);
+
+  const publicLiveCategoryVisible = (category: string) =>
+    publicLiveCategoryFilter === "all" || String(category || "Ohne Kategorie") === publicLiveCategoryFilter;
+
+  const filterPublicLiveRows = (rows: any[]) => {
+    const items = Array.isArray(rows) ? rows : [];
+    if (!publicLiveSearchTerm) return items;
+    return items.filter((row: any) => getPublicLiveRowSearchText(row).includes(publicLiveSearchTerm));
+  };
+
+  const findPublicLiveRiderOccurrences = (liveRace: any, query: string) => {
+    const term = normalizePublicLiveSearchValue(query);
+    if (!liveRace || !term) return { rider: null as any, entries: [] as any[] };
+    const entries: any[] = [];
+    let rider: any = null;
+
+    const rowMatches = (row: any) => {
+      if (!row) return false;
+      const plateExact = String(row.plate || "").trim().toLowerCase() === String(query || "").trim().toLowerCase();
+      return plateExact || getPublicLiveRowSearchText(row).includes(term);
+    };
+    const remember = (row: any, entry: any) => {
+      if (!rowMatches(row)) return;
+      if (!rider) rider = { ...row, category: entry.category || row.category };
+      entries.push({ ...entry, row });
+    };
+
+    (liveRace.categories || []).forEach((block: any) => {
+      (block.riders || []).forEach((row: any) => remember(row, { type: "Startliste", category: block.category, label: block.category, flowKey: "", complete: false }));
+    });
+
+    (liveRace.motos || []).forEach((block: any) => {
+      (block.runs || []).forEach((run: any) => {
+        (run.races || []).forEach((race: any) => {
+          const resultRows = Array.isArray(race.results) && race.results.length ? race.results : [];
+          const startRows = Array.isArray(race.startList) ? race.startList : [];
+          startRows.forEach((row: any) => {
+            const result = resultRows.find((res: any) => String(res.plate || "") === String(row.plate || "") && normalizePublicLiveSearchValue(res.name) === normalizePublicLiveSearchValue(row.name));
+            remember(result || row, {
+              type: "Moto",
+              category: block.category,
+              label: `${run.name} · Race ${race.raceNumber}`,
+              flowKey: race.flowKey,
+              complete: Boolean(race.resultComplete),
+              result: result || null,
+            });
+          });
+        });
+      });
+    });
+
+    (liveRace.finals || []).forEach((block: any) => {
+      (block.rounds || []).forEach((round: any) => {
+        const resultRows = Array.isArray(round.results) && round.results.length ? round.results : [];
+        const startRows = Array.isArray(round.startList) ? round.startList : [];
+        startRows.forEach((row: any) => {
+          const result = resultRows.find((res: any) => String(res.plate || "") === String(row.plate || "") && normalizePublicLiveSearchValue(res.name) === normalizePublicLiveSearchValue(row.name));
+          remember(result || row, {
+            type: "Final",
+            category: block.category,
+            label: round.name,
+            flowKey: round.flowKey,
+            complete: Boolean(round.resultComplete),
+            result: result || null,
+          });
+        });
+      });
+    });
+
+    (liveRace.finalRankings || []).forEach((block: any) => {
+      (block.rows || []).forEach((row: any) => remember(row, { type: "Resultat", category: block.category, label: `Endrang ${row.rank || "-"}`, flowKey: "", complete: true, result: row }));
+    });
+
+    return { rider, entries };
+  };
+
+  const getPublicLiveDomId = (prefix: string, value: string) =>
+    `${prefix}-${String(value || "").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 90)}`;
+
+  const publicLiveQrUrl = typeof window === "undefined"
+    ? ""
+    : `${window.location.origin}${window.location.pathname}${window.location.search}#live`;
+
+  const publicLiveQrImageSrc = publicLiveQrUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=170x170&margin=10&data=${encodeURIComponent(publicLiveQrUrl)}`
+    : "";
+
+  const renderPublicLiveRiderDetail = (liveRace: any, flowState: { activeKey: string; gateKey: string }) => {
+    const detail = findPublicLiveRiderOccurrences(liveRace, publicLiveMyRiderTerm);
+    if (!publicLiveMyRiderTerm) return null;
+    if (!detail.rider) {
+      return (
+        <div style={{ ...basePanelStyle, marginBottom: 18, borderLeft: `6px solid ${colors.warningBorder}`, background: colors.warningBg }}>
+          <strong>Mein Fahrer</strong> · Kein Fahrer zu „{publicLiveMyRiderQuery || publicLiveSearch}“ gefunden.
+        </div>
+      );
+    }
+    const nextEntry = detail.entries.find((entry: any) => !entry.complete) || null;
+    return (
+      <div style={{ ...basePanelStyle, marginBottom: 18, borderLeft: `6px solid ${colors.blueBtn}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Mein Fahrer</div>
+            <h2 style={{ margin: "4px 0", color: colors.title }}>#{detail.rider.plate || "-"} · {detail.rider.name || "-"}</h2>
+            <div style={{ color: colors.muted, fontWeight: 900 }}>{detail.rider.category || detail.entries[0]?.category || "-"}{detail.rider.club ? ` · ${detail.rider.club}` : ""}</div>
+          </div>
+          <button type="button" onClick={() => setPublicLiveMyRiderQuery("")} style={smallGhostButtonStyle}>Ausblenden</button>
+        </div>
+        {nextEntry && (
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 14, background: nextEntry.flowKey === flowState.gateKey ? "#fff1f1" : "#eaf2ff", border: `2px solid ${nextEntry.flowKey === flowState.gateKey ? colors.redBtn : colors.blueBtn}`, fontWeight: 950 }}>
+            Nächster Einsatz: {nextEntry.type} · {nextEntry.category} · {nextEntry.label}
+            {nextEntry.flowKey === flowState.gateKey ? " · ans Gate" : nextEntry.flowKey === flowState.activeKey ? " · läuft jetzt" : ""}
+          </div>
+        )}
+        <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+          {detail.entries.map((entry: any, index: number) => (
+            <div key={`my-rider-${index}`} style={{ display: "grid", gridTemplateColumns: publicLiveTvMode ? "120px 1fr 120px" : "90px 1fr 90px", gap: 10, alignItems: "center", padding: "8px 10px", borderRadius: 12, border: `1px solid ${colors.cardBorder}`, background: entry.complete ? colors.greenBg : colors.cardSoftBg, fontWeight: 850 }}>
+              <div>{entry.type}</div>
+              <div>{entry.category} · {entry.label}</div>
+              <div style={{ textAlign: "right" }}>{entry.result?.rank ? `${entry.result.rank}.` : entry.row?.status || (entry.complete ? "fertig" : "offen")}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  useEffect(() => {
+    if (!isPublicLiveView || !publicLiveRace) return;
+    const flowState = getPublicLiveFlowState(publicLiveRace);
+    const targetKey = flowState.activeKey || flowState.gateKey;
+    if (!targetKey) return;
+    window.setTimeout(() => {
+      document.getElementById(getPublicLiveDomId("live-flow", targetKey))?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 350);
+  }, [isPublicLiveView, publicLiveRace?.liveVersion, publicLiveRace?.updatedAt]);
+
   const renderPublicLiveView = () => (
     <div
       style={{
@@ -7597,7 +7932,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         minHeight: "100vh",
         color: colors.text,
         position: "relative",
-        maxWidth: 1320,
+        maxWidth: publicLiveTvMode ? 1800 : 1320,
         margin: "0 auto",
       }}
     >
@@ -7633,11 +7968,60 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           </div>
         </div>
 
+        {publicLiveRace && (
+          <div style={{ ...basePanelStyle, marginBottom: 18 }}>
+            <div style={{ display: "grid", gridTemplateColumns: publicLiveTvMode ? "minmax(280px, 1fr) 260px 180px 190px" : "minmax(220px, 1fr) 220px 150px 170px", gap: 12, alignItems: "end" }}>
+              <div>
+                <label style={labelStyle}>Fahrer suchen</label>
+                <input
+                  value={publicLiveSearch}
+                  onChange={(event) => setPublicLiveSearch(event.target.value)}
+                  placeholder="Name oder Startnummer, z. B. 247"
+                  style={{ ...inputStyle, minHeight: publicLiveTvMode ? 56 : 44, fontSize: publicLiveTvMode ? 22 : 16 }}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Kategorie</label>
+                <select
+                  value={publicLiveCategoryFilter}
+                  onChange={(event) => setPublicLiveCategoryFilter(event.target.value)}
+                  style={{ ...inputStyle, minHeight: publicLiveTvMode ? 56 : 44, fontSize: publicLiveTvMode ? 20 : 15 }}
+                >
+                  {publicLiveCategoryOptions.map((category) => (
+                    <option key={category} value={category}>{category === "all" ? "Alle Kategorien" : category}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPublicLiveMyRiderQuery(publicLiveSearch.trim())}
+                disabled={!publicLiveSearch.trim()}
+                style={!publicLiveSearch.trim() ? compactDisabledButtonStyle : compactPrimaryButtonStyle}
+              >
+                Mein Fahrer
+              </button>
+              <button type="button" onClick={() => setPublicLiveTvMode((value) => !value)} style={compactHomeButtonStyle}>
+                {publicLiveTvMode ? "Normalmodus" : "Beamer/TV"}
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: publicLiveTvMode ? "190px 1fr" : "150px 1fr", gap: 14, marginTop: 14, alignItems: "center" }}>
+              <div style={{ textAlign: "center" }}>
+                {publicLiveQrImageSrc && <img src={publicLiveQrImageSrc} alt="QR-Code zur Live-Ansicht" style={{ width: publicLiveTvMode ? 170 : 120, height: publicLiveTvMode ? 170 : 120, borderRadius: 12, border: `1px solid ${colors.cardBorder}`, background: "#fff" }} />}
+              </div>
+              <div style={{ color: colors.muted, fontWeight: 850, lineHeight: 1.45 }}>
+                QR-Code zur Live-Ansicht. Suche nach Startnummer oder Name zeigt die Läufe, Resultate und den nächsten Einsatz dieses Fahrers.
+              </div>
+            </div>
+          </div>
+        )}
+
         {!publicLiveRace ? (
           <div style={{ ...basePanelStyle, textAlign: "center", padding: 34 }}>
-            <h2 style={{ marginTop: 0, color: colors.title }}>Aktuell ist kein Rennen live veröffentlicht</h2>
+            <h2 style={{ marginTop: 0, color: colors.title }}>{publicLiveMeta && publicLiveMeta.active === false ? "Live-Ansicht beendet" : "Aktuell ist kein Rennen live veröffentlicht"}</h2>
             <div style={{ color: colors.muted, fontWeight: 900, lineHeight: 1.45 }}>
-              Sobald die Rennleitung ein Rennen live aktiviert, erscheinen hier zuerst die Startliste und danach Motos, Resultate und Finals.
+              {publicLiveMeta && publicLiveMeta.active === false
+                ? "Die Rennleitung hat die öffentliche Live-Ansicht beendet. Bitte später erneut öffnen oder die Rennleitung fragen."
+                : "Sobald die Rennleitung ein Rennen live aktiviert, erscheinen hier zuerst die Startliste und danach Motos, Resultate und Finals."}
             </div>
             {publicLiveMessage && <div style={{ marginTop: 14, color: colors.muted, fontWeight: 800 }}>{publicLiveMessage}</div>}
           </div>
@@ -7669,6 +8053,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             </div>
 
+            {renderPublicLiveRiderDetail(publicLiveRace, liveFlowState)}
+
             {(!publicLiveRace.motos?.length && !publicLiveRace.finals?.length && publicLiveRace.categories?.length > 0) && (
               <div style={{ ...basePanelStyle, marginBottom: 18 }}>
                 <h2 style={{ ...sectionTitleStyle }}>Aktuelle Startliste</h2>
@@ -7676,7 +8062,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                   Motos wurden noch nicht erstellt. Sichtbar ist die aktuelle Teilnehmerliste nach Kategorien.
                 </div>
                 <div style={{ display: "grid", gap: 12 }}>
-                  {publicLiveRace.categories.map((categoryBlock: any) => (
+                  {publicLiveRace.categories.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
                     <div key={`live-category-${categoryBlock.category}`} style={publicLivePanelStyle}>
                       <h3 style={{ margin: "0 0 8px", color: colors.title }}>{categoryBlock.category}</h3>
                       {renderPublicLiveRows(categoryBlock.riders || [], "start")}
@@ -7690,7 +8076,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <div style={{ ...basePanelStyle, marginBottom: 18 }}>
                 <h2 style={{ ...sectionTitleStyle }}>Motos / Laufeinteilung</h2>
                 <div style={{ display: "grid", gap: 16 }}>
-                  {publicLiveRace.motos.map((categoryBlock: any) => (
+                  {publicLiveRace.motos.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
                     <div key={`live-moto-${categoryBlock.category}`} style={publicLivePanelStyle}>
                       <h3 style={{ margin: "0 0 10px", color: colors.title }}>{categoryBlock.category}</h3>
                       <div style={{ display: "grid", gap: 14 }}>
@@ -7700,6 +8086,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                             <div style={{ display: "grid", gap: 12 }}>
                               {run.races.map((race: any) => (
                                 <div
+                                  id={getPublicLiveDomId("live-flow", race.flowKey)}
                                   key={`${categoryBlock.category}-${run.name}-${race.raceNumber}`}
                                   style={getPublicLiveRaceCardStyle(race.flowKey, liveFlowState, Boolean(race.resultComplete))}
                                 >
@@ -7738,12 +8125,13 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <div style={{ ...basePanelStyle, marginBottom: 18 }}>
                 <h2 style={{ ...sectionTitleStyle }}>Finals</h2>
                 <div style={{ display: "grid", gap: 16 }}>
-                  {publicLiveRace.finals.map((categoryBlock: any) => (
+                  {publicLiveRace.finals.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
                     <div key={`live-final-${categoryBlock.category}`} style={publicLivePanelStyle}>
                       <h3 style={{ margin: "0 0 10px", color: colors.title }}>{categoryBlock.category}</h3>
                       <div style={{ display: "grid", gap: 12 }}>
                         {categoryBlock.rounds.map((round: any) => (
                           <div
+                            id={getPublicLiveDomId("live-flow", round.flowKey)}
                             key={`${categoryBlock.category}-${round.name}`}
                             style={getPublicLiveRaceCardStyle(round.flowKey, liveFlowState, Boolean(round.resultComplete))}
                           >
@@ -7779,7 +8167,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <div style={{ ...basePanelStyle, marginBottom: 18 }}>
                 <h2 style={{ ...sectionTitleStyle }}>Resultate</h2>
                 <div style={{ display: "grid", gap: 12 }}>
-                  {publicLiveRace.finalRankings.map((categoryBlock: any) => (
+                  {publicLiveRace.finalRankings.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
                     <div key={`live-ranking-${categoryBlock.category}`} style={publicLivePanelStyle}>
                       <h3 style={{ margin: "0 0 8px", color: colors.title }}>{categoryBlock.category}</h3>
                       {renderPublicLiveRows(categoryBlock.rows || [], "result")}
@@ -7920,7 +8308,19 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 {onlineStatusCheckedAt ? `Geprüft: ${formatDateTime(onlineStatusCheckedAt)}` : `${onlineBackups.length} Online-Backups geladen`}
               </div>
             </div>
+            <div style={{ border: `1px solid ${isOnlineStatusNewerThanLastKnownSave(onlineStatus) ? colors.warningBorder : colors.cardBorder}`, borderRadius: 16, padding: 14, background: isOnlineStatusNewerThanLastKnownSave(onlineStatus) ? colors.warningBg : colors.cardSoftBg }}>
+              <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Gerät / Konflikt</div>
+              <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} placeholder="Gerätename, z. B. iPad Rennleitung" style={{ ...inputStyle, minHeight: 38, marginTop: 5 }} />
+              <div style={{ fontSize: 13, color: colors.muted, marginTop: 5, fontWeight: 800 }}>
+                Online zuletzt: {onlineStatus?.savedByDevice || "-"}{onlineStatus?.saveRevision ? ` · Rev. ${onlineStatus.saveRevision}` : ""}
+              </div>
+            </div>
           </div>
+          {saveConflictMessage && (
+            <div style={{ ...basePanelStyle, marginBottom: 12, background: colors.warningBg, borderColor: colors.warningBorder, color: "#92400e", fontWeight: 900 }}>
+              {saveConflictMessage}
+            </div>
+          )}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, marginBottom: 12 }}>
             <button
@@ -8732,6 +9132,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   if (appShellView === "dataCheck") {
     const repairableCount = dataCheckIssues.filter((issue) => issue.repairable).length;
+    const errorCount = dataCheckIssues.filter((issue) => issue.level === "error").length;
+    const warningCount = dataCheckIssues.filter((issue) => issue.level === "warning").length;
+    const infoCount = dataCheckIssues.filter((issue) => issue.level === "info").length;
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
         {renderAppHeader()}
@@ -8741,7 +9144,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             <div>
               <h2 style={{ margin: 0, color: colors.title }}>Daten prüfen / Reparatur</h2>
               <div style={{ color: colors.muted, fontWeight: 800, marginTop: 4 }}>
-                Prüft Rennen, Teilnehmer, lokale Datensätze, Event-Zuordnung und Backup-Struktur.
+                Prüft Teilnehmer-IDs, doppelte Startnummern, Kategorien über 32 Fahrer, fehlende Resultate, Halbfinal-/Finalstatus, Event-Zuordnung und alte Datenstrukturen.
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -8755,8 +9158,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             </div>
           </div>
           {lastIntegrityCheckAt && (
-            <div style={{ ...chipStyle, display: "inline-flex", marginBottom: 12 }}>
-              Letzte Prüfung: {formatDateTime(lastIntegrityCheckAt)}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{ ...chipStyle, display: "inline-flex" }}>Letzte Prüfung: {formatDateTime(lastIntegrityCheckAt)}</div>
+              <div style={{ ...chipStyle, display: "inline-flex", background: errorCount ? colors.dangerBg : colors.successBg, color: errorCount ? "#991b1b" : colors.greenBtn }}>Fehler: {errorCount}</div>
+              <div style={{ ...chipStyle, display: "inline-flex", background: warningCount ? colors.warningBg : colors.successBg, color: warningCount ? "#92400e" : colors.greenBtn }}>Warnungen: {warningCount}</div>
+              <div style={{ ...chipStyle, display: "inline-flex" }}>Infos: {infoCount}</div>
+              <div style={{ ...chipStyle, display: "inline-flex" }}>Reparierbar: {repairableCount}</div>
             </div>
           )}
           {dataRepairMessage && (
