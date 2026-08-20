@@ -8,10 +8,26 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.7",
+    title: "Plausch-Kategorien & Finalblock-Reihenfolge",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "Neue Spezial-Kategorien Plausch 1, Plausch 2 und Plausch 3 ergänzt.",
+      "Plausch-Kategorien sind wie Cruiser separat auswählbar und werden separat gewertet.",
+      "Plausch 1–3 starten in der Kategorienreihenfolge immer vor allen regulären Alterskategorien.",
+      "Cruiser startet nicht mehr ganz am Schluss, sondern direkt vor Boys 16+ / Girls 17+.",
+      "Bei Kategorien mit 1–8 Fahrern wird der 4. Moto im Finalblock geführt und zusammen mit den A-Finals am Schluss angezeigt.",
+      "Finals-PDF und öffentliche Live-Ansicht übernehmen die neue Finalblock-Reihenfolge.",
+      "Renn-Reglement wurde mit Plausch-Kategorien, Cruiser-Reihenfolge und 4.-Moto-Finalblock ergänzt.",
+      "Keine Änderung an Login, Online-Speicher oder Resultatberechnung.",
+    ],
+  },
+  {
     version: "v1.16.6",
     title: "Final-Darstellung & Halbfinal-Freischaltung",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "C- und D-Finals werden bei Halbfinal-Kategorien nicht mehr sofort mit den Halbfinals angezeigt.",
       "Nach vollständig erfassten Halbfinalresultaten werden D-, C-, B- und A-Finals gemeinsam über Finals freischalten erzeugt.",
