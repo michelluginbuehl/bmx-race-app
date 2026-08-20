@@ -8,10 +8,28 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.12",
+    title: "Datenprüfung, Live-Suche, PDF-Layout und Konfliktschutz",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "Datenprüfung erweitert: Teilnehmer-IDs, doppelte Startnummern pro Kategorie, Kategorien über 32 Fahrer, verwaiste Moto-/Final-Einträge und Halbfinal-/Finalstatus werden geprüft.",
+      "Datenprüfung zeigt neu Fehler-, Warnungs-, Info- und Reparatur-Zähler.",
+      "Öffentliche Live-Ansicht ergänzt: Fahrer-/Startnummer-Suche, Button Mein Fahrer, Kategorie-Filter und automatische Scrollposition zum aktuellen Lauf.",
+      "Mein Fahrer zeigt Motos, Finals, Resultate und den nächsten Einsatz eines Fahrers an.",
+      "Beamer-/TV-Modus und QR-Code zur Live-Ansicht ergänzt.",
+      "Hinweis Live beendet klarer dargestellt.",
+      "PDF-Layout mit modernerem Kopfbereich, Race-/Ort-/Datum-Information und sauberer Trennlinie verbessert.",
+      "Konfliktschutz für mehrere Geräte ergänzt: App warnt, wenn Online-Daten seit der letzten bekannten Speicherung von einem anderen Gerät geändert wurden.",
+      "Gerätename und Online-Revision werden im Speicherbereich angezeigt und beim Online-Speichern mitgespeichert.",
+      "Keine Änderung an Rennlogik, Einteilung oder Punktewertung.",
+    ],
+  },
+  {
     version: "v1.11.1",
     title: "Live-Ansicht Text bereinigt",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "Hinweistext Startliste: manuell aktualisieren oder automatische Sicherheitsprüfung alle 1 Stunde aus der öffentlichen Live-Ansicht entfernt.",
       "Live-Aktualisierungslogik bleibt unverändert: vor dem Rennen sparsam, während Motos/Finals 30-Sekunden-Meta-Prüfung.",
