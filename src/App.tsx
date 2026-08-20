@@ -4576,6 +4576,33 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     </div>
   );
 
+
+
+  useEffect(() => {
+    const hideLegacyCruiserCheckbox = () => {
+      const containers = Array.from(document.querySelectorAll(".rider-form-no-legacy-cruiser"));
+      containers.forEach((container) => {
+        const checkboxes = Array.from(container.querySelectorAll('input[type="checkbox"]')) as HTMLInputElement[];
+        checkboxes.forEach((checkbox) => {
+          let node: HTMLElement | null = checkbox.closest("label") as HTMLElement | null;
+          let fallback: HTMLElement | null = checkbox.parentElement;
+          for (let i = 0; i < 4 && fallback && !node; i += 1) {
+            const text = String(fallback.textContent || "").toLowerCase();
+            if (text.includes("cruiser")) node = fallback;
+            fallback = fallback.parentElement;
+          }
+          const targetText = String(node?.textContent || "").toLowerCase();
+          if (node && targetText.includes("cruiser")) {
+            node.style.display = "none";
+          }
+        });
+      });
+    };
+    hideLegacyCruiserCheckbox();
+    const timer = window.setTimeout(hideLegacyCruiserCheckbox, 0);
+    return () => window.clearTimeout(timer);
+  }, [editingRider, showEventParticipantCreateForm, appShellView, viewMode, currentEventId]);
+
   const renderAppHeader = () => (
     <AppHeader
       onHomeClick={async () => {
@@ -7827,14 +7854,16 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 Bearbeitung aktiv · Teilnehmer-ID: {getParticipantStableId(editingRider) || "wird beim Speichern erstellt"}
               </div>
             )}
-            <RiderForm
-              onChange={handleRiderFormChange}
-              editingRider={editingRider}
-              onCancelEdit={() => { setEditingRider(null); setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setLastEditedMasterParticipantId(""); setMasterParticipantDraftLookup({ name: "", plate: "", birthYear: "", gender: "", club: "" }); }}
-              eventYear={String(new Date().getFullYear())}
-              currentEventId="master"
-              masterMode
-            />
+            <div className="rider-form-no-legacy-cruiser">
+              <RiderForm
+                onChange={handleRiderFormChange}
+                editingRider={editingRider}
+                onCancelEdit={() => { setEditingRider(null); setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setLastEditedMasterParticipantId(""); setMasterParticipantDraftLookup({ name: "", plate: "", birthYear: "", gender: "", club: "" }); }}
+                eventYear={String(new Date().getFullYear())}
+                currentEventId="master"
+                masterMode
+              />
+            </div>
             {renderSpecialCategorySelector()}
             {!editingRider && participantEntrySuggestions.length > 0 && (
               <div style={{ marginTop: 12, padding: 12, borderRadius: 14, border: `1px solid ${colors.warningBorder}`, background: colors.warningBg }}>
@@ -8890,13 +8919,15 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <p style={{ color: colors.muted, marginTop: -4 }}>
                 Die bestehende Teilnehmer-ID, Race-Häkchen und Resultat-Verknüpfungen bleiben beim Speichern erhalten.
               </p>
-              <RiderForm
-                onChange={handleEventParticipantFormChange}
-                editingRider={editingRider}
-                onCancelEdit={() => { setEditingRider(null); setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setLastEditedMasterParticipantId(""); }}
-                eventYear={participantEventYear}
-                currentEventId={currentEventId || "legacy"}
-              />
+              <div className="rider-form-no-legacy-cruiser">
+                <RiderForm
+                  onChange={handleEventParticipantFormChange}
+                  editingRider={editingRider}
+                  onCancelEdit={() => { setEditingRider(null); setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setLastEditedMasterParticipantId(""); }}
+                  eventYear={participantEventYear}
+                  currentEventId={currentEventId || "legacy"}
+                />
+              </div>
               {renderSpecialCategorySelector()}
             </>
           ) : showEventParticipantCreateForm ? (
@@ -8905,13 +8936,15 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 <strong style={{ color: colors.title }}>Neuen Teilnehmer erfassen und direkt zu {selectedRace} hinzufügen</strong>
                 <button type="button" onClick={() => { setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setShowEventParticipantCreateForm(false); }} style={smallGhostButtonStyle}>Abbrechen</button>
               </div>
-              <RiderForm
-                onChange={handleEventParticipantFormChange}
-                editingRider={null}
-                onCancelEdit={() => { setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setShowEventParticipantCreateForm(false); }}
-                eventYear={participantEventYear}
-                currentEventId={currentEventId || "legacy"}
-              />
+              <div className="rider-form-no-legacy-cruiser">
+                <RiderForm
+                  onChange={handleEventParticipantFormChange}
+                  editingRider={null}
+                  onCancelEdit={() => { setParticipantSpecialCategoryDraft(""); setParticipantSpecialCategoryDraftDirty(false); setShowEventParticipantCreateForm(false); }}
+                  eventYear={participantEventYear}
+                  currentEventId={currentEventId || "legacy"}
+                />
+              </div>
               {renderSpecialCategorySelector("Nach dem Speichern wird der neue Teilnehmer direkt dieser Spezial-Kategorie zugeordnet, falls hier eine Auswahl gesetzt ist.")}
               <div style={{ marginTop: 8, color: colors.muted, fontSize: 13, fontWeight: 800 }}>
                 Nach dem Speichern erhält der Teilnehmer automatisch eine stabile Teilnehmer-ID und wird in {selectedRace} ausgewählt.
