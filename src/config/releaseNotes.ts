@@ -8,10 +8,25 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.9",
+    title: "Live-Ablauf & automatische Laufnavigation",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "Abgeschlossene Motos und Finalläufe klappen im Rennbetrieb automatisch zu.",
+      "Nach vollständig gespeichertem Resultat springt die App automatisch zum nächsten offenen Lauf.",
+      "Der aktuelle Lauf wird blau hervorgehoben; der nächste Lauf für den Starthelfer wird rot mit ans Gate markiert.",
+      "4. Moto bleibt ausschliesslich im Finalblock und wird zusammen mit den A-Finals am Schluss gefahren.",
+      "Die öffentliche Live-Ansicht zeigt nach vorhandenen Resultaten automatisch Resultate statt Startliste/Gateplätze.",
+      "Die Live-Ansicht hebt den laufenden Lauf und den nächsten Lauf ans Gate farblich hervor.",
+      "Rennlogik, Einteilung, Halbfinal-/Final-Reihenfolge und DNS-/Rangpunkte-Regeln wurden im Code nochmals gegen die aktuelle Logik geprüft.",
+    ],
+  },
+  {
     version: "v1.16.8",
     title: "Spezial-Kategorie bereinigt",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "Das separate Cruiser-Häkchen im Teilnehmerformular wird nicht mehr angezeigt.",
       "Cruiser wird nur noch über das Auswahlfeld Spezial-Kategorie gesetzt.",
