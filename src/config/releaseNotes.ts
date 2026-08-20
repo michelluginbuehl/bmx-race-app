@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.8",
+    title: "Spezial-Kategorie bereinigt",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "Das separate Cruiser-Häkchen im Teilnehmerformular wird nicht mehr angezeigt.",
+      "Cruiser wird nur noch über das Auswahlfeld Spezial-Kategorie gesetzt.",
+      "Plausch 1, Plausch 2, Plausch 3 und Cruiser sind damit an einer Stelle auswählbar.",
+      "Bestehende Cruiser-Daten bleiben erhalten; nur die doppelte Darstellung wurde entfernt.",
+      "Keine Änderung an Rennlogik, Teilnehmerdaten, Online-Speicher oder Live-Ansicht.",
+    ],
+  },
+  {
     version: "v1.16.7",
     title: "Plausch-Kategorien & Finalblock-Reihenfolge",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "Neue Spezial-Kategorien Plausch 1, Plausch 2 und Plausch 3 ergänzt.",
       "Plausch-Kategorien sind wie Cruiser separat auswählbar und werden separat gewertet.",
