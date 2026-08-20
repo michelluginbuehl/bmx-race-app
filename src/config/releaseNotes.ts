@@ -8,10 +8,55 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.11",
+    title: "Optimierte Live-Aktualisierung",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "Öffentliche Live-Ansicht nutzt neu ein kleines Meta-Dokument zur Prüfung statt bei jeder Aktualisierung den kompletten Live-Stand zu laden.",
+      "Admin-App erhöht bei jeder Live-Veröffentlichung eine liveVersion; Zuschauer laden den vollständigen Live-Stand nur, wenn sich diese Version geändert hat.",
+      "Vor dem Rennen mit reiner Startliste bleibt die Zuschauer-Prüfung sparsam: manuell oder Sicherheitsprüfung einmal pro Stunde.",
+      "Während Motos, Halbfinals oder Finals sichtbar sind, prüft die Zuschaueransicht alle 30 Sekunden nur die kleine Live-Meta-Version.",
+      "Wenn der Browser-Tab im Hintergrund ist, wird die Prüfung automatisch langsamer, um Datenverbrauch und Firestore-Reads zu reduzieren.",
+      "Live-Ansicht zeigt Aktualisierungsmodus, letzte Prüfung und erkannte Live-Version an.",
+      "Keine Änderung an Rennlogik, Einteilung, Punktewertung, Login oder Online-Speicher für Admin-Daten.",
+    ],
+  },
+  {
+    version: "v1.10",
+    title: "Eventbasierte Live-Aktualisierung",
+    date: "2026-08-20",
+    current: false,
+    items: [
+      "Admin-App veröffentlicht Live-Daten nicht mehr in einem fixen Sekundenintervall.",
+      "Sobald der letzte Fahrer eines Motos, Halbfinals oder Finals im Zieleinlauf erfasst ist, wird der Live-Stand automatisch online aktualisiert.",
+      "Beim Erstellen von Motos, Finals oder einer manuellen Rangliste wird ein aktives Live-Rennen automatisch neu veröffentlicht.",
+      "Vor dem Rennen, wenn nur die Startliste sichtbar ist, aktualisiert die Zuschaueransicht nur manuell oder als Sicherheitsprüfung einmal pro Stunde.",
+      "Während Motos/Finals vorhanden sind, aktualisiert die Zuschaueransicht automatisch alle 30 Sekunden.",
+      "Wenn Teilnehmer vor der Moto-Erstellung erfasst oder geändert werden und das Rennen live ist, sendet die Admin-App die aktualisierte Startliste automatisch nach.",
+      "Beim Sprung zum nächsten Lauf scrollt die App direkt zum Zieleinlauf-Eingabebereich.",
+      "Keine Änderung an Rennlogik, Einteilung, Punktewertung, Login oder Online-Speicherstruktur.",
+    ],
+  },
+  {
+    version: "v1.9",
+    title: "Live-Takt, Startliste & Laufnavigation",
+    date: "2026-08-20",
+    current: false,
+    items: [
+      "App-Version im Banner auf v1.9 gesetzt.",
+      "Beim Abschluss eines Motos springt die Ansicht direkt zum nächsten Zieleinlauf-Eingabebereich statt zu hoch an den Abschnittsanfang.",
+      "Beim Live-Schalten ist der Live-Aktualisierungstakt auswählbar: 5, 10, 30, 60, 90 oder 180 Sekunden.",
+      "Admin-Live-Veröffentlichung und Zuschaueransicht verwenden den gewählten Aktualisierungstakt.",
+      "Wenn ein Rennen live ist, aber Motos noch nicht erstellt wurden, zeigt die Zuschaueransicht die aktuelle Startliste nach Kategorien.",
+      "4. Moto bleibt weiterhin nur im Finalblock; Rennlogik, Einteilung und Rangpunkte wurden nicht verändert.",
+    ],
+  },
+  {
     version: "v1.16.9",
     title: "Live-Ablauf & automatische Laufnavigation",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "Abgeschlossene Motos und Finalläufe klappen im Rennbetrieb automatisch zu.",
       "Nach vollständig gespeichertem Resultat springt die App automatisch zum nächsten offenen Lauf.",
