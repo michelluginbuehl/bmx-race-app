@@ -73,6 +73,8 @@ export type OnlineStorageStatus = {
   riderCount?: number;
   eventCount?: number;
   payloadSize?: number;
+  saveRevision?: number;
+  savedByDevice?: string;
   backupVersion?: string;
   dataSchemaVersion?: string;
 };
@@ -85,6 +87,8 @@ export type OnlineBackupListItem = {
   riderCount?: number;
   eventCount?: number;
   payloadSize?: number;
+  saveRevision?: number;
+  savedByDevice?: string;
   backupVersion?: string;
   dataSchemaVersion?: string;
 };
@@ -235,6 +239,8 @@ const parseManifestMeta = (document: any): Omit<OnlineStorageStatus, "ok" | "mes
     riderCount: numberFromField(fields.riderCount),
     eventCount: numberFromField(fields.eventCount),
     payloadSize: numberFromField(fields.payloadSize),
+    saveRevision: numberFromField(fields.saveRevision),
+    savedByDevice: stringFromField(fields.savedByDevice),
     backupVersion: stringFromField(fields.backupVersion),
     dataSchemaVersion: stringFromField(fields.dataSchemaVersion),
   };
@@ -280,6 +286,8 @@ const saveChunkedDocument = async (
     appVersion: { stringValue: String(meta.appVersion || payload?.appVersion || "") },
     backupVersion: { stringValue: String(payload?.backupVersion || "") },
     dataSchemaVersion: { stringValue: String(payload?.dataSchemaVersion || payload?.schemaVersion || "") },
+    saveRevision: { integerValue: String(Number(meta.saveRevision || 0)) },
+    savedByDevice: { stringValue: String(meta.savedByDevice || "") },
     riderCount: { integerValue: String(Number(meta.riderCount ?? payload?.riders?.length ?? payload?.data?.riders?.length ?? 0)) },
     eventCount: { integerValue: String(Number(meta.eventCount ?? payload?.managedEvents?.length ?? payload?.data?.managedEvents?.length ?? 0)) },
   });
@@ -358,6 +366,8 @@ const readBackupIndex = async (): Promise<OnlineBackupListItem[]> => {
         riderCount: Number.isFinite(Number(item.riderCount)) ? Number(item.riderCount) : undefined,
         eventCount: Number.isFinite(Number(item.eventCount)) ? Number(item.eventCount) : undefined,
         payloadSize: Number.isFinite(Number(item.payloadSize)) ? Number(item.payloadSize) : undefined,
+        saveRevision: Number.isFinite(Number(item.saveRevision)) ? Number(item.saveRevision) : undefined,
+        savedByDevice: item.savedByDevice ? String(item.savedByDevice) : undefined,
         backupVersion: item.backupVersion ? String(item.backupVersion) : undefined,
         dataSchemaVersion: item.dataSchemaVersion ? String(item.dataSchemaVersion) : undefined,
       }))
@@ -473,6 +483,8 @@ export const createOnlineBackup = async (
       riderCount: manifestMeta.riderCount,
       eventCount: manifestMeta.eventCount,
       payloadSize: manifestMeta.payloadSize,
+      saveRevision: manifestMeta.saveRevision,
+      savedByDevice: manifestMeta.savedByDevice,
       backupVersion: manifestMeta.backupVersion,
       dataSchemaVersion: manifestMeta.dataSchemaVersion,
     };
