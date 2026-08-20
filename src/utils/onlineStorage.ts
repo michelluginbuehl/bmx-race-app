@@ -4,12 +4,16 @@ type OnlineStorageResponse = {
   ok: boolean;
   message: string;
   updatedAt?: string;
+  liveVersion?: number;
   data?: any;
 };
 
 export type PublicLiveRacePayload = {
   publicVersion: number;
+  liveVersion?: number;
   active: boolean;
+  refreshSeconds?: number;
+  hasRaceProgram?: boolean;
   publishedAt: string;
   updatedAt: string;
   appName: string;
@@ -34,6 +38,30 @@ export type PublicLiveRaceResponse = {
   active: boolean;
   updatedAt?: string;
   data?: PublicLiveRacePayload | null;
+};
+
+export type PublicLiveRaceMeta = {
+  liveVersion: number;
+  active: boolean;
+  updatedAt?: string;
+  appName?: string;
+  appVersion?: string;
+  eventId?: string;
+  eventName?: string;
+  raceName?: string;
+  raceStatus?: string;
+  participantCount?: number;
+  hasRaceProgram?: boolean;
+  payloadSize?: number;
+};
+
+export type PublicLiveRaceMetaResponse = {
+  ok: boolean;
+  message: string;
+  exists: boolean;
+  active: boolean;
+  updatedAt?: string;
+  data?: PublicLiveRaceMeta | null;
 };
 
 export type OnlineStorageStatus = {
@@ -76,6 +104,7 @@ const PAYLOAD_CHUNK_SIZE = 180_000;
 const MAX_ONLINE_BACKUPS = 20;
 const BACKUP_INDEX_PATH = "onlineBackupIndex/current";
 const PUBLIC_LIVE_RACE_PATH = "bmxRacePublic/currentRace";
+const PUBLIC_LIVE_RACE_META_PATH = "bmxRacePublic/currentRaceMeta";
 const PUBLIC_LIVE_RACE_PAYLOAD_LIMIT = 900_000;
 
 let onlineStorageAuthToken = "";
@@ -479,6 +508,70 @@ export const loadOnlineBackup = async (backupId: string): Promise<OnlineStorageR
   }
 };
 
+
+const readPublicLiveRaceMetaDocument = async () => {
+  const response = await fetch(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_META_PATH), { method: "GET" });
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    throw new Error(await parseFirestoreError(response));
+  }
+  return response.json();
+};
+
+const parsePublicLiveRaceMetaDocument = (document: any): PublicLiveRaceMeta | null => {
+  const fields = document?.fields || {};
+  if (!fields || Object.keys(fields).length === 0) return null;
+  const liveVersion = numberFromField(fields.liveVersion) || 0;
+  const updatedAt = stringFromField(fields.updatedAt);
+  return {
+    liveVersion,
+    active: fields?.active?.booleanValue === true,
+    updatedAt,
+    appName: stringFromField(fields.appName),
+    appVersion: stringFromField(fields.appVersion),
+    eventId: stringFromField(fields.eventId),
+    eventName: stringFromField(fields.eventName),
+    raceName: stringFromField(fields.raceName),
+    raceStatus: stringFromField(fields.raceStatus),
+    participantCount: numberFromField(fields.participantCount),
+    hasRaceProgram: fields?.hasRaceProgram?.booleanValue === true,
+    payloadSize: numberFromField(fields.payloadSize),
+  };
+};
+
+export const loadPublicLiveRaceMeta = async (): Promise<PublicLiveRaceMetaResponse> => {
+  if (!isOnlineStorageConfigured()) {
+    return { ok: false, exists: false, active: false, message: "Online-Speicher ist noch nicht konfiguriert." };
+  }
+
+  try {
+    const document = await readPublicLiveRaceMetaDocument();
+    if (!document) return { ok: true, exists: false, active: false, message: "Aktuell ist kein Rennen live veröffentlicht." };
+    const data = parsePublicLiveRaceMetaDocument(document);
+    if (!data) return { ok: true, exists: false, active: false, message: "Aktuell ist kein Rennen live veröffentlicht." };
+    return {
+      ok: true,
+      exists: true,
+      active: data.active,
+      updatedAt: data.updatedAt,
+      data,
+      message: data.active ? "Live-Meta geladen." : "Aktuell ist kein Rennen live veröffentlicht.",
+    };
+  } catch (error: any) {
+    return { ok: false, exists: false, active: false, message: error?.message || "Live-Meta konnte nicht geladen werden." };
+  }
+};
+
+const getNextPublicLiveVersion = async () => {
+  try {
+    const metaDocument = await readPublicLiveRaceMetaDocument();
+    const currentVersion = numberFromField(metaDocument?.fields?.liveVersion) || 0;
+    return currentVersion + 1;
+  } catch {
+    return 1;
+  }
+};
+
 const readPublicLiveRaceDocument = async () => {
   const response = await fetch(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_PATH), { method: "GET" });
   if (!response.ok) {
@@ -504,6 +597,8 @@ export const loadPublicLiveRace = async (): Promise<PublicLiveRaceResponse> => {
     if (!payloadJson) return { ok: true, exists: true, active: false, updatedAt, message: "Live-Rennen ist leer." };
 
     const data = JSON.parse(payloadJson) as PublicLiveRacePayload;
+    const liveVersion = numberFromField(fields.liveVersion);
+    if (liveVersion && !data.liveVersion) data.liveVersion = liveVersion;
     return {
       ok: true,
       exists: true,
@@ -524,16 +619,22 @@ export const publishPublicLiveRace = async (payload: PublicLiveRacePayload): Pro
 
   try {
     const updatedAt = new Date().toISOString();
-    const normalizedPayload = { ...payload, active: true, updatedAt };
+    const liveVersion = await getNextPublicLiveVersion();
+    const hasRaceProgram =
+      payload?.hasRaceProgram === true ||
+      (Array.isArray(payload?.motos) && payload.motos.length > 0) ||
+      (Array.isArray(payload?.finals) && payload.finals.length > 0) ||
+      (Array.isArray(payload?.finalRankings) && payload.finalRankings.length > 0);
+    const normalizedPayload = { ...payload, active: true, updatedAt, liveVersion, hasRaceProgram };
     const payloadJson = JSON.stringify(normalizedPayload);
     if (payloadJson.length > PUBLIC_LIVE_RACE_PAYLOAD_LIMIT) {
       return { ok: false, message: "Live-Rennen ist zu gross für ein einzelnes öffentliches Firestore-Dokument. Bitte später auf Chunk-Speicherung erweitern." };
     }
 
-    await patchFirestoreDocument(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_PATH), {
-      storageFormat: { stringValue: "public-live-race-v1" },
+    const commonFields = {
       active: { booleanValue: true },
       updatedAt: { timestampValue: updatedAt },
+      liveVersion: { integerValue: String(liveVersion) },
       appName: { stringValue: String(normalizedPayload.appName || "BMX Race Manager") },
       appVersion: { stringValue: String(normalizedPayload.appVersion || "") },
       eventId: { stringValue: String(normalizedPayload.eventId || "") },
@@ -541,11 +642,22 @@ export const publishPublicLiveRace = async (payload: PublicLiveRacePayload): Pro
       raceName: { stringValue: String(normalizedPayload.raceName || "") },
       raceStatus: { stringValue: String(normalizedPayload.raceStatus || "") },
       participantCount: { integerValue: String(Number(normalizedPayload.participantCount || 0)) },
+      hasRaceProgram: { booleanValue: hasRaceProgram },
       payloadSize: { integerValue: String(payloadJson.length) },
+    };
+
+    await patchFirestoreDocument(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_PATH), {
+      storageFormat: { stringValue: "public-live-race-v2" },
+      ...commonFields,
       payloadJson: { stringValue: payloadJson },
     });
 
-    return { ok: true, message: "Live-Rennen veröffentlicht.", updatedAt };
+    await patchFirestoreDocument(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_META_PATH), {
+      storageFormat: { stringValue: "public-live-race-meta-v1" },
+      ...commonFields,
+    });
+
+    return { ok: true, message: "Live-Rennen veröffentlicht.", updatedAt, liveVersion };
   } catch (error: any) {
     return { ok: false, message: error?.message || "Live-Rennen konnte nicht veröffentlicht werden." };
   }
@@ -558,8 +670,10 @@ export const deactivatePublicLiveRace = async (payload: Partial<PublicLiveRacePa
 
   try {
     const updatedAt = new Date().toISOString();
+    const liveVersion = await getNextPublicLiveVersion();
     const normalizedPayload = {
       publicVersion: 1,
+      liveVersion,
       active: false,
       publishedAt: String(payload.publishedAt || updatedAt),
       updatedAt,
@@ -572,6 +686,7 @@ export const deactivatePublicLiveRace = async (payload: Partial<PublicLiveRacePa
       location: String(payload.location || ""),
       date: String(payload.date || ""),
       participantCount: Number(payload.participantCount || 0),
+      hasRaceProgram: false,
       categories: [],
       motos: [],
       finals: [],
@@ -583,6 +698,7 @@ export const deactivatePublicLiveRace = async (payload: Partial<PublicLiveRacePa
       storageFormat: { stringValue: "public-live-race-v1" },
       active: { booleanValue: false },
       updatedAt: { timestampValue: updatedAt },
+      liveVersion: { integerValue: String(liveVersion) },
       appName: { stringValue: normalizedPayload.appName },
       appVersion: { stringValue: normalizedPayload.appVersion },
       eventId: { stringValue: normalizedPayload.eventId },
@@ -590,11 +706,28 @@ export const deactivatePublicLiveRace = async (payload: Partial<PublicLiveRacePa
       raceName: { stringValue: normalizedPayload.raceName },
       raceStatus: { stringValue: normalizedPayload.raceStatus },
       participantCount: { integerValue: String(normalizedPayload.participantCount) },
+      hasRaceProgram: { booleanValue: false },
       payloadSize: { integerValue: String(payloadJson.length) },
       payloadJson: { stringValue: payloadJson },
     });
 
-    return { ok: true, message: "Live-Rennen beendet.", updatedAt };
+    await patchFirestoreDocument(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_META_PATH), {
+      storageFormat: { stringValue: "public-live-race-meta-v1" },
+      active: { booleanValue: false },
+      updatedAt: { timestampValue: updatedAt },
+      liveVersion: { integerValue: String(liveVersion) },
+      appName: { stringValue: normalizedPayload.appName },
+      appVersion: { stringValue: normalizedPayload.appVersion },
+      eventId: { stringValue: normalizedPayload.eventId },
+      eventName: { stringValue: normalizedPayload.eventName },
+      raceName: { stringValue: normalizedPayload.raceName },
+      raceStatus: { stringValue: normalizedPayload.raceStatus },
+      participantCount: { integerValue: String(normalizedPayload.participantCount) },
+      hasRaceProgram: { booleanValue: false },
+      payloadSize: { integerValue: String(payloadJson.length) },
+    });
+
+    return { ok: true, message: "Live-Rennen beendet.", updatedAt, liveVersion };
   } catch (error: any) {
     return { ok: false, message: error?.message || "Live-Rennen konnte nicht beendet werden." };
   }
