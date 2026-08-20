@@ -262,7 +262,7 @@ export default function App() {
   const [publicLiveSearch, setPublicLiveSearch] = useState("");
   const [publicLiveCategoryFilter, setPublicLiveCategoryFilter] = useState("all");
   const [publicLiveMyRiderQuery, setPublicLiveMyRiderQuery] = useState("");
-  const [publicLiveTvMode, setPublicLiveTvMode] = useState(false);
+  const publicLiveTvMode = false;
   const [deviceName, setDeviceName] = useState(() => appStorage.getItem("bmx_device_name") || "");
   const [saveConflictMessage, setSaveConflictMessage] = useState("");
   const [adminLiveRace, setAdminLiveRace] = useState<PublicLiveRacePayload | null>(null);
@@ -4839,15 +4839,40 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
   const stickyButtonBarStyle: React.CSSProperties = {
     ...basePanelStyle,
-    padding: 12,
+    padding: 8,
     position: "sticky",
     top: 0,
     zIndex: 20,
-    marginBottom: 22,
-    borderRadius: "0 0 22px 22px",
+    marginBottom: 18,
+    borderRadius: "0 0 18px 18px",
     background: "rgba(255,255,255,0.96)",
     backdropFilter: "blur(8px)",
-    boxShadow: "0 10px 24px rgba(23,32,51,0.14)",
+    boxShadow: "0 8px 20px rgba(23,32,51,0.12)",
+  };
+
+  const topRaceNavRowStyle: React.CSSProperties = {
+    display: "flex",
+    gap: 6,
+    flexWrap: "nowrap",
+    alignItems: "stretch",
+    width: "100%",
+    overflowX: "hidden",
+    paddingBottom: 0,
+  };
+
+  const topRaceNavButtonStyle: React.CSSProperties = {
+    flex: "1 1 0",
+    minWidth: 0,
+    minHeight: 40,
+    padding: "7px 6px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    fontSize: 11.5,
+    lineHeight: 1.12,
+    whiteSpace: "normal",
+    boxShadow: "none",
   };
 
   const sideRaceNavigationStyle: React.CSSProperties = {
@@ -7531,7 +7556,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         minHeight: "100vh",
         color: colors.text,
         position: "relative",
-        maxWidth: publicLiveTvMode ? 1800 : 1320,
+        maxWidth: 1320,
         margin: "0 auto",
       }}
     >
@@ -7932,7 +7957,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         minHeight: "100vh",
         color: colors.text,
         position: "relative",
-        maxWidth: publicLiveTvMode ? 1800 : 1320,
+        maxWidth: 1320,
         margin: "0 auto",
       }}
     >
@@ -7970,7 +7995,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
         {publicLiveRace && (
           <div style={{ ...basePanelStyle, marginBottom: 18 }}>
-            <div style={{ display: "grid", gridTemplateColumns: publicLiveTvMode ? "minmax(280px, 1fr) 260px 180px 190px" : "minmax(220px, 1fr) 220px 150px 170px", gap: 12, alignItems: "end" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) 220px 150px", gap: 12, alignItems: "end" }}>
               <div>
                 <label style={labelStyle}>Fahrer suchen</label>
                 <input
@@ -7999,9 +8024,6 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 style={!publicLiveSearch.trim() ? compactDisabledButtonStyle : compactPrimaryButtonStyle}
               >
                 Mein Fahrer
-              </button>
-              <button type="button" onClick={() => setPublicLiveTvMode((value) => !value)} style={compactHomeButtonStyle}>
-                {publicLiveTvMode ? "Normalmodus" : "Beamer/TV"}
               </button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: publicLiveTvMode ? "190px 1fr" : "150px 1fr", gap: 14, marginTop: 14, alignItems: "center" }}>
@@ -10248,18 +10270,11 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
         <div style={stickyButtonBarStyle}>
           <div
-            style={{
-              display: "flex",
-              gap: 10,
-              flexWrap: "nowrap",
-              alignItems: "center",
-              overflowX: "auto",
-              paddingBottom: 2,
-            }}
+            style={topRaceNavRowStyle}
           >
             <button
               onClick={() => setViewMode("dashboard")}
-              style={{ ...compactHomeHighlightButtonStyle, minHeight: 52 }}
+              style={{ ...compactHomeHighlightButtonStyle, ...topRaceNavButtonStyle }}
             >
               Home
             </button>
@@ -10267,7 +10282,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               type="button"
               onClick={saveOnlineFullAppState}
               disabled={!isFirebaseSignedIn}
-              style={{ ...(!isFirebaseSignedIn ? compactDisabledButtonStyle : (hasUnsavedChanges || !lastOnlineSaveAt ? actionWarningButtonStyle : actionSaveButtonStyle)), minHeight: 52 }}
+              style={{ ...(!isFirebaseSignedIn ? compactDisabledButtonStyle : (hasUnsavedChanges || !lastOnlineSaveAt ? actionWarningButtonStyle : actionSaveButtonStyle)), ...topRaceNavButtonStyle }}
               title={!isFirebaseSignedIn ? "Bitte zuerst auf der Startseite anmelden" : hasUnsavedChanges || !lastOnlineSaveAt ? "Änderungen vorhanden – online speichern" : "Aktueller Stand ist online gespeichert"}
             >
               Speichern
@@ -10277,8 +10292,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               disabled={heatsCreated || raceClosed}
               style={
                 heatsCreated || raceClosed
-                  ? compactDisabledButtonStyle
-                  : { ...compactPrimaryButtonStyle, minHeight: 52 }
+                  ? { ...compactDisabledButtonStyle, ...topRaceNavButtonStyle }
+                  : { ...compactPrimaryButtonStyle, ...topRaceNavButtonStyle }
               }
               title={
                 heatsCreated
@@ -10291,12 +10306,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             <button
               onClick={startManualResultsMode}
               disabled={raceClosed}
-              style={raceClosed ? compactDisabledButtonStyle : { ...compactPrimaryButtonStyle, minHeight: 52 }}
+              style={raceClosed ? { ...compactDisabledButtonStyle, ...topRaceNavButtonStyle } : { ...compactPrimaryButtonStyle, ...topRaceNavButtonStyle }}
               title="Rangliste direkt manuell aus allen Teilnehmern je Kategorie erstellen"
             >
               Manuelle Rangliste
             </button>
-            <button onClick={exportHeatsStartPdf} style={{ ...compactHomeButtonStyle, minHeight: 52 }}>
+            <button onClick={exportHeatsStartPdf} style={{ ...compactHomeButtonStyle, ...topRaceNavButtonStyle }}>
               Motos PDF
             </button>
             <button
@@ -10304,8 +10319,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               disabled={!heatsCreated || finalsCreated || raceClosed}
               style={
                 !heatsCreated || finalsCreated || raceClosed
-                  ? compactDisabledButtonStyle
-                  : { ...compactPrimaryButtonStyle, minHeight: 52 }
+                  ? { ...compactDisabledButtonStyle, ...topRaceNavButtonStyle }
+                  : { ...compactPrimaryButtonStyle, ...topRaceNavButtonStyle }
               }
               title={
                 !heatsCreated
@@ -10322,29 +10337,29 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               disabled={raceClosed || !Object.values(finals || {}).some((rounds: any) => isSemifinalProgram(rounds) && !rounds?.["A-Final"])}
               style={
                 raceClosed || !Object.values(finals || {}).some((rounds: any) => isSemifinalProgram(rounds) && !rounds?.["A-Final"])
-                  ? compactDisabledButtonStyle
-                  : { ...compactPrimaryButtonStyle, minHeight: 52 }
+                  ? { ...compactDisabledButtonStyle, ...topRaceNavButtonStyle }
+                  : { ...compactPrimaryButtonStyle, ...topRaceNavButtonStyle }
               }
               title="Nach vollständig erfassten Halbfinalresultaten D-, C-, B- und A-Finals freischalten"
             >
               Finals freischalten
             </button>
-            <button onClick={exportFinalsStartPdf} style={{ ...compactHomeButtonStyle, minHeight: 52 }}>
+            <button onClick={exportFinalsStartPdf} style={{ ...compactHomeButtonStyle, ...topRaceNavButtonStyle }}>
               Finals PDF
             </button>
             <button
               onClick={toggleRaceClosed}
-              style={raceClosed ? { ...actionWarningButtonStyle, minHeight: 52 } : { ...actionSaveButtonStyle, minHeight: 52 }}
+              style={raceClosed ? { ...actionWarningButtonStyle, ...topRaceNavButtonStyle } : { ...actionSaveButtonStyle, ...topRaceNavButtonStyle }}
             >
               {raceClosed ? "Race wieder öffnen" : "Race abschliessen"}
             </button>
-            <button onClick={exportFinalsPdf} style={{ ...compactPrimaryButtonStyle, minHeight: 52 }}>
+            <button onClick={exportFinalsPdf} style={{ ...compactPrimaryButtonStyle, ...topRaceNavButtonStyle }}>
               Resultate PDF
             </button>
             <button
               onClick={resetHeats}
               disabled={raceClosed}
-              style={raceClosed ? compactDisabledButtonStyle : { ...actionDangerButtonStyle, minHeight: 52 }}
+              style={raceClosed ? { ...compactDisabledButtonStyle, ...topRaceNavButtonStyle } : { ...actionDangerButtonStyle, ...topRaceNavButtonStyle }}
             >
               Reset
             </button>
