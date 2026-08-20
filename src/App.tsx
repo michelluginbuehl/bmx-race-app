@@ -7614,7 +7614,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                   ? "Browser im Hintergrund: sparsame Live-Prüfung alle 5 Minuten"
                   : publicLiveHasRaceProgram(publicLiveRace, publicLiveMeta)
                     ? "Rennen live: alle 30 Sekunden kleine Meta-Prüfung; komplette Daten nur bei Änderung"
-                    : "Startliste: manuell aktualisieren oder automatische Sicherheitsprüfung alle 1 Stunde"}
+                    : ""}
               </div>
               <div style={{ color: colors.muted, fontWeight: 800, fontSize: 13, marginTop: 4 }}>
                 Live-Version: {publicLiveMeta?.liveVersion || publicLiveRace?.liveVersion || "-"}
