@@ -83,12 +83,28 @@ const SEMIFINAL_MIN_RIDERS = 20;
 const FINAL_DISPLAY_ROUND_ORDER = [
   "Manuelle Rangliste",
   "4. Vorlauf",
-  "D-Final",
-  "C-Final",
   "Halbfinal 1",
   "Halbfinal 2",
+  "D-Final",
+  "C-Final",
   "B-Final",
   "A-Final",
+] as const;
+const FINAL_QUALIFYING_DISPLAY_ROUND_ORDER = [
+  "Manuelle Rangliste",
+  "4. Vorlauf",
+  "Halbfinal 1",
+  "Halbfinal 2",
+  "D-Final",
+  "C-Final",
+  "B-Final",
+] as const;
+const FINAL_PRE_A_DISPLAY_ROUND_ORDER = [
+  "Manuelle Rangliste",
+  "4. Vorlauf",
+  "D-Final",
+  "C-Final",
+  "B-Final",
 ] as const;
 const RACE_RANKING_ROUND_ORDER = [
   "Manuelle Rangliste",
@@ -2928,9 +2944,8 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
       "Halbfinal 2": createStartListRows(semi2Indexes.map((index) => top16[index]).filter(Boolean)),
     };
 
-    if (remaining.length > 0) program["C-Final"] = createStartListRows(remaining.slice(0, 8));
-    if (remaining.length > 8) program["D-Final"] = createStartListRows(remaining.slice(8, 16));
-
+    // C- und D-Finals werden bewusst noch nicht freigeschaltet.
+    // Sie werden erst nach vollständig erfassten Halbfinalresultaten zusammen mit B- und A-Final erzeugt.
     return program;
   };
 
@@ -3788,6 +3803,9 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
         ...semi1Sorted.slice(4, 8),
         ...semi2Sorted.slice(4, 8),
       ]);
+      const remainingFromMotos = getCombinedFinalRanking(finalCategory).slice(16, MAX_RIDERS_PER_RACE_CATEGORY);
+      const cFinalRows = createStartListRows(remainingFromMotos.slice(0, 8));
+      const dFinalRows = createStartListRows(remainingFromMotos.slice(8, 16));
 
       if (aFinalRows.length === 0) {
         warnings.push(`${getFinalCategoryLabel(finalCategory)}: Aus den Halbfinals konnten keine A-Final-Fahrer ermittelt werden.`);
@@ -3796,19 +3814,23 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
       nextFinals[finalCategory] = {
         ...rounds,
-        "A-Final": aFinalRows,
+        ...(dFinalRows.length > 0 ? { "D-Final": dFinalRows } : {}),
+        ...(cFinalRows.length > 0 ? { "C-Final": cFinalRows } : {}),
         ...(bFinalRows.length > 0 ? { "B-Final": bFinalRows } : {}),
+        "A-Final": aFinalRows,
       };
       delete nextFinalResults[`${finalCategory}_A-Final`];
       delete nextFinalResults[`${finalCategory}_B-Final`];
+      delete nextFinalResults[`${finalCategory}_C-Final`];
+      delete nextFinalResults[`${finalCategory}_D-Final`];
       createdCount += 1;
     });
 
     if (createdCount === 0) {
       window.alert(
         warnings.length
-          ? `A-/B-Finals konnten noch nicht erstellt werden:\n\n${warnings.join("\n")}`
-          : "Es gibt keine offenen Halbfinals, aus denen A-/B-Finals erstellt werden können.",
+          ? `Finals konnten noch nicht freigeschaltet werden:\n\n${warnings.join("\n")}`
+          : "Es gibt keine offenen Halbfinals, aus denen Finals freigeschaltet werden können.",
       );
       return;
     }
@@ -3820,7 +3842,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     setFinals(orderRecordByCategories(nextFinals));
     setFinalResults(nextFinalResults);
     setFinalManualOrder({});
-    addChangeLog(`${selectedRace}: A-/B-Finals aus Halbfinals erstellt`);
+    addChangeLog(`${selectedRace}: Finals aus Halbfinals freigeschaltet`);
   };
 
   const createFinals = async () => {
@@ -4701,6 +4723,63 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     </div>
   );
 
+  const getVisiblePreAFinalRoundNames = (rounds: Record<string, any[]> | undefined) => {
+    if (!rounds) return [] as string[];
+    const hasMainFinals = !!rounds["A-Final"]?.length;
+    const order = hasMainFinals ? FINAL_PRE_A_DISPLAY_ROUND_ORDER : FINAL_QUALIFYING_DISPLAY_ROUND_ORDER;
+    return order.filter((roundName) => {
+      const heat = rounds[roundName];
+      return Array.isArray(heat) && heat.length > 0;
+    });
+  };
+
+  const getVisibleAFinalRoundNames = (rounds: Record<string, any[]> | undefined) => {
+    if (!rounds?.["A-Final"]?.length) return [] as string[];
+    return ["A-Final"];
+  };
+
+  const renderFinalRoundCard = (cat: string, roundName: string) => {
+    const heat = finals[cat]?.[roundName];
+    if (!heat || heat.length === 0) return null;
+
+    const key = `${cat}_${roundName}`;
+    const result = finalResults[key] || [];
+
+    return (
+      <div
+        key={key}
+        style={getFinalCardStyle(roundName, result.length > 0)}
+      >
+        <strong
+          style={{
+            color: colors.title,
+            fontSize: roundName === "A-Final" || roundName === "Manuelle Rangliste" ? 22 : 18,
+          }}
+        >
+          {getRoundDisplayName(roundName)}
+        </strong>
+
+        <div
+          style={{ display: "flex", gap: 20, marginTop: 10 }}
+        >
+          {renderStartList(heat)}
+          {renderSavedResult(result)}
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <HeatInput
+            heat={heat}
+            value={result}
+            allowUnlimitedSelectedRows={roundName === "Manuelle Rangliste"}
+            onSave={(data: any[]) =>
+              saveFinalResult(cat, roundName, data)
+            }
+          />
+        </div>
+      </div>
+    );
+  };
+
   const getResultStatusOrder = (status: any) => {
     const value = String(status || "").toUpperCase();
     if (value === "DNF" || value === "DNS") return 1;
@@ -5075,21 +5154,26 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   const exportFinalsStartPdf = () => {
     const doc = new jsPDF("landscape");
     let firstPage = true;
+    const title = "BMX Finals - Startplätze";
 
-    sortCategories(Object.keys(finals)).forEach((cat) => {
+    const addFinalsStartPage = (cat: string, roundNames: string[], titleSuffix = "") => {
       const rounds = finals[cat];
       if (!rounds) return;
+      const visibleRoundNames = roundNames.filter((roundName) => {
+        const heat = rounds[roundName];
+        return Array.isArray(heat) && heat.length > 0;
+      });
+      if (visibleRoundNames.length === 0) return;
 
       if (!firstPage) doc.addPage();
       firstPage = false;
 
-      const title = "BMX Finals - Startplätze";
-      const subtitle = `Kategorie: ${getFinalCategoryLabel(cat)}`;
+      const subtitle = `Kategorie: ${getFinalCategoryLabel(cat)}${titleSuffix}`;
       addPdfHeader(doc, title, subtitle);
 
       let currentY = 52;
 
-      FINAL_DISPLAY_ROUND_ORDER.forEach((roundName) => {
+      visibleRoundNames.forEach((roundName) => {
         const heat = rounds[roundName];
         if (!heat || !heat.length) return;
 
@@ -5140,7 +5224,11 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
         currentY = (doc as any).lastAutoTable.finalY + 6;
       });
-    });
+    };
+
+    const categories = sortCategories(Object.keys(finals || {}));
+    categories.forEach((cat) => addFinalsStartPage(cat, getVisiblePreAFinalRoundNames(finals[cat])));
+    categories.forEach((cat) => addFinalsStartPage(cat, getVisibleAFinalRoundNames(finals[cat]), " · A-Final"));
 
     addPdfPageNumbers(doc);
     doc.save(buildPdfFilename("bmx_finals_startplaetze"));
@@ -5601,7 +5689,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
     Object.keys(finals || {}).forEach((cat) => {
       if (isSemifinalProgram(finals[cat]) && !finals[cat]?.["A-Final"]) {
-        warnings.push(`${getFinalCategoryLabel(cat)}: A-/B-Finals wurden aus den Halbfinals noch nicht erstellt.`);
+        warnings.push(`${getFinalCategoryLabel(cat)}: Finals wurden aus den Halbfinals noch nicht freigeschaltet.`);
       }
       Object.keys(finals[cat] || {}).forEach((roundName) => {
         const startList = finals[cat][roundName] || [];
@@ -6423,21 +6511,30 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
       })).filter((run) => run.races.length > 0),
     })).filter((categoryBlock) => categoryBlock.runs.length > 0);
 
-    const publicFinals = sortCategories(Object.keys(finals || {})).map((category) => ({
-      category: getFinalCategoryLabel(category),
-      rounds: FINAL_DISPLAY_ROUND_ORDER.map((roundName) => {
-        const heat = finals?.[category]?.[roundName] || [];
-        const key = `${category}_${roundName}`;
-        const result = Array.isArray(finalResults?.[key]) ? finalResults[key] : [];
-        return {
-          name: getRoundDisplayName(roundName),
-          startList: [...heat]
-            .sort((a: any, b: any) => Number(a.startPos || 99) - Number(b.startPos || 99))
-            .map((rider: any) => getPublicRiderRow(rider)),
-          results: result.map((rider: any, index: number) => getPublicRiderRow(rider, index + 1)),
-        };
-      }).filter((round) => round.startList.length > 0 || round.results.length > 0),
-    })).filter((categoryBlock) => categoryBlock.rounds.length > 0);
+    const buildPublicFinalRound = (category: string, roundName: string) => {
+      const heat = finals?.[category]?.[roundName] || [];
+      const key = `${category}_${roundName}`;
+      const result = Array.isArray(finalResults?.[key]) ? finalResults[key] : [];
+      return {
+        name: getRoundDisplayName(roundName),
+        startList: [...heat]
+          .sort((a: any, b: any) => Number(a.startPos || 99) - Number(b.startPos || 99))
+          .map((rider: any) => getPublicRiderRow(rider)),
+        results: result.map((rider: any, index: number) => getPublicRiderRow(rider, index + 1)),
+      };
+    };
+
+    const publicFinalCategories = sortCategories(Object.keys(finals || {}));
+    const publicFinals = [
+      ...publicFinalCategories.map((category) => ({
+        category: getFinalCategoryLabel(category),
+        rounds: getVisiblePreAFinalRoundNames(finals?.[category]).map((roundName) => buildPublicFinalRound(category, roundName)),
+      })).filter((categoryBlock) => categoryBlock.rounds.some((round) => round.startList.length > 0 || round.results.length > 0)),
+      ...publicFinalCategories.map((category) => ({
+        category: `${getFinalCategoryLabel(category)} · A-Final`,
+        rounds: getVisibleAFinalRoundNames(finals?.[category]).map((roundName) => buildPublicFinalRound(category, roundName)),
+      })).filter((categoryBlock) => categoryBlock.rounds.some((round) => round.startList.length > 0 || round.results.length > 0)),
+    ];
 
     const publicFinalRankings = Object.keys(finals || {}).length > 0
       ? originalRaceCategories().map((category) => ({
@@ -7915,9 +8012,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
       { count: "1–8", motos: "3 Motos + 4. Moto", finals: "Kein A/B-Final. Der 4. Moto ist der Endlauf." },
       { count: "9–16", motos: "3 Motos", finals: "A-Final und B-Final nach Moto-Punkten." },
       { count: "17–19", motos: "3 Motos", finals: "A-, B- und C-Final nach Moto-Punkten." },
-      { count: "20", motos: "3 Motos", finals: "Top 16 in zwei Halbfinals, restliche 4 Fahrer direkt in C-Final." },
-      { count: "21–24", motos: "3 Motos", finals: "Top 16 in zwei Halbfinals, restliche 5–8 Fahrer direkt in C-Final." },
-      { count: "25–32", motos: "3 Motos", finals: "Top 16 in zwei Halbfinals, Plätze 17–24 in C-Final, Plätze 25–32 in D-Final." },
+      { count: "20", motos: "3 Motos", finals: "Top 16 zuerst in zwei Halbfinals. Nach fertigen Halbfinalresultaten wird C-Final für die restlichen 4 Fahrer freigeschaltet." },
+      { count: "21–24", motos: "3 Motos", finals: "Top 16 zuerst in zwei Halbfinals. Nach fertigen Halbfinalresultaten wird C-Final für die restlichen 5–8 Fahrer freigeschaltet." },
+      { count: "25–32", motos: "3 Motos", finals: "Top 16 zuerst in zwei Halbfinals. Nach fertigen Halbfinalresultaten werden Plätze 17–24 im C-Final und 25–32 im D-Final freigeschaltet." },
       { count: ">32", motos: "Nicht erlaubt", finals: "App bricht mit Fehlermeldung ab." },
     ];
 
@@ -7961,7 +8058,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <li>DNS in einem Final-/Endresultat wird nicht in der Race-Rangliste geführt und erhält keine Gesamtwertungspunkte für dieses Rennen.</li>
               <li>Ab 20 Teilnehmern gehen die besten 16 Fahrer nach den Motos in zwei Halbfinals.</li>
               <li>Aus den Halbfinals kommen die besten 4 Fahrer pro Halbfinal in den A-Final; die restlichen gewerteten Fahrer kommen in den B-Final.</li>
-              <li>Fahrer ab Rang 17 nach den Motos fahren je nach Anzahl C-Final und D-Final.</li>
+              <li>C- und D-Finals werden bei Halbfinal-Kategorien erst freigeschaltet, wenn die Halbfinalresultate vollständig erfasst sind und die Finals freigeschaltet werden.</li>
+              <li>Die operative Final-Darstellung läuft nach dem Freischalten zuerst D-Final, C-Final und B-Final je Kategorie; alle A-Finals werden am Schluss gesammelt angezeigt.</li>
             </ul>
           </div>
 
@@ -9188,9 +9286,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                   ? compactDisabledButtonStyle
                   : { ...compactPrimaryButtonStyle, minHeight: 52 }
               }
-              title="Nach erfassten Halbfinalresultaten A- und B-Finals erstellen"
+              title="Nach vollständig erfassten Halbfinalresultaten D-, C-, B- und A-Finals freischalten"
             >
-              A/B-Finals erstellen
+              Finals freischalten
             </button>
             <button onClick={exportFinalsStartPdf} style={{ ...compactHomeButtonStyle, minHeight: 52 }}>
               Finals PDF
@@ -9725,58 +9823,42 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         {Object.keys(finals).length > 0 && (
           <div id="finallaeufe" style={{ marginTop: 40, scrollMarginTop: 120 }}>
             <h2 style={{ color: colors.title }}>🏁 Finals</h2>
+            <div style={{ ...helperTextStyle, marginBottom: 14 }}>
+              Bei Halbfinal-Kategorien werden C- und D-Finals erst nach vollständig erfassten Halbfinals freigeschaltet. Danach erscheinen zuerst D-, C- und B-Finals je Kategorie; alle A-Finals werden am Schluss gesammelt angezeigt.
+            </div>
 
-            {sortCategories(Object.keys(finals)).map((cat) => (
-              <div key={cat} style={{ marginBottom: 30 }}>
-                <h3 style={{ color: colors.title }}>
-                  {getFinalCategoryLabel(cat)}
-                </h3>
+            {sortCategories(Object.keys(finals)).map((cat) => {
+              const roundNames = getVisiblePreAFinalRoundNames(finals[cat]);
+              if (roundNames.length === 0) return null;
 
-                {FINAL_DISPLAY_ROUND_ORDER.map(
-                  (roundName) => {
-                    const heat = finals[cat]?.[roundName];
-                    if (!heat || heat.length === 0) return null;
+              return (
+                <div key={cat} style={{ marginBottom: 30 }}>
+                  <h3 style={{ color: colors.title }}>
+                    {getFinalCategoryLabel(cat)}
+                  </h3>
+                  {roundNames.map((roundName) => renderFinalRoundCard(cat, roundName))}
+                </div>
+              );
+            })}
 
-                    const key = `${cat}_${roundName}`;
-                    const result = finalResults[key] || [];
+            {sortCategories(Object.keys(finals)).some((cat) => getVisibleAFinalRoundNames(finals[cat]).length > 0) && (
+              <div style={{ marginTop: 34, paddingTop: 16, borderTop: `4px solid ${colors.finalABorder}` }}>
+                <h2 style={{ color: colors.title }}>🏆 A-Finals am Schluss</h2>
+                {sortCategories(Object.keys(finals)).map((cat) => {
+                  const roundNames = getVisibleAFinalRoundNames(finals[cat]);
+                  if (roundNames.length === 0) return null;
 
-                    return (
-                      <div
-                        key={key}
-                        style={getFinalCardStyle(roundName, result.length > 0)}
-                      >
-                        <strong
-                          style={{
-                            color: colors.title,
-                            fontSize: roundName === "A-Final" || roundName === "Manuelle Rangliste" ? 22 : 18,
-                          }}
-                        >
-                          {getRoundDisplayName(roundName)}
-                        </strong>
-
-                        <div
-                          style={{ display: "flex", gap: 20, marginTop: 10 }}
-                        >
-                          {renderStartList(heat)}
-                          {renderSavedResult(result)}
-                        </div>
-
-                        <div style={{ marginTop: 16 }}>
-                          <HeatInput
-                            heat={heat}
-                            value={result}
-                            allowUnlimitedSelectedRows={roundName === "Manuelle Rangliste"}
-                            onSave={(data: any[]) =>
-                              saveFinalResult(cat, roundName, data)
-                            }
-                          />
-                        </div>
-                      </div>
-                    );
-                  },
-                )}
+                  return (
+                    <div key={`a-final-${cat}`} style={{ marginBottom: 30 }}>
+                      <h3 style={{ color: colors.title }}>
+                        {getFinalCategoryLabel(cat)}
+                      </h3>
+                      {roundNames.map((roundName) => renderFinalRoundCard(cat, roundName))}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            )}
           </div>
         )}
 
