@@ -8,10 +8,24 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.16.6",
+    title: "Final-Darstellung & Halbfinal-Freischaltung",
+    date: "2026-08-20",
+    current: true,
+    items: [
+      "C- und D-Finals werden bei Halbfinal-Kategorien nicht mehr sofort mit den Halbfinals angezeigt.",
+      "Nach vollständig erfassten Halbfinalresultaten werden D-, C-, B- und A-Finals gemeinsam über Finals freischalten erzeugt.",
+      "Die Final-Darstellung ist im Rennbetrieb nach Ablauf sortiert: zuerst D-, C- und B-Finals je Kategorie, danach alle A-Finals gesammelt am Schluss.",
+      "Finals-PDF und öffentliche Live-Ansicht übernehmen die gleiche Reihenfolge mit A-Finals am Schluss.",
+      "Renn-Reglement in der App wurde mit der neuen Freischalt- und Darstellungsregel ergänzt.",
+      "Keine Änderung an Motos, Teilnehmerlogik, Login oder Online-Speicher.",
+    ],
+  },
+  {
     version: "v1.16.5",
     title: "Halbfinal-Logik & Renn-Reglement",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "Maximal 32 Teilnehmer pro Kategorie/Laufgruppe erlaubt; zu grosse Kategorien werden mit klarer Fehlermeldung blockiert.",
       "Ab 20 Teilnehmern werden automatisch zwei Halbfinals für die besten 16 Fahrer nach den Motos erstellt.",
