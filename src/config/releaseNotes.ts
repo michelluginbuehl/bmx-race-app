@@ -8,10 +8,23 @@ export type ReleaseNote = {
 
 export const APP_RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "v1.12.2",
+    title: "Live-Ansicht für Handy-Hochformat optimiert",
+    date: "2026-08-21",
+    current: true,
+    items: [
+      "Öffentliche Live-Ansicht für Smartphones im Hochformat optimiert.",
+      "Fahrer-Suche, Mein Fahrer, Kategorie-Filter und QR-Code werden auf schmalen Bildschirmen untereinander und besser bedienbar dargestellt.",
+      "Motos, Finals, Startlisten und Resultate verwenden auf dem Handy kompaktere Karten ohne horizontales Überlaufen.",
+      "Aktueller Lauf und ans-Gate-Markierung bleiben auf dem Handy deutlich sichtbar.",
+      "Keine Änderung an Rennlogik, Live-Daten, Login oder Online-Speicher.",
+    ],
+  },
+  {
     version: "v1.12.1",
     title: "Live-Ansicht bereinigt und Rennmenü kompakter",
     date: "2026-08-20",
-    current: true,
+    current: false,
     items: [
       "Beamer-/TV-Modus aus der öffentlichen Live-Ansicht entfernt.",
       "Live-Ansicht bleibt mit Fahrer-Suche, Mein Fahrer, Kategorie-Filter und QR-Code erhalten.",
