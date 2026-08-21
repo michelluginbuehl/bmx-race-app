@@ -262,7 +262,10 @@ export default function App() {
   const [publicLiveSearch, setPublicLiveSearch] = useState("");
   const [publicLiveCategoryFilter, setPublicLiveCategoryFilter] = useState("all");
   const [publicLiveMyRiderQuery, setPublicLiveMyRiderQuery] = useState("");
+  const [publicLiveViewportWidth, setPublicLiveViewportWidth] = useState(() => typeof window === "undefined" ? 1024 : window.innerWidth);
   const publicLiveTvMode = false;
+  const publicLiveMobile = publicLiveViewportWidth <= 720;
+  const publicLiveNarrow = publicLiveViewportWidth <= 960;
   const [deviceName, setDeviceName] = useState(() => appStorage.getItem("bmx_device_name") || "");
   const [saveConflictMessage, setSaveConflictMessage] = useState("");
   const [adminLiveRace, setAdminLiveRace] = useState<PublicLiveRacePayload | null>(null);
@@ -338,6 +341,18 @@ export default function App() {
     updateLiveRoute();
     window.addEventListener("hashchange", updateLiveRoute);
     return () => window.removeEventListener("hashchange", updateLiveRoute);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updatePublicLiveViewportWidth = () => setPublicLiveViewportWidth(window.innerWidth || 1024);
+    updatePublicLiveViewportWidth();
+    window.addEventListener("resize", updatePublicLiveViewportWidth);
+    window.addEventListener("orientationchange", updatePublicLiveViewportWidth);
+    return () => {
+      window.removeEventListener("resize", updatePublicLiveViewportWidth);
+      window.removeEventListener("orientationchange", updatePublicLiveViewportWidth);
+    };
   }, []);
 
   useEffect(() => {
@@ -7550,13 +7565,13 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   const renderLoginStartScreen = () => (
     <div
       style={{
-        padding: 20,
+        padding: publicLiveMobile ? 8 : 20,
         fontFamily: "Arial, sans-serif",
         background: colors.pageBg,
         minHeight: "100vh",
         color: colors.text,
         position: "relative",
-        maxWidth: 1320,
+        maxWidth: publicLiveMobile ? 560 : 1320,
         margin: "0 auto",
       }}
     >
@@ -7624,7 +7639,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             ) : (
               <>
-                <div style={{ display: "grid", gap: 12 }}>
+                <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
                   <div>
                     <label style={labelStyle}>E-Mail</label>
                     <input
@@ -7694,16 +7709,22 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   const publicLivePanelStyle: React.CSSProperties = {
     border: `1px solid ${colors.cardBorder}`,
-    borderRadius: 18,
+    borderRadius: publicLiveMobile ? 14 : 18,
     background: colors.cardBg,
-    padding: 14,
+    padding: publicLiveMobile ? 10 : 14,
     boxShadow: "0 8px 20px rgba(23,32,51,0.07)",
+  };
+
+  const publicLiveBasePanelStyle: React.CSSProperties = {
+    ...basePanelStyle,
+    padding: publicLiveMobile ? 12 : basePanelStyle.padding,
+    borderRadius: publicLiveMobile ? 16 : basePanelStyle.borderRadius,
   };
 
   const renderPublicLiveRows = (rows: any[], mode: "start" | "result") => {
     const visibleRows = filterPublicLiveRows(rows);
     return (
-    <div style={{ display: "grid", gap: publicLiveTvMode ? 8 : 4, marginTop: 8 }}>
+    <div style={{ display: "grid", gap: publicLiveMobile ? 6 : publicLiveTvMode ? 8 : 4, marginTop: 8 }}>
       {visibleRows.length === 0 ? (
         <div style={{ color: colors.muted, fontWeight: 800, padding: "8px 0" }}>{publicLiveSearchTerm ? "Keine passenden Fahrer in diesem Lauf" : "Noch nicht erfasst"}</div>
       ) : visibleRows.map((row: any, index: number) => (
@@ -7711,12 +7732,16 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           key={`${mode}-${row.plate}-${row.name}-${index}`}
           style={{
             display: "grid",
-            gridTemplateColumns: mode === "start" ? "48px 76px minmax(140px, 1fr) minmax(90px, 0.7fr)" : "48px 76px minmax(140px, 1fr) minmax(80px, 0.6fr)",
-            gap: 8,
+            gridTemplateColumns: publicLiveMobile
+              ? "42px 62px minmax(0, 1fr)"
+              : mode === "start"
+                ? "48px 76px minmax(140px, 1fr) minmax(90px, 0.7fr)"
+                : "48px 76px minmax(140px, 1fr) minmax(80px, 0.6fr)",
+            gap: publicLiveMobile ? 6 : 8,
             alignItems: "center",
-            minHeight: publicLiveTvMode ? 44 : 32,
-            padding: publicLiveTvMode ? "9px 10px" : "6px 8px",
-            fontSize: publicLiveTvMode ? 20 : undefined,
+            minHeight: publicLiveMobile ? 44 : publicLiveTvMode ? 44 : 32,
+            padding: publicLiveMobile ? "8px 8px" : publicLiveTvMode ? "9px 10px" : "6px 8px",
+            fontSize: publicLiveMobile ? 15 : publicLiveTvMode ? 20 : undefined,
             borderRadius: 10,
             background: index % 2 === 0 ? colors.cardSoftBg : colors.cardBg,
             border: `1px solid ${colors.cardBorder}`,
@@ -7726,7 +7751,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           <div style={{ color: colors.blueBtn, fontWeight: 1000 }}>{mode === "start" ? row.gate || "-" : row.rank || index + 1}</div>
           <div>#{row.plate || "-"}</div>
           <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.name || "-"}</div>
-          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: colors.muted }}>{mode === "result" ? row.status || row.club || "-" : row.club || "-"}</div>
+          <div style={{ gridColumn: publicLiveMobile ? "1 / -1" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: colors.muted, fontSize: publicLiveMobile ? 12 : undefined }}>{mode === "result" ? row.status || row.club || "-" : row.club || "-"}</div>
         </div>
       ))}
     </div>
@@ -7762,12 +7787,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   const getPublicLiveRaceCardStyle = (flowKey: string, flowState: { activeKey: string; gateKey: string }, complete: boolean): React.CSSProperties => {
     if (flowKey && flowKey === flowState.activeKey) {
-      return { border: `4px solid ${colors.blueBtn}`, borderRadius: 14, padding: 12, background: "#eaf2ff", boxShadow: "0 10px 26px rgba(37,99,235,0.18)" };
+      return { border: `${publicLiveMobile ? 3 : 4}px solid ${colors.blueBtn}`, borderRadius: 14, padding: publicLiveMobile ? 10 : 12, background: "#eaf2ff", boxShadow: "0 10px 26px rgba(37,99,235,0.18)" };
     }
     if (flowKey && flowKey === flowState.gateKey) {
-      return { border: `4px solid ${colors.redBtn}`, borderRadius: 14, padding: 12, background: "#fff1f1", boxShadow: "0 10px 26px rgba(220,38,38,0.14)" };
+      return { border: `${publicLiveMobile ? 3 : 4}px solid ${colors.redBtn}`, borderRadius: 14, padding: publicLiveMobile ? 10 : 12, background: "#fff1f1", boxShadow: "0 10px 26px rgba(220,38,38,0.14)" };
     }
-    return { border: `1px solid ${complete ? colors.greenBorder : colors.cardBorder}`, borderRadius: 14, padding: 12, background: complete ? colors.greenBg : colors.cardSoftBg };
+    return { border: `1px solid ${complete ? colors.greenBorder : colors.cardBorder}`, borderRadius: 14, padding: publicLiveMobile ? 10 : 12, background: complete ? colors.greenBg : colors.cardSoftBg };
   };
 
   const getPublicLiveFlowLabel = (flowKey: string, flowState: { activeKey: string; gateKey: string }, complete: boolean) => {
@@ -7778,7 +7803,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   };
 
   const getPublicLiveFlowLabelStyle = (flowKey: string, flowState: { activeKey: string; gateKey: string }, complete: boolean): React.CSSProperties => {
-    const base: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 96, padding: "5px 10px", borderRadius: 999, fontSize: 12, fontWeight: 1000, textTransform: "uppercase", letterSpacing: 0.4, marginRight: 8 };
+    const base: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: publicLiveMobile ? 78 : 96, padding: publicLiveMobile ? "4px 8px" : "5px 10px", borderRadius: 999, fontSize: publicLiveMobile ? 10 : 12, fontWeight: 1000, textTransform: "uppercase", letterSpacing: 0.4, marginRight: publicLiveMobile ? 0 : 8 };
     if (complete) return { ...base, background: colors.greenBg, color: colors.greenBtn, border: `1px solid ${colors.greenBorder}` };
     if (flowKey && flowKey === flowState.activeKey) return { ...base, background: colors.blueBtn, color: "#fff", border: `1px solid ${colors.blueBtn}` };
     if (flowKey && flowKey === flowState.gateKey) return { ...base, background: colors.redBtn, color: "#fff", border: `1px solid ${colors.redBtn}` };
@@ -7911,10 +7936,10 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     const nextEntry = detail.entries.find((entry: any) => !entry.complete) || null;
     return (
       <div style={{ ...basePanelStyle, marginBottom: 18, borderLeft: `6px solid ${colors.blueBtn}` }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: publicLiveMobile ? "flex-start" : "center" }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Mein Fahrer</div>
-            <h2 style={{ margin: "4px 0", color: colors.title }}>#{detail.rider.plate || "-"} · {detail.rider.name || "-"}</h2>
+            <h2 style={{ margin: "4px 0", color: colors.title, fontSize: publicLiveMobile ? 20 : undefined, lineHeight: 1.15 }}>#{detail.rider.plate || "-"} · {detail.rider.name || "-"}</h2>
             <div style={{ color: colors.muted, fontWeight: 900 }}>{detail.rider.category || detail.entries[0]?.category || "-"}{detail.rider.club ? ` · ${detail.rider.club}` : ""}</div>
           </div>
           <button type="button" onClick={() => setPublicLiveMyRiderQuery("")} style={smallGhostButtonStyle}>Ausblenden</button>
@@ -7927,10 +7952,10 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         )}
         <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
           {detail.entries.map((entry: any, index: number) => (
-            <div key={`my-rider-${index}`} style={{ display: "grid", gridTemplateColumns: publicLiveTvMode ? "120px 1fr 120px" : "90px 1fr 90px", gap: 10, alignItems: "center", padding: "8px 10px", borderRadius: 12, border: `1px solid ${colors.cardBorder}`, background: entry.complete ? colors.greenBg : colors.cardSoftBg, fontWeight: 850 }}>
+            <div key={`my-rider-${index}`} style={{ display: "grid", gridTemplateColumns: publicLiveMobile ? "1fr" : publicLiveTvMode ? "120px 1fr 120px" : "90px 1fr 90px", gap: publicLiveMobile ? 4 : 10, alignItems: "center", padding: publicLiveMobile ? "10px 10px" : "8px 10px", borderRadius: 12, border: `1px solid ${colors.cardBorder}`, background: entry.complete ? colors.greenBg : colors.cardSoftBg, fontWeight: 850 }}>
               <div>{entry.type}</div>
               <div>{entry.category} · {entry.label}</div>
-              <div style={{ textAlign: "right" }}>{entry.result?.rank ? `${entry.result.rank}.` : entry.row?.status || (entry.complete ? "fertig" : "offen")}</div>
+              <div style={{ textAlign: publicLiveMobile ? "left" : "right", color: colors.muted }}>{entry.result?.rank ? `${entry.result.rank}.` : entry.row?.status || (entry.complete ? "fertig" : "offen")}</div>
             </div>
           ))}
         </div>
@@ -7951,24 +7976,24 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   const renderPublicLiveView = () => (
     <div
       style={{
-        padding: 20,
+        padding: publicLiveMobile ? 8 : 20,
         fontFamily: "Arial, sans-serif",
         background: colors.pageBg,
         minHeight: "100vh",
         color: colors.text,
         position: "relative",
-        maxWidth: 1320,
+        maxWidth: publicLiveMobile ? 560 : 1320,
         margin: "0 auto",
       }}
     >
       <div style={{ position: "relative", zIndex: 1 }}>
         {renderAppHeader()}
 
-        <div style={{ ...basePanelStyle, marginBottom: 18, borderLeft: `6px solid ${publicLiveRace ? colors.greenBtn : colors.warningBorder}` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18, borderLeft: `${publicLiveMobile ? 4 : 6}px solid ${publicLiveRace ? colors.greenBtn : colors.warningBorder}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: publicLiveMobile ? 8 : 12, flexWrap: "wrap", alignItems: publicLiveMobile ? "flex-start" : "center" }}>
             <div>
               <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>Öffentliche Live-Ansicht</div>
-              <h1 style={{ margin: "6px 0", color: colors.title, fontSize: 30 }}>BMX Race Manager Live</h1>
+              <h1 style={{ margin: "6px 0", color: colors.title, fontSize: publicLiveMobile ? 23 : 30, lineHeight: 1.1 }}>BMX Race Manager Live</h1>
               <div style={{ color: colors.muted, fontWeight: 900 }}>
                 {getPublicLiveRefreshSeconds(publicLiveRace, publicLiveMeta, publicLiveTabVisible) === PUBLIC_LIVE_BACKGROUND_REFRESH_SECONDS
                   ? "Browser im Hintergrund: sparsame Live-Prüfung alle 5 Minuten"
@@ -7982,11 +8007,11 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 {publicLiveCheckedAt ? ` · Geprüft: ${formatDateTime(publicLiveCheckedAt)}` : ""}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={() => refreshPublicLiveRace(true)} disabled={publicLiveLoading} style={publicLiveLoading ? compactDisabledButtonStyle : compactHomeButtonStyle}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: publicLiveMobile ? "100%" : undefined }}>
+              <button type="button" onClick={() => refreshPublicLiveRace(true)} disabled={publicLiveLoading} style={{ ...(publicLiveLoading ? compactDisabledButtonStyle : compactHomeButtonStyle), flex: publicLiveMobile ? "1 1 150px" : undefined, minHeight: publicLiveMobile ? 42 : undefined }}>
                 {publicLiveLoading ? "Aktualisiere ..." : "Jetzt aktualisieren"}
               </button>
-              <button type="button" onClick={() => { if (typeof window !== "undefined") window.location.hash = ""; setIsPublicLiveView(false); }} style={smallGhostButtonStyle}>
+              <button type="button" onClick={() => { if (typeof window !== "undefined") window.location.hash = ""; setIsPublicLiveView(false); }} style={{ ...smallGhostButtonStyle, flex: publicLiveMobile ? "1 1 120px" : undefined, minHeight: publicLiveMobile ? 42 : undefined }}>
                 Zum Login
               </button>
             </div>
@@ -7994,15 +8019,15 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         </div>
 
         {publicLiveRace && (
-          <div style={{ ...basePanelStyle, marginBottom: 18 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) 220px 150px", gap: 12, alignItems: "end" }}>
+          <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18 }}>
+            <div style={{ display: "grid", gridTemplateColumns: publicLiveMobile ? "1fr" : publicLiveNarrow ? "minmax(200px, 1fr) 180px" : "minmax(220px, 1fr) 220px 150px", gap: publicLiveMobile ? 8 : 12, alignItems: "end" }}>
               <div>
                 <label style={labelStyle}>Fahrer suchen</label>
                 <input
                   value={publicLiveSearch}
                   onChange={(event) => setPublicLiveSearch(event.target.value)}
                   placeholder="Name oder Startnummer, z. B. 247"
-                  style={{ ...inputStyle, minHeight: publicLiveTvMode ? 56 : 44, fontSize: publicLiveTvMode ? 22 : 16 }}
+                  style={{ ...inputStyle, minHeight: publicLiveMobile ? 46 : publicLiveTvMode ? 56 : 44, fontSize: publicLiveMobile ? 16 : publicLiveTvMode ? 22 : 16 }}
                 />
               </div>
               <div>
@@ -8010,7 +8035,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 <select
                   value={publicLiveCategoryFilter}
                   onChange={(event) => setPublicLiveCategoryFilter(event.target.value)}
-                  style={{ ...inputStyle, minHeight: publicLiveTvMode ? 56 : 44, fontSize: publicLiveTvMode ? 20 : 15 }}
+                  style={{ ...inputStyle, minHeight: publicLiveMobile ? 44 : publicLiveTvMode ? 56 : 44, fontSize: publicLiveMobile ? 15 : publicLiveTvMode ? 20 : 15 }}
                 >
                   {publicLiveCategoryOptions.map((category) => (
                     <option key={category} value={category}>{category === "all" ? "Alle Kategorien" : category}</option>
@@ -8021,24 +8046,24 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 type="button"
                 onClick={() => setPublicLiveMyRiderQuery(publicLiveSearch.trim())}
                 disabled={!publicLiveSearch.trim()}
-                style={!publicLiveSearch.trim() ? compactDisabledButtonStyle : compactPrimaryButtonStyle}
+                style={{ ...(!publicLiveSearch.trim() ? compactDisabledButtonStyle : compactPrimaryButtonStyle), minHeight: publicLiveMobile ? 46 : undefined, gridColumn: publicLiveNarrow && !publicLiveMobile ? "1 / -1" : undefined }}
               >
                 Mein Fahrer
               </button>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: publicLiveTvMode ? "190px 1fr" : "150px 1fr", gap: 14, marginTop: 14, alignItems: "center" }}>
+            <div style={{ display: "grid", gridTemplateColumns: publicLiveMobile ? "92px 1fr" : publicLiveTvMode ? "190px 1fr" : "150px 1fr", gap: publicLiveMobile ? 10 : 14, marginTop: publicLiveMobile ? 10 : 14, alignItems: "center" }}>
               <div style={{ textAlign: "center" }}>
-                {publicLiveQrImageSrc && <img src={publicLiveQrImageSrc} alt="QR-Code zur Live-Ansicht" style={{ width: publicLiveTvMode ? 170 : 120, height: publicLiveTvMode ? 170 : 120, borderRadius: 12, border: `1px solid ${colors.cardBorder}`, background: "#fff" }} />}
+                {publicLiveQrImageSrc && <img src={publicLiveQrImageSrc} alt="QR-Code zur Live-Ansicht" style={{ width: publicLiveMobile ? 84 : publicLiveTvMode ? 170 : 120, height: publicLiveMobile ? 84 : publicLiveTvMode ? 170 : 120, borderRadius: 12, border: `1px solid ${colors.cardBorder}`, background: "#fff" }} />}
               </div>
-              <div style={{ color: colors.muted, fontWeight: 850, lineHeight: 1.45 }}>
-                QR-Code zur Live-Ansicht. Suche nach Startnummer oder Name zeigt die Läufe, Resultate und den nächsten Einsatz dieses Fahrers.
+              <div style={{ color: colors.muted, fontWeight: 850, lineHeight: 1.35, fontSize: publicLiveMobile ? 12 : undefined }}>
+                Suche nach Startnummer oder Name zeigt die Läufe, Resultate und den nächsten Einsatz.
               </div>
             </div>
           </div>
         )}
 
         {!publicLiveRace ? (
-          <div style={{ ...basePanelStyle, textAlign: "center", padding: 34 }}>
+          <div style={{ ...publicLiveBasePanelStyle, textAlign: "center", padding: publicLiveMobile ? 22 : 34 }}>
             <h2 style={{ marginTop: 0, color: colors.title }}>{publicLiveMeta && publicLiveMeta.active === false ? "Live-Ansicht beendet" : "Aktuell ist kein Rennen live veröffentlicht"}</h2>
             <div style={{ color: colors.muted, fontWeight: 900, lineHeight: 1.45 }}>
               {publicLiveMeta && publicLiveMeta.active === false
@@ -8051,8 +8076,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           const liveFlowState = getPublicLiveFlowState(publicLiveRace);
           return (
           <>
-            <div style={{ ...basePanelStyle, marginBottom: 18 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: 12 }}>
+            <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18 }}>
+              <div style={{ display: "grid", gridTemplateColumns: publicLiveMobile ? "1fr 1fr" : "repeat(4, minmax(140px, 1fr))", gap: publicLiveMobile ? 8 : 12 }}>
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 1000, color: colors.muted, textTransform: "uppercase" }}>Rennen</div>
                   <div style={{ fontWeight: 1000, color: colors.title, fontSize: 18 }}>{publicLiveRace.eventName}</div>
@@ -8078,15 +8103,15 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             {renderPublicLiveRiderDetail(publicLiveRace, liveFlowState)}
 
             {(!publicLiveRace.motos?.length && !publicLiveRace.finals?.length && publicLiveRace.categories?.length > 0) && (
-              <div style={{ ...basePanelStyle, marginBottom: 18 }}>
-                <h2 style={{ ...sectionTitleStyle }}>Aktuelle Startliste</h2>
+              <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18 }}>
+                <h2 style={{ ...sectionTitleStyle, fontSize: publicLiveMobile ? 20 : sectionTitleStyle.fontSize }}>Aktuelle Startliste</h2>
                 <div style={{ color: colors.muted, fontWeight: 900, marginBottom: 12 }}>
                   Motos wurden noch nicht erstellt. Sichtbar ist die aktuelle Teilnehmerliste nach Kategorien.
                 </div>
-                <div style={{ display: "grid", gap: 12 }}>
+                <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
                   {publicLiveRace.categories.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
                     <div key={`live-category-${categoryBlock.category}`} style={publicLivePanelStyle}>
-                      <h3 style={{ margin: "0 0 8px", color: colors.title }}>{categoryBlock.category}</h3>
+                      <h3 style={{ margin: "0 0 8px", color: colors.title, fontSize: publicLiveMobile ? 18 : undefined }}>{categoryBlock.category}</h3>
                       {renderPublicLiveRows(categoryBlock.riders || [], "start")}
                     </div>
                   ))}
@@ -8095,17 +8120,17 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             )}
 
             {publicLiveRace.motos?.length > 0 && (
-              <div style={{ ...basePanelStyle, marginBottom: 18 }}>
-                <h2 style={{ ...sectionTitleStyle }}>Motos / Laufeinteilung</h2>
-                <div style={{ display: "grid", gap: 16 }}>
+              <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18 }}>
+                <h2 style={{ ...sectionTitleStyle, fontSize: publicLiveMobile ? 20 : sectionTitleStyle.fontSize }}>Motos / Laufeinteilung</h2>
+                <div style={{ display: "grid", gap: publicLiveMobile ? 10 : 16 }}>
                   {publicLiveRace.motos.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
                     <div key={`live-moto-${categoryBlock.category}`} style={publicLivePanelStyle}>
-                      <h3 style={{ margin: "0 0 10px", color: colors.title }}>{categoryBlock.category}</h3>
-                      <div style={{ display: "grid", gap: 14 }}>
+                      <h3 style={{ margin: "0 0 10px", color: colors.title, fontSize: publicLiveMobile ? 18 : undefined }}>{categoryBlock.category}</h3>
+                      <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 14 }}>
                         {categoryBlock.runs.map((run: any) => (
                           <div key={`${categoryBlock.category}-${run.name}`}>
-                            <h4 style={{ margin: "4px 0 8px", color: colors.title }}>{run.name}</h4>
-                            <div style={{ display: "grid", gap: 12 }}>
+                            <h4 style={{ margin: "4px 0 8px", color: colors.title, fontSize: publicLiveMobile ? 15 : undefined }}>{run.name}</h4>
+                            <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
                               {run.races.map((race: any) => (
                                 <div
                                   id={getPublicLiveDomId("live-flow", race.flowKey)}
@@ -8144,13 +8169,13 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             )}
 
             {publicLiveRace.finals?.length > 0 && (
-              <div style={{ ...basePanelStyle, marginBottom: 18 }}>
-                <h2 style={{ ...sectionTitleStyle }}>Finals</h2>
-                <div style={{ display: "grid", gap: 16 }}>
+              <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18 }}>
+                <h2 style={{ ...sectionTitleStyle, fontSize: publicLiveMobile ? 20 : sectionTitleStyle.fontSize }}>Finals</h2>
+                <div style={{ display: "grid", gap: publicLiveMobile ? 10 : 16 }}>
                   {publicLiveRace.finals.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
                     <div key={`live-final-${categoryBlock.category}`} style={publicLivePanelStyle}>
-                      <h3 style={{ margin: "0 0 10px", color: colors.title }}>{categoryBlock.category}</h3>
-                      <div style={{ display: "grid", gap: 12 }}>
+                      <h3 style={{ margin: "0 0 10px", color: colors.title, fontSize: publicLiveMobile ? 18 : undefined }}>{categoryBlock.category}</h3>
+                      <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
                         {categoryBlock.rounds.map((round: any) => (
                           <div
                             id={getPublicLiveDomId("live-flow", round.flowKey)}
@@ -8186,12 +8211,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             )}
 
             {publicLiveRace.finalRankings?.length > 0 && (
-              <div style={{ ...basePanelStyle, marginBottom: 18 }}>
-                <h2 style={{ ...sectionTitleStyle }}>Resultate</h2>
-                <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18 }}>
+                <h2 style={{ ...sectionTitleStyle, fontSize: publicLiveMobile ? 20 : sectionTitleStyle.fontSize }}>Resultate</h2>
+                <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
                   {publicLiveRace.finalRankings.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
                     <div key={`live-ranking-${categoryBlock.category}`} style={publicLivePanelStyle}>
-                      <h3 style={{ margin: "0 0 8px", color: colors.title }}>{categoryBlock.category}</h3>
+                      <h3 style={{ margin: "0 0 8px", color: colors.title, fontSize: publicLiveMobile ? 18 : undefined }}>{categoryBlock.category}</h3>
                       {renderPublicLiveRows(categoryBlock.rows || [], "result")}
                     </div>
                   ))}
@@ -8200,7 +8225,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
             )}
 
             {(!publicLiveRace.motos?.length && !publicLiveRace.finals?.length && !publicLiveRace.finalRankings?.length && !publicLiveRace.categories?.length) && (
-              <div style={{ ...basePanelStyle, textAlign: "center", padding: 24 }}>
+              <div style={{ ...publicLiveBasePanelStyle, textAlign: "center", padding: publicLiveMobile ? 18 : 24 }}>
                 <h2 style={{ marginTop: 0, color: colors.title }}>Live-Rennen ist aktiv</h2>
                 <div style={{ color: colors.muted, fontWeight: 900 }}>Motos oder Resultate wurden noch nicht veröffentlicht.</div>
               </div>
@@ -8478,7 +8503,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
           {activeGroupedEvents.length === 0 ? (
             <div style={{ color: colors.muted, padding: 22, border: `1px dashed ${colors.cardBorderStrong}`, borderRadius: 16, textAlign: "center", fontWeight: 900, background: colors.cardSoftBg }}>{eventSearch.trim() ? "Keine passenden aktiven Rennen/Rennserien gefunden." : "Noch keine Rennen erstellt. Erstelle dein erstes Einzelrennen oder eine Rennserie."}</div>
           ) : (
-            <div style={{ display: "grid", gap: 16 }}>
+            <div style={{ display: "grid", gap: publicLiveMobile ? 10 : 16 }}>
               {activeGroupedEvents.map((group) => (
                 <div key={group.year}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "6px 0 10px" }}>
@@ -8930,7 +8955,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                   <button onClick={() => setSelectedMasterParticipant(null)} style={smallGhostButtonStyle}>Schliessen</button>
                 </div>
 
-                <div style={{ display: "grid", gap: 14 }}>
+                <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 14 }}>
                   {getMasterParticipantEventDetails(selectedMasterParticipant).map((entry: any, entryIndex: number) => (
                     <div key={`${entry.eventId}-${entryIndex}`} style={{ border: `1px solid ${colors.cardBorder}`, borderRadius: 14, padding: 12, background: "#fbfdff" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10 }}>
@@ -10254,13 +10279,13 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   return (
     <div
       style={{
-        padding: 20,
+        padding: publicLiveMobile ? 8 : 20,
         fontFamily: "Arial, sans-serif",
         background: colors.pageBg,
         minHeight: "100vh",
         color: colors.text,
         position: "relative",
-        maxWidth: 1320,
+        maxWidth: publicLiveMobile ? 560 : 1320,
         margin: "0 auto",
       }}
     >
