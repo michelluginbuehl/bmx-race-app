@@ -1,3 +1,4 @@
+import { MANAGER_COLLECTION } from "./environment";
 export type FirebaseOnlineStorageConfig = {
   enabled: boolean;
   projectId: string;
@@ -47,7 +48,7 @@ export const firebaseOnlineStorageConfig: FirebaseOnlineStorageConfig = {
   authDomain: String(env.VITE_FIREBASE_AUTH_DOMAIN ?? "").trim() || undefined,
   storageBucket: String(env.VITE_FIREBASE_STORAGE_BUCKET ?? "").trim() || undefined,
   messagingSenderId: String(env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "").trim() || undefined,
-  collectionPath: "bmxRaceManager",
+  collectionPath: MANAGER_COLLECTION,
   documentId: "mainAppState",
   databaseId,
 };

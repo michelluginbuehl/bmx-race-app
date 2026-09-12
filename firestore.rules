@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isRaceManager() {
+      return request.auth != null && request.auth.uid in ['K7BLiJFIglcCY7XiMqQxfZ2dTRx1'];
+    }
+
+    match /bmxRaceManager/mainAppState {
+      allow get, create, update: if isRaceManager();
+
+      match /chunks/{chunkId} {
+        allow get, create, update, delete: if isRaceManager();
+      }
+
+      match /onlineBackupIndex/current {
+        allow get, create, update: if isRaceManager();
+      }
+
+      match /onlineBackups/{backupId} {
+        allow get, create, update, delete: if isRaceManager();
+
+        match /chunks/{chunkId} {
+          allow get, create, update, delete: if isRaceManager();
+        }
+      }
+    }
+
+    // Die App liest diese beiden Live-Dokumente ohne Anmeldung.
+    match /bmxRacePublic/{documentId} {
+      allow get: if documentId in ['currentRace', 'currentRaceMeta'];
+      allow create, update: if isRaceManager()
+        && documentId in ['currentRace', 'currentRaceMeta'];
+    }
+
+    match /bmxRaceTest/mainAppState {
+      allow get, create, update: if isRaceManager();
+
+      match /chunks/{chunkId} {
+        allow get, create, update, delete: if isRaceManager();
+      }
+
+      match /onlineBackupIndex/current {
+        allow get, create, update: if isRaceManager();
+      }
+
+      match /onlineBackups/{backupId} {
+        allow get, create, update, delete: if isRaceManager();
+
+        match /chunks/{chunkId} {
+          allow get, create, update, delete: if isRaceManager();
+        }
+      }
+    }
+
+    match /bmxRaceTestLive/{documentId} {
+      allow get, create, update: if isRaceManager()
+        && documentId in ['currentRace', 'currentRaceMeta'];
+    }
+
+    // Alle anderen Pfade und sämtliche Listenabfragen bleiben gesperrt.
+  }
+}

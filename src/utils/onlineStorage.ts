@@ -1,3 +1,4 @@
+import { IS_TEST_ENVIRONMENT, LIVE_COLLECTION } from "../config/environment";
 import { firebaseOnlineStorageConfig } from "../config/firebaseConfig";
 
 type OnlineStorageResponse = {
@@ -107,8 +108,8 @@ type OnlineBackupCreateResponse = OnlineStorageResponse & {
 const PAYLOAD_CHUNK_SIZE = 180_000;
 const MAX_ONLINE_BACKUPS = 20;
 const BACKUP_INDEX_PATH = "onlineBackupIndex/current";
-const PUBLIC_LIVE_RACE_PATH = "bmxRacePublic/currentRace";
-const PUBLIC_LIVE_RACE_META_PATH = "bmxRacePublic/currentRaceMeta";
+const PUBLIC_LIVE_RACE_PATH = `${LIVE_COLLECTION}/currentRace`;
+const PUBLIC_LIVE_RACE_META_PATH = `${LIVE_COLLECTION}/currentRaceMeta`;
 const PUBLIC_LIVE_RACE_PAYLOAD_LIMIT = 900_000;
 
 let onlineStorageAuthToken = "";
@@ -522,7 +523,8 @@ export const loadOnlineBackup = async (backupId: string): Promise<OnlineStorageR
 
 
 const readPublicLiveRaceMetaDocument = async () => {
-  const response = await fetch(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_META_PATH), { method: "GET" });
+  if (IS_TEST_ENVIRONMENT && !onlineStorageAuthToken) throw new Error("Bitte für die private Test-Zuschaueransicht anmelden.");
+  const response = await fetch(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_META_PATH), { method: "GET", headers: IS_TEST_ENVIRONMENT ? buildFirestoreHeaders() : {} });
   if (!response.ok) {
     if (response.status === 404) return null;
     throw new Error(await parseFirestoreError(response));
@@ -585,7 +587,8 @@ const getNextPublicLiveVersion = async () => {
 };
 
 const readPublicLiveRaceDocument = async () => {
-  const response = await fetch(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_PATH), { method: "GET" });
+  if (IS_TEST_ENVIRONMENT && !onlineStorageAuthToken) throw new Error("Bitte für die private Test-Zuschaueransicht anmelden.");
+  const response = await fetch(getFirestoreDatabaseDocumentUrl(PUBLIC_LIVE_RACE_PATH), { method: "GET", headers: IS_TEST_ENVIRONMENT ? buildFirestoreHeaders() : {} });
   if (!response.ok) {
     if (response.status === 404) return null;
     throw new Error(await parseFirestoreError(response));

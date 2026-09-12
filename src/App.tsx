@@ -1,3 +1,4 @@
+import { IS_TEST_ENVIRONMENT, PRODUCTION_APP_URL, TEST_APP_URL, canEnterEnvironment } from "./config/environment";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { db } from "./db";
 import RiderForm from "./components/RiderForm";
@@ -2661,6 +2662,8 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   useEffect(() => {
     signOutFirebaseAuth();
     setFirebaseAuthSession(null);
+    setPublicLiveRace(null);
+    setPublicLiveMeta(null);
     setOnlineStorageAuthToken("");
     setFirebaseAuthPassword("");
     setFirebaseAuthMessage("");
@@ -4984,6 +4987,12 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   }, [editingRider, showEventParticipantCreateForm, appShellView, viewMode, currentEventId]);
 
   const renderAppHeader = () => (
+    <>
+      {IS_TEST_ENVIRONMENT && <div role="status" style={{ padding: "12px 16px", borderRadius: 12, background: "#fff3cd", color: "#713f12", fontWeight: 800, marginBottom: 12 }}>
+        Private Testumgebung · Eigene Testdaten · Noch nicht für Zuschauer veröffentlicht
+        {isFirebaseSignedIn && <button onClick={openPublicLiveView} style={{ marginLeft: 12 }}>Test-Zuschaueransicht</button>}
+        {isFirebaseSignedIn && <button onClick={logoutFirebaseAuth} style={{ marginLeft: 8 }}>Abmelden</button>}
+      </div>}
     <AppHeader
       onHomeClick={async () => {
         if (!isFirebaseSignedIn) return;
@@ -4996,6 +5005,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       }}
       colors={colors}
     />
+    </>
   );
 
   const versionFooter = (
@@ -6561,6 +6571,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       setFirebaseAuthLoading(true);
       setFirebaseAuthMessage("Anmeldung läuft ...");
       const session = await signInWithFirebaseEmailPassword(firebaseAuthEmail, firebaseAuthPassword);
+      if (!canEnterEnvironment(session.localId)) throw new Error("Die Testumgebung ist nur für Michel freigegeben.");
       setFirebaseAuthSession(session);
       setOnlineStorageAuthToken(session.idToken);
       setFirebaseAuthPassword("");
@@ -6579,6 +6590,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
   const logoutFirebaseAuth = () => {
     signOutFirebaseAuth();
     setFirebaseAuthSession(null);
+    setPublicLiveRace(null);
+    setPublicLiveMeta(null);
     setOnlineStorageAuthToken("");
     setFirebaseAuthPassword("");
     setOnlineStorageMessage("Abgemeldet. Online speichern/laden ist gesperrt.");
@@ -7336,6 +7349,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   const refreshPublicLiveRace = async (showLoading = true) => {
     try {
+      if (IS_TEST_ENVIRONMENT && !(await ensureOnlineAuthSession("Test-Zuschaueransicht", false))) return;
       if (showLoading) setPublicLiveLoading(true);
       const result = await loadPublicLiveRace();
       const checkedIso = new Date().toISOString();
@@ -7374,6 +7388,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   const checkPublicLiveRaceMeta = async () => {
     try {
+      if (IS_TEST_ENVIRONMENT && !(await ensureOnlineAuthSession("Test-Zuschaueransicht", false))) return;
       const result = await loadPublicLiveRaceMeta();
       setPublicLiveCheckedAt(new Date().toISOString());
 
@@ -7420,16 +7435,16 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   }, []);
 
   useEffect(() => {
-    if (!isPublicLiveView) return;
+    if (!isPublicLiveView || (IS_TEST_ENVIRONMENT && !isFirebaseSignedIn)) return;
     refreshPublicLiveRace(true);
-  }, [isPublicLiveView]);
+  }, [isPublicLiveView, isFirebaseSignedIn]);
 
   useEffect(() => {
-    if (!isPublicLiveView) return;
+    if (!isPublicLiveView || (IS_TEST_ENVIRONMENT && !isFirebaseSignedIn)) return;
     const intervalSeconds = getPublicLiveRefreshSeconds(publicLiveRace, publicLiveMeta, publicLiveTabVisible);
     const timer = window.setInterval(() => void checkPublicLiveRaceMeta(), intervalSeconds * 1000);
     return () => window.clearInterval(timer);
-  }, [isPublicLiveView, publicLiveRace?.liveVersion, publicLiveRace?.updatedAt, publicLiveMeta?.liveVersion, publicLiveMeta?.hasRaceProgram, publicLiveTabVisible]);
+  }, [isPublicLiveView, isFirebaseSignedIn, publicLiveRace?.liveVersion, publicLiveRace?.updatedAt, publicLiveMeta?.liveVersion, publicLiveMeta?.hasRaceProgram, publicLiveTabVisible]);
 
   useEffect(() => {
     if (!firebaseAuthReady || !isFirebaseSignedIn || appShellView !== "manager" || !currentEventId) return;
@@ -7602,11 +7617,16 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               Geschützter Zugang
             </div>
             <h1 style={{ margin: "8px 0 8px", color: colors.title, fontSize: 30, lineHeight: 1.1 }}>
-              Anmeldung erforderlich
+              {IS_TEST_ENVIRONMENT ? "Testumgebung" : "Richtige Version"}
             </h1>
             <div style={{ fontSize: 15, fontWeight: 800, color: colors.muted, lineHeight: 1.45, marginBottom: 18 }}>
-              Die App wird erst nach erfolgreicher Firebase-Anmeldung angezeigt.
+              {IS_TEST_ENVIRONMENT ? "Nur für dich: Design, Funktionen und Zuschaueransicht mit getrennten Testdaten ausprobieren. Die richtige Version bleibt unverändert." : "Die freigegebene Version für deine Rennen."}
             </div>
+
+            <nav aria-label="Umgebung auswählen" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+              <a href={PRODUCTION_APP_URL} aria-current={!IS_TEST_ENVIRONMENT ? "page" : undefined} style={{ ...compactHomeButtonStyle, textAlign: "center", padding: 14, textDecoration: "none", border: !IS_TEST_ENVIRONMENT ? "2px solid #2563eb" : "1px solid #ccd5df" }}>Richtige Version</a>
+              <a href={TEST_APP_URL || "#"} aria-current={IS_TEST_ENVIRONMENT ? "page" : undefined} style={{ ...compactHomeButtonStyle, textAlign: "center", padding: 14, textDecoration: "none", border: IS_TEST_ENVIRONMENT ? "2px solid #d97706" : "1px solid #ccd5df" }}>Testumgebung</a>
+            </nav>
 
             {!isOnlineStorageConfigured() && (
               <div
@@ -7668,17 +7688,17 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                     disabled={firebaseAuthLoading || !isOnlineStorageConfigured()}
                     style={firebaseAuthLoading || !isOnlineStorageConfigured() ? { ...compactDisabledButtonStyle, minHeight: 54 } : { ...compactPrimaryButtonStyle, minHeight: 54, fontSize: 17 }}
                   >
-                    {firebaseAuthLoading ? "Anmelden ..." : "Anmelden"}
+                    {firebaseAuthLoading ? "Anmelden ..." : IS_TEST_ENVIRONMENT ? "Testumgebung betreten" : "Anmelden"}
                   </button>
                 </div>
 
-                <button
+                {!IS_TEST_ENVIRONMENT && <button
                   type="button"
                   onClick={openPublicLiveView}
                   style={{ ...compactHomeButtonStyle, minHeight: 48, width: "100%", marginTop: 12 }}
                 >
                   Zuschaueransicht öffnen
-                </button>
+                </button>}
 
                 {firebaseAuthMessage && (
                   <div
@@ -7919,7 +7939,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     ? ""
     : `${window.location.origin}${window.location.pathname}${window.location.search}#live`;
 
-  const publicLiveQrImageSrc = publicLiveQrUrl
+  const publicLiveQrImageSrc = !IS_TEST_ENVIRONMENT && publicLiveQrUrl
     ? `https://api.qrserver.com/v1/create-qr-code/?size=170x170&margin=10&data=${encodeURIComponent(publicLiveQrUrl)}`
     : "";
 
@@ -7971,7 +7991,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     window.setTimeout(() => {
       document.getElementById(getPublicLiveDomId("live-flow", targetKey))?.scrollIntoView({ block: "center", behavior: "smooth" });
     }, 350);
-  }, [isPublicLiveView, publicLiveRace?.liveVersion, publicLiveRace?.updatedAt]);
+  }, [isPublicLiveView, isFirebaseSignedIn, publicLiveRace?.liveVersion, publicLiveRace?.updatedAt]);
 
   const renderPublicLiveView = () => (
     <div
@@ -8239,6 +8259,10 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   const backupWarningBar = null;
 
+
+  if (IS_TEST_ENVIRONMENT && (!firebaseAuthReady || !isFirebaseSignedIn || !canEnterEnvironment(firebaseAuthSession?.localId || ""))) {
+    return renderLoginStartScreen();
+  }
 
   if (isPublicLiveView) {
     return renderPublicLiveView();
