@@ -7461,9 +7461,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
   }, [firebaseAuthReady, isFirebaseSignedIn, appShellView, currentEventId, selectedRace, isCurrentRaceLive, riders]);
 
   useEffect(() => {
-    if (appShellView !== "events") return;
+    if (appShellView !== "events" || !isFirebaseSignedIn) return;
     refreshOnlineStatus(false);
-  }, [appShellView]);
+  }, [appShellView, isFirebaseSignedIn]);
 
   const warningCards = [
     dashboardStats.missingCount

@@ -2,7 +2,7 @@
 export const IS_TEST_ENVIRONMENT = import.meta.env.VITE_APP_ENVIRONMENT !== 'production';
 export const TEST_OWNER_UID = 'K7BLiJFIglcCY7XiMqQxfZ2dTRx1';
 export const PRODUCTION_APP_URL = 'https://bmx-race-app.vercel.app';
-export const TEST_APP_URL = '';
+export const TEST_APP_URL = 'https://bmx-race-app-git-test-environment-michels-projects-6fda5878.vercel.app';
 export const LOCAL_STORAGE_PREFIX = IS_TEST_ENVIRONMENT ? 'bmx_test:' : '';
 export const DATABASE_NAME = IS_TEST_ENVIRONMENT ? 'BMXDB-test' : 'BMXDB';
 export const MANAGER_COLLECTION = IS_TEST_ENVIRONMENT ? 'bmxRaceTest' : 'bmxRaceManager';
