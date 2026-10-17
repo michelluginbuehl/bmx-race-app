@@ -1,6 +1,6 @@
-export const APP_VERSION = "v1.12.2";
+export const APP_VERSION = "v1.12.3";
 export const APP_NAME = "BMX Race Manager";
-export const APP_CHANGE_NOTE = "Live-Ansicht für Handy-Hochformat optimiert";
+export const APP_CHANGE_NOTE = "Kategorie zurück auf Jahrgang/Geschlecht und gelöschte Fahrer wiederherstellen";
 
 export const DATA_SCHEMA_VERSION = 8;
 export const BACKUP_VERSION = 2;
