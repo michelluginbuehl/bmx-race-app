@@ -75,6 +75,9 @@ const parseBoolean = (value: any) => {
 
 type DuplicateCandidate = {
   id?: string;
+  participantId?: string;
+  masterId?: string;
+  deletedAt?: string;
   name: string;
   plate?: string;
   birthYear?: number | string;
@@ -156,6 +159,7 @@ const findDuplicateCandidates = (candidate: any, existingRiders: any[], currentI
       const sameNameTokens = sortedNameTokens(candidateName) === sortedNameTokens(rider.name);
 
       const reasons: string[] = [];
+      if (rider.deletedAt) reasons.push("im Papierkorb");
       if (sameNameTokens) reasons.push("Name/Vorname möglicherweise vertauscht");
       if (similarity >= 0.88 && !sameNameTokens) reasons.push("Name sehr ähnlich");
       if (samePlate) reasons.push("gleiche Startnummer");
@@ -171,6 +175,9 @@ const findDuplicateCandidates = (candidate: any, existingRiders: any[], currentI
 
       return {
         id: rider.id,
+        participantId: rider.participantId,
+        masterId: rider.masterId,
+        deletedAt: rider.deletedAt,
         name: rider.name || "",
         plate: rider.plate,
         birthYear: rider.birthYear || rider.jahrgang,
@@ -302,45 +309,36 @@ export default function RiderForm({
     setNameSuggestions([]);
   };
 
-  const saveRider = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const buildCurrentRider = () => ({
+    name: name.trim(),
+    plate: plate.trim(),
+    birthYear: Number(birthYear),
+    jahrgang: Number(birthYear),
+    gender,
+    geschlecht: gender,
+    club: club.trim(),
+    cruiser,
+    isCruiser: cruiser,
+    eventId: masterMode ? "master" : currentEventId || "legacy",
+  });
 
+  const validateCurrentRider = () => {
     if (!name.trim() || !plate.trim()) {
       alert("Bitte mindestens Name und Plate erfassen.");
-      return;
+      return false;
     }
-
     if (!birthYear || !gender) {
       alert(
         "Bitte Jahrgang und Geschlecht erfassen, damit die Kategorie automatisch berechnet werden kann.",
       );
-      return;
+      return false;
     }
+    return true;
+  };
 
-    const rider = {
-      name: name.trim(),
-      plate: plate.trim(),
-      birthYear: Number(birthYear),
-      jahrgang: Number(birthYear),
-      gender,
-      geschlecht: gender,
-      club: club.trim(),
-      cruiser,
-      isCruiser: cruiser,
-      eventId: masterMode ? "master" : currentEventId || "legacy",
-    };
-
-    if (!editId && !allowDuplicateSave) {
-      const existingRiders = await db.table("riders").toArray();
-      const duplicates = findDuplicateCandidates(rider, existingRiders);
-      if (duplicates.length > 0) {
-        setDuplicateWarning(duplicates);
-        setImportMessage(
-          "Mögliche doppelte Teilnehmer gefunden. Bitte prüfen und unten entscheiden.",
-        );
-        return;
-      }
-    }
+  const persistCurrentRider = async () => {
+    if (!validateCurrentRider()) return;
+    const rider = buildCurrentRider();
 
     if (editId) {
       await db.table("riders").update(editId, rider);
@@ -356,6 +354,64 @@ export default function RiderForm({
 
     resetForm();
     await onChange();
+  };
+
+  const restoreDeletedDuplicate = async (duplicate: DuplicateCandidate) => {
+    if (!duplicate.deletedAt) return;
+
+    const existingRiders = await db.table("riders").toArray();
+    const stableId = String(duplicate.participantId || duplicate.masterId || duplicate.id || "");
+    const duplicateName = sortedNameTokens(duplicate.name);
+    const duplicateYear = Number(duplicate.birthYear || 0);
+    const duplicateGender = normalizeGender(duplicate.gender || "");
+
+    const rowsToRestore = existingRiders.filter((rider: any) => {
+      if (!rider.deletedAt) return false;
+      const riderId = String(rider.id || "");
+      const riderParticipantId = String(rider.participantId || "");
+      const riderMasterId = String(rider.masterId || "");
+      if (stableId && [riderId, riderParticipantId, riderMasterId].includes(stableId)) return true;
+
+      return (
+        sortedNameTokens(rider.name) === duplicateName &&
+        (!duplicateYear || riderBirthYear(rider) === duplicateYear) &&
+        (!duplicateGender || riderGender(rider) === duplicateGender)
+      );
+    });
+
+    if (rowsToRestore.length === 0) {
+      alert("Der gelöschte Teilnehmer konnte nicht wiederhergestellt werden.");
+      return;
+    }
+
+    for (const rider of rowsToRestore) {
+      await db.table("riders").update(rider.id, { deletedAt: "" });
+    }
+
+    resetForm();
+    await onChange();
+    alert(`${duplicate.name} wurde aus dem Papierkorb wiederhergestellt.`);
+  };
+
+  const saveRider = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!validateCurrentRider()) return;
+
+    const rider = buildCurrentRider();
+
+    if (!editId && !allowDuplicateSave) {
+      const existingRiders = await db.table("riders").toArray();
+      const duplicates = findDuplicateCandidates(rider, existingRiders);
+      if (duplicates.length > 0) {
+        setDuplicateWarning(duplicates);
+        setImportMessage(
+          "Mögliche doppelte Teilnehmer gefunden. Bitte prüfen und unten entscheiden.",
+        );
+        return;
+      }
+    }
+
+    await persistCurrentRider();
   };
 
   const cancelEdit = () => {
@@ -557,7 +613,7 @@ export default function RiderForm({
                       width: "100%",
                     }}
                   >
-                    #{suggestion.plate || "-"} {suggestion.name} · {suggestion.birthYear || "-"} | {suggestion.gender || "-"}{suggestion.club ? ` · ${suggestion.club}` : ""} · {suggestion.score}%
+                    #{suggestion.plate || "-"} {suggestion.name} · {suggestion.birthYear || "-"} | {suggestion.gender || "-"}{suggestion.club ? ` · ${suggestion.club}` : ""}{suggestion.deletedAt ? " · Papierkorb" : ""} · {suggestion.score}%
                   </button>
                 ))}
               </div>
@@ -680,28 +736,41 @@ export default function RiderForm({
           <strong>Mögliche doppelte Teilnehmer gefunden</strong>
           <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
             {duplicateWarning.map((duplicate) => (
-              <div key={`${duplicate.id || duplicate.name}-${duplicate.score}`}>
+              <div
+                key={`${duplicate.id || duplicate.name}-${duplicate.score}`}
+                style={{ padding: 8, borderRadius: 8, background: duplicate.deletedAt ? "#fff7ed" : "transparent" }}
+              >
                 #{duplicate.plate || "-"} {duplicate.name} · {duplicate.birthYear || "-"} | {duplicate.gender || "-"}
                 {duplicate.club ? ` · ${duplicate.club}` : ""}
+                {duplicate.deletedAt ? " · Papierkorb" : ""}
                 <br />
                 <span style={{ fontSize: 13 }}>
                   {duplicate.reason} · Ähnlichkeit {duplicate.score}%
                 </span>
+                {duplicate.deletedAt && (
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => void restoreDeletedDuplicate(duplicate)}
+                      style={buttonStyle}
+                    >
+                      Fahrer wiederherstellen
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 12, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-              <input
-                type="checkbox"
-                checked={allowDuplicateSave}
-                onChange={(event) => setAllowDuplicateSave(event.target.checked)}
-                style={{ width: 20, height: 20 }}
-              />
-              Diesen Teilnehmer trotzdem erfassen
-            </label>
+          <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => void persistCurrentRider()}
+              style={buttonStyle}
+            >
+              Trotzdem neu erfassen
+            </button>
             <button type="button" onClick={resetForm} style={secondaryButtonStyle}>
-              Diesen Teilnehmer überspringen
+              Abbrechen / ignorieren
             </button>
           </div>
         </div>
