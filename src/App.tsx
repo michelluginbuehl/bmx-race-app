@@ -436,10 +436,7 @@ export default function App() {
     return "";
   };
 
-  const getDerivedCategory = (rider: any) => {
-    const specialCategory = getSpecialCategoryValue(rider);
-    if (specialCategory) return specialCategory;
-
+  const getAutomaticCategory = (rider: any) => {
     const gender = getRiderGenderCode(rider);
     const age = getRiderAge(rider);
 
@@ -452,7 +449,16 @@ export default function App() {
       if (found) return found.label;
     }
 
-    return rider?.category || "Ohne Kategorie";
+    const existingCategory = String(rider?.category || "").trim();
+    return existingCategory && !normalizeSpecialCategoryValue(existingCategory)
+      ? existingCategory
+      : "Ohne Kategorie";
+  };
+
+  const getDerivedCategory = (rider: any) => {
+    const specialCategory = getSpecialCategoryValue(rider);
+    if (specialCategory) return specialCategory;
+    return getAutomaticCategory(rider);
   };
 
   const normalizeRider = (rider: any) => ({
@@ -1928,17 +1934,26 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       cruiser: normalizedSpecial === CRUISER_CATEGORY,
       isCruiser: normalizedSpecial === CRUISER_CATEGORY,
     };
+    const automaticCategory = getAutomaticCategory({
+      ...originalRow,
+      ...specialPatch,
+      category: "",
+    });
     const edited = {
       ...originalRow,
       ...specialPatch,
-      category: getDerivedCategory({ ...originalRow, ...specialPatch }),
+      category: normalizedSpecial || automaticCategory,
     };
     await db.table("riders").update(riderId, {
       ...specialPatch,
       category: edited.category,
     });
     await syncRiderSharedDataToAllReferences(originalRow, edited);
-    if (normalizedSpecial) addChangeLog(`Spezial-Kategorie gesetzt: ${edited.name || "Teilnehmer"} → ${normalizedSpecial}`);
+    if (normalizedSpecial) {
+      addChangeLog(`Spezial-Kategorie gesetzt: ${edited.name || "Teilnehmer"} → ${normalizedSpecial}`);
+    } else {
+      addChangeLog(`Spezial-Kategorie entfernt: ${edited.name || "Teilnehmer"} → ${edited.category}`);
+    }
     return String(riderId);
   };
 
