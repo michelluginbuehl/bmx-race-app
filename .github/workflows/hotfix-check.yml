@@ -1,10 +1,10 @@
-name: Hotfix Check
+name: Test and Build
 
 on:
-  push:
-    branches:
-      - hotfix/race-flow-live-online-2026-10-21
   pull_request:
+    branches:
+      - main
+  push:
     branches:
       - main
 
