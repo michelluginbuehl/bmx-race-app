@@ -1422,7 +1422,7 @@ export default function App() {
       !window.confirm(
         `Alle Teilnehmer endgültig löschen?
 
-Es werden ${all.length} Teilnehmerdatensätze aus Hauptdatenbank, Rennen/Rennserien und Papierkorb gelöscht. Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten werden ebenfalls entfernt, damit beim späteren Import/Hinzufügen keine alten Teilnehmer mehr als vorhanden erkannt werden.
+Es werden ${all.length} Teilnehmerdatensätze aus Hauptdatenbank und Rennen/Rennserien gelöscht. Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten werden ebenfalls entfernt, damit beim späteren Import/Hinzufügen keine alten Teilnehmer mehr als vorhanden erkannt werden.
 
 Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       )
@@ -1433,7 +1433,6 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     setSelectedMasterParticipant(null);
     setEditingRider(null);
     setLastEditedMasterParticipantId("");
-    setMasterParticipantFilter("active");
     setAllRiders([]);
     setRiders([]);
     setHeats({});
@@ -8226,7 +8225,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                         <details
                           id={getPublicLiveDomId("live-flow", race.flowKey)}
                           key={`${race.flowKey || `${entry.category}-${entry.runName}-${entry.raceNumber}`}-${complete ? "done" : "open"}-${activeOrGate ? "focus" : "normal"}`}
-                          defaultOpen={!complete || activeOrGate}
+                          open={!complete || activeOrGate}
                           style={getPublicLiveRaceCardStyle(race.flowKey, liveFlowState, complete)}
                         >
                           <summary
@@ -8488,7 +8487,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Aktuellen Stand online sichern</span>
             </button>
             <button
-              onClick={loadOnlineFullAppState}
+              onClick={() => void loadOnlineFullAppState()}
               disabled={!isFirebaseSignedIn}
               style={!isFirebaseSignedIn ? { ...compactDisabledButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" } : { ...compactHomeButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
             >
