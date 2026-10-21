@@ -75,9 +75,6 @@ const parseBoolean = (value: any) => {
 
 type DuplicateCandidate = {
   id?: string;
-  participantId?: string;
-  masterId?: string;
-  deletedAt?: string;
   name: string;
   plate?: string;
   birthYear?: number | string;
@@ -150,6 +147,7 @@ const findDuplicateCandidates = (candidate: any, existingRiders: any[], currentI
   const candidateGender = normalizeGender(candidate.gender || candidate.geschlecht || "");
 
   return existingRiders
+    .filter((rider) => !rider?.deletedAt)
     .filter((rider) => !currentId || String(rider.id || "") !== String(currentId))
     .map((rider) => {
       const similarity = nameSimilarity(candidateName, rider.name);
@@ -159,7 +157,6 @@ const findDuplicateCandidates = (candidate: any, existingRiders: any[], currentI
       const sameNameTokens = sortedNameTokens(candidateName) === sortedNameTokens(rider.name);
 
       const reasons: string[] = [];
-      if (rider.deletedAt) reasons.push("im Papierkorb");
       if (sameNameTokens) reasons.push("Name/Vorname möglicherweise vertauscht");
       if (similarity >= 0.88 && !sameNameTokens) reasons.push("Name sehr ähnlich");
       if (samePlate) reasons.push("gleiche Startnummer");
@@ -175,9 +172,6 @@ const findDuplicateCandidates = (candidate: any, existingRiders: any[], currentI
 
       return {
         id: rider.id,
-        participantId: rider.participantId,
-        masterId: rider.masterId,
-        deletedAt: rider.deletedAt,
         name: rider.name || "",
         plate: rider.plate,
         birthYear: rider.birthYear || rider.jahrgang,
@@ -354,43 +348,6 @@ export default function RiderForm({
 
     resetForm();
     await onChange();
-  };
-
-  const restoreDeletedDuplicate = async (duplicate: DuplicateCandidate) => {
-    if (!duplicate.deletedAt) return;
-
-    const existingRiders = await db.table("riders").toArray();
-    const stableId = String(duplicate.participantId || duplicate.masterId || duplicate.id || "");
-    const duplicateName = sortedNameTokens(duplicate.name);
-    const duplicateYear = Number(duplicate.birthYear || 0);
-    const duplicateGender = normalizeGender(duplicate.gender || "");
-
-    const rowsToRestore = existingRiders.filter((rider: any) => {
-      if (!rider.deletedAt) return false;
-      const riderId = String(rider.id || "");
-      const riderParticipantId = String(rider.participantId || "");
-      const riderMasterId = String(rider.masterId || "");
-      if (stableId && [riderId, riderParticipantId, riderMasterId].includes(stableId)) return true;
-
-      return (
-        sortedNameTokens(rider.name) === duplicateName &&
-        (!duplicateYear || riderBirthYear(rider) === duplicateYear) &&
-        (!duplicateGender || riderGender(rider) === duplicateGender)
-      );
-    });
-
-    if (rowsToRestore.length === 0) {
-      alert("Der gelöschte Teilnehmer konnte nicht wiederhergestellt werden.");
-      return;
-    }
-
-    for (const rider of rowsToRestore) {
-      await db.table("riders").update(rider.id, { deletedAt: "" });
-    }
-
-    resetForm();
-    await onChange();
-    alert(`${duplicate.name} wurde aus dem Papierkorb wiederhergestellt.`);
   };
 
   const saveRider = async (event: React.FormEvent) => {
@@ -613,7 +570,7 @@ export default function RiderForm({
                       width: "100%",
                     }}
                   >
-                    #{suggestion.plate || "-"} {suggestion.name} · {suggestion.birthYear || "-"} | {suggestion.gender || "-"}{suggestion.club ? ` · ${suggestion.club}` : ""}{suggestion.deletedAt ? " · Papierkorb" : ""} · {suggestion.score}%
+                    #{suggestion.plate || "-"} {suggestion.name} · {suggestion.birthYear || "-"} | {suggestion.gender || "-"}{suggestion.club ? ` · ${suggestion.club}` : ""} · {suggestion.score}%
                   </button>
                 ))}
               </div>
@@ -738,26 +695,14 @@ export default function RiderForm({
             {duplicateWarning.map((duplicate) => (
               <div
                 key={`${duplicate.id || duplicate.name}-${duplicate.score}`}
-                style={{ padding: 8, borderRadius: 8, background: duplicate.deletedAt ? "#fff7ed" : "transparent" }}
+                style={{ padding: 8, borderRadius: 8 }}
               >
                 #{duplicate.plate || "-"} {duplicate.name} · {duplicate.birthYear || "-"} | {duplicate.gender || "-"}
                 {duplicate.club ? ` · ${duplicate.club}` : ""}
-                {duplicate.deletedAt ? " · Papierkorb" : ""}
                 <br />
                 <span style={{ fontSize: 13 }}>
                   {duplicate.reason} · Ähnlichkeit {duplicate.score}%
                 </span>
-                {duplicate.deletedAt && (
-                  <div style={{ marginTop: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => void restoreDeletedDuplicate(duplicate)}
-                      style={buttonStyle}
-                    >
-                      Fahrer wiederherstellen
-                    </button>
-                  </div>
-                )}
               </div>
             ))}
           </div>
