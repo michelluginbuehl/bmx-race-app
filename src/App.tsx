@@ -10,10 +10,11 @@ import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KE
 import { appStorage, encodeStorageValue } from "./utils/storage";
 import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
 import { createOnlineBackup, deactivatePublicLiveRace, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, loadPublicLiveRace, loadPublicLiveRaceMeta, publishPublicLiveRace, saveOnlineAppState, setOnlineStorageAuthToken, type OnlineBackupListItem, type OnlineStorageStatus, type PublicLiveRaceMeta, type PublicLiveRacePayload } from "./utils/onlineStorage";
-import { refreshFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
+import { getValidFirebaseAuthSession, refreshFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import { shouldIncludePreliminaryRankingRow } from "./utils/raceRanking";
 
 const ROW_HEIGHT = 30;
 const BOX_MIN_HEIGHT = 8 * ROW_HEIGHT + 34;
@@ -200,7 +201,6 @@ export default function App() {
   const [showEventParticipantCreateForm, setShowEventParticipantCreateForm] = useState(false);
   const eventParticipantCreateKnownIdsRef = useRef<Set<string>>(new Set());
   const [masterParticipantSearch, setMasterParticipantSearch] = useState("");
-  const [masterParticipantFilter, setMasterParticipantFilter] = useState<"active" | "trash" | "all">("active");
   const [masterParticipantDraftLookup, setMasterParticipantDraftLookup] = useState({ name: "", plate: "", birthYear: "", gender: "", club: "" });
   const [participantSpecialCategoryDraft, setParticipantSpecialCategoryDraft] = useState<string>("");
   const [participantSpecialCategoryDraftDirty, setParticipantSpecialCategoryDraftDirty] = useState(false);
@@ -1325,117 +1325,41 @@ export default function App() {
     const name = participant?.name || "diesen Teilnehmer";
     const eventCount = Array.isArray(participant?.events) ? participant.events.length : 0;
     const message = eventCount > 0
-      ? `${name} in den Papierkorb verschieben? Der Teilnehmer wird aus der Hauptdatenbank und aus ${eventCount} Rennen/Rennserien ausgeblendet und kann wiederhergestellt werden.`
-      : `${name} in den Papierkorb verschieben? Der Teilnehmer kann wiederhergestellt werden.`;
+      ? `${name} endgültig löschen? Der Teilnehmer wird aus der Hauptdatenbank und aus ${eventCount} Rennen/Rennserien entfernt. Bereits gespeicherte Motos und Resultate bleiben als historische Renndaten erhalten.`
+      : `${name} endgültig löschen? Der Teilnehmer wird sofort aus der Hauptdatenbank entfernt.`;
     if (!window.confirm(message)) return;
 
-    await exportBackup("Sicherheitsbackup vor Teilnehmer-Papierkorb");
+    await exportBackup("Sicherheitsbackup vor Teilnehmer-Löschen");
+
     const all = (await db.table("riders").toArray()).map(normalizeRider);
     const key = getMasterParticipantKey(participant.raw || participant);
-    const masterId = String(participant.masterId || participant.raw?.masterId || participant.raw?.id || "");
-    const idsToTrash = all
-      .filter((rider: any) => {
-        if (rider.deletedAt) return false;
-        const riderId = String(rider.id || "");
-        const riderMasterId = String(rider.masterId || "");
-        return getMasterParticipantKey(rider) === key || (!!masterId && (riderId === masterId || riderMasterId === masterId));
-      })
-      .map((rider: any) => rider.id)
-      .filter(Boolean);
-
-    if (idsToTrash.length === 0) return;
-    const deletedAt = new Date().toISOString();
-    for (const id of idsToTrash) {
-      await db.table("riders").update(id, { deletedAt });
-    }
-    setSelectedMasterParticipant(null);
-    setEditingRider(null);
-    setLastEditedMasterParticipantId("");
-    await loadMasterParticipants();
-    await loadAllRiders();
-    await loadRaceRiders();
-    setBackupMessage(`Teilnehmer in Papierkorb verschoben: ${name}`);
-  };
-
-  const getDeletedMasterParticipantGroups = () => {
-    const groups = new Map<string, any>();
-    masterParticipants.filter((rider: any) => !!rider.deletedAt).forEach((rider: any) => {
-      const key = getMasterParticipantKey(rider);
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
-          raw: rider,
-          masterId: rider.eventId === "master" ? rider.id : rider.masterId || rider.id,
-          name: rider.name || "",
-          plate: rider.plate || "",
-          birthYear: rider.birthYear || rider.jahrgang || "",
-          gender: rider.gender || rider.geschlecht || "",
-          club: rider.club || "",
-          deletedAt: rider.deletedAt,
-          count: 0,
-        });
-      }
-      groups.get(key).count += 1;
+    const stableId = String(participant.participantId || participant.masterId || participant.raw?.participantId || participant.raw?.masterId || participant.raw?.id || "");
+    const linkedRows = all.filter((rider: any) => {
+      const riderId = String(rider.id || "");
+      const riderStableId = String(rider.participantId || rider.masterId || "");
+      return getMasterParticipantKey(rider) === key || (!!stableId && (riderId === stableId || riderStableId === stableId));
     });
-    return Array.from(groups.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  };
 
-  const restoreMasterParticipantGroup = async (participant: any) => {
-    const all = (await db.table("riders").toArray()).map(normalizeRider);
-    const key = getMasterParticipantKey(participant.raw || participant);
-    const masterId = String(participant.masterId || participant.raw?.masterId || participant.raw?.id || "");
-    const idsToRestore = all
-      .filter((rider: any) => {
-        const riderId = String(rider.id || "");
-        const riderMasterId = String(rider.masterId || "");
-        return rider.deletedAt && (getMasterParticipantKey(rider) === key || (!!masterId && (riderId === masterId || riderMasterId === masterId)));
-      })
-      .map((rider: any) => rider.id)
-      .filter(Boolean);
-    for (const id of idsToRestore) {
-      await db.table("riders").update(id, { deletedAt: "" });
+    if (linkedRows.length === 0) return;
+
+    // Vor dem Löschen die gespeicherten Renn-Snapshots mit Kategorie/Stammdaten
+    // anreichern, damit historische Resultate auch ohne Teilnehmer-Datensatz lesbar bleiben.
+    const representative = participant.raw || linkedRows.find((rider: any) => rider.eventId === "master") || linkedRows[0];
+    if (representative) {
+      await syncRiderSharedDataToAllReferences(representative, representative);
     }
-    await loadMasterParticipants();
-    await loadAllRiders();
-    await loadRaceRiders();
-    setBackupMessage(`Teilnehmer wiederhergestellt: ${participant.name}`);
-  };
 
-  const permanentlyDeleteMasterParticipantGroup = async (participant: any) => {
-    if (!window.confirm(`${participant.name} endgültig aus dem Papierkorb löschen?`)) return;
-    await exportBackup("Sicherheitsbackup vor endgültigem Teilnehmer-Löschen");
-    const all = (await db.table("riders").toArray()).map(normalizeRider);
-    const key = getMasterParticipantKey(participant.raw || participant);
-    const idsToDelete = all.filter((rider: any) => rider.deletedAt && getMasterParticipantKey(rider) === key).map((rider: any) => rider.id).filter(Boolean);
-    if (idsToDelete.length) await db.table("riders").bulkDelete(idsToDelete);
-    await loadMasterParticipants();
-    await loadAllRiders();
-    await loadRaceRiders();
-    setBackupMessage(`Teilnehmer endgültig gelöscht: ${participant.name}`);
-  };
+    const idsToDelete = linkedRows.map((rider: any) => rider.id).filter(Boolean);
+    if (idsToDelete.length > 0) await db.table("riders").bulkDelete(idsToDelete);
 
-  const permanentlyDeleteAllTrashParticipants = async () => {
-    const all = (await db.table("riders").toArray()).map(normalizeRider);
-    const idsToDelete = all
-      .filter((rider: any) => !!rider.deletedAt)
-      .map((rider: any) => rider.id)
-      .filter(Boolean);
-    if (idsToDelete.length === 0) {
-      window.alert("Der Papierkorb ist leer.");
-      return;
-    }
-    if (!window.confirm(`Alle Teilnehmer im Papierkorb endgültig löschen?
-
-Es werden ${idsToDelete.length} Papierkorb-Einträge dauerhaft entfernt. Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`)) return;
-    await exportBackup("Sicherheitsbackup vor Papierkorb-Leerung");
-    await db.table("riders").bulkDelete(idsToDelete);
     setSelectedMasterParticipant(null);
     setEditingRider(null);
     setLastEditedMasterParticipantId("");
     await loadMasterParticipants();
     await loadAllRiders();
     await loadRaceRiders();
-    setBackupMessage(`Papierkorb geleert: ${idsToDelete.length} Teilnehmer-Einträge endgültig gelöscht.`);
+    setBackupMessage(`Teilnehmer endgültig gelöscht: ${name}. Historische Resultate bleiben erhalten.`);
+    addChangeLog(`Teilnehmer endgültig gelöscht: ${name}`);
   };
 
   const clearAllParticipantRowsAndRaceData = async () => {
@@ -2675,14 +2599,44 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   }, []);
 
   useEffect(() => {
-    signOutFirebaseAuth();
-    setFirebaseAuthSession(null);
-    setPublicLiveRace(null);
-    setPublicLiveMeta(null);
-    setOnlineStorageAuthToken("");
-    setFirebaseAuthPassword("");
-    setFirebaseAuthMessage("");
-    setFirebaseAuthReady(true);
+    let cancelled = false;
+
+    const restoreAuthSession = async () => {
+      try {
+        const session = await getValidFirebaseAuthSession();
+        if (cancelled) return;
+
+        if (session?.idToken && canEnterEnvironment(session.localId)) {
+          setFirebaseAuthSession(session);
+          setOnlineStorageAuthToken(session.idToken);
+          setFirebaseAuthEmail(session.email || "");
+          setFirebaseAuthMessage(`Anmeldung wiederhergestellt: ${session.email || "Firebase Benutzer"}`);
+        } else {
+          if (session?.idToken) signOutFirebaseAuth();
+          setFirebaseAuthSession(null);
+          setOnlineStorageAuthToken("");
+          setFirebaseAuthMessage("");
+        }
+      } catch {
+        if (!cancelled) {
+          setFirebaseAuthSession(null);
+          setOnlineStorageAuthToken("");
+          setFirebaseAuthMessage("");
+        }
+      } finally {
+        if (!cancelled) {
+          setPublicLiveRace(null);
+          setPublicLiveMeta(null);
+          setFirebaseAuthPassword("");
+          setFirebaseAuthReady(true);
+        }
+      }
+    };
+
+    void restoreAuthSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -3251,10 +3205,10 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
 
     return combined.sort((a: any, b: any) => {
       if (a.total !== b.total) return a.total - b.total;
-      if ((a.runs?.[2] || 99) !== (b.runs?.[2] || 99))
-        return (a.runs?.[2] || 99) - (b.runs?.[2] || 99);
-      if ((a.runs?.[1] || 99) !== (b.runs?.[1] || 99))
-        return (a.runs?.[1] || 99) - (b.runs?.[1] || 99);
+      const run2Diff = getRunSortValue(a.runs?.[2]) - getRunSortValue(b.runs?.[2]);
+      if (run2Diff !== 0) return run2Diff;
+      const run1Diff = getRunSortValue(a.runs?.[1]) - getRunSortValue(b.runs?.[1]);
+      if (run1Diff !== 0) return run1Diff;
       return String(a.name).localeCompare(String(b.name), "de-CH", {
         numeric: true,
       });
@@ -4143,6 +4097,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     run: number,
     heatIndex: number,
     data: any[],
+    meta?: { confirmed?: boolean },
   ) => {
     if (raceClosed) {
       alert(
@@ -4159,15 +4114,16 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     setResults(nextResults);
 
     const startList = heats?.[cat]?.[run]?.[heatIndex] || [];
-    if (isCompleteRaceEntry(startList, data)) {
+    if (isCompleteRaceEntry(startList, data) && meta?.confirmed) {
+      addChangeLog(`${selectedRace}: ${getRoundDisplayName(`Moto ${run + 1}`)} Race ${getSequentialHeatRaceNumber(heats, cat, run, heatIndex)} bestätigt`);
       activateNextRaceFlowEntryAfter(entryKey, nextResults, finalResults);
-      triggerAutomaticLivePublish(650);
+      triggerAutomaticLivePublish(350);
     } else {
       setActiveRaceEntryKey(entryKey);
     }
   };
 
-  const saveFinalResult = (cat: string, roundName: string, data: any[]) => {
+  const saveFinalResult = (cat: string, roundName: string, data: any[], meta?: { confirmed?: boolean }) => {
     if (raceClosed) {
       alert(
         "Dieses Race ist abgeschlossen. Resultate können erst nach dem Wiederöffnen geändert werden.",
@@ -4183,9 +4139,10 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     setFinalResults(nextFinalResults);
 
     const startList = finals?.[cat]?.[roundName] || [];
-    if (isCompleteRaceEntry(startList, data)) {
+    if (isCompleteRaceEntry(startList, data) && meta?.confirmed) {
+      addChangeLog(`${selectedRace}: ${getRoundDisplayName(roundName)} bestätigt`);
       activateNextRaceFlowEntryAfter(entryKey, results, nextFinalResults);
-      triggerAutomaticLivePublish(650);
+      triggerAutomaticLivePublish(350);
     } else {
       setActiveRaceEntryKey(entryKey);
     }
@@ -4212,23 +4169,36 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
     Object.keys(results).forEach((key) => {
       const parts = key.split("_");
+      const heatIndex = Number(parts[parts.length - 1]);
       const run = Number(parts[parts.length - 2]);
+      const resultCategory = parts.slice(0, -2).join("_");
       const heatResult = results[key] || [];
 
       heatResult.forEach((r: any) => {
-        const riderData = riders.find(
+        const liveRider = riders.find(
           (x: any) => String(x.id) === String(r.riderId),
         );
-        if (!riderData || riderData.category !== cat) return;
+        const storedHeatRider = ((heats?.[resultCategory]?.[run]?.[heatIndex] || []) as any[]).find(
+          (x: any) => String(x.id ?? x.riderId) === String(r.riderId),
+        );
+        const riderData = liveRider || storedHeatRider || r;
+        const originalCategory = String(riderData?.category || r?.category || "").trim();
+
+        if (originalCategory) {
+          if (originalCategory !== cat) return;
+        } else if (resultCategory !== getEffectiveHeatCategory(cat)) {
+          return;
+        }
 
         if (!scores[r.riderId]) {
           scores[r.riderId] = {
             riderId: r.riderId,
-            name: r.name,
-            plate: r.plate,
+            name: r.name || riderData?.name || "",
+            plate: r.plate || riderData?.plate || "",
             club: r.club || riderData?.club || "",
             birthYear: getRiderBirthYear(riderData || r) || "",
             gender: getRiderGenderCode(riderData || r) || "",
+            category: originalCategory || cat,
             total: 0,
             runs: {},
           };
@@ -4246,14 +4216,16 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       });
     });
 
-    return Object.values(scores).sort((a: any, b: any) => {
-      const penaltyDiff = getRacePenaltyOrder(a) - getRacePenaltyOrder(b);
-      if (penaltyDiff !== 0) return penaltyDiff;
-      if (a.total !== b.total) return a.total - b.total;
-      const run2Diff = getRunSortValue(a.runs[2]) - getRunSortValue(b.runs[2]);
-      if (run2Diff !== 0) return run2Diff;
-      return getRunSortValue(a.runs[1]) - getRunSortValue(b.runs[1]);
-    });
+    return Object.values(scores)
+      .filter((row: any) => shouldIncludePreliminaryRankingRow(row.runs))
+      .sort((a: any, b: any) => {
+        const penaltyDiff = getRacePenaltyOrder(a) - getRacePenaltyOrder(b);
+        if (penaltyDiff !== 0) return penaltyDiff;
+        if (a.total !== b.total) return a.total - b.total;
+        const run2Diff = getRunSortValue(a.runs[2]) - getRunSortValue(b.runs[2]);
+        if (run2Diff !== 0) return run2Diff;
+        return getRunSortValue(a.runs[1]) - getRunSortValue(b.runs[1]);
+      });
   };
 
   const createMainFinalsFromSemifinals = async () => {
@@ -5368,8 +5340,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
             heat={heat}
             value={result}
             allowUnlimitedSelectedRows={roundName === "Manuelle Rangliste"}
-            onSave={(data: any[]) =>
-              saveFinalResult(cat, roundName, data)
+            onSave={(data: any[], meta) =>
+              saveFinalResult(cat, roundName, data, meta)
             }
           />
         </div>
@@ -10945,8 +10917,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                               <HeatInput
                                 heat={group}
                                 value={result}
-                                onSave={(data: any[]) =>
-                                  saveHeatResult(cat, runIndex, heatIndex, data)
+                                onSave={(data: any[], meta) =>
+                                  saveHeatResult(cat, runIndex, heatIndex, data, meta)
                                 }
                               />
                             </div>
