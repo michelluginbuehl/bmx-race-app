@@ -6772,41 +6772,48 @@ Bitte wählen:
     );
   };
 
-  const restoreOnlineBackupData = async (backup: any, sourceLabel: string, updatedAt?: string) => {
+  const restoreOnlineBackupData = async (
+    backup: any,
+    sourceLabel: string,
+    updatedAt?: string,
+    options: { skipDetailsConfirmation?: boolean } = {},
+  ) => {
     const validation = validateBackupStructure(backup);
     if (!validation.ok) {
       throw new Error(validation.message || "Die Online-Daten sind unvollständig oder beschädigt.");
     }
 
     const backupSummary = getBackupSummary(backup);
-    const detailsOk = window.confirm(
-      `${sourceLabel} wirklich wiederherstellen?
+    if (!options.skipDetailsConfirmation) {
+      const detailsOk = window.confirm(
+        `${sourceLabel} wirklich wiederherstellen?
 
 ` +
-        `Inhalt des gewählten Online-Stands:
+          `Inhalt des gewählten Online-Stands:
 ` +
-        `- Rennen/Rennserien: ${backupSummary.eventCount}
+          `- Rennen/Rennserien: ${backupSummary.eventCount}
 ` +
-        `- Teilnehmer: ${backupSummary.riderCount}
+          `- Teilnehmer: ${backupSummary.riderCount}
 ` +
-        `- Gespeicherte App-Daten: ${backupSummary.appDataCount}
+          `- Gespeicherte App-Daten: ${backupSummary.appDataCount}
 ` +
-        `- Backup-Version: ${backupSummary.backupVersion}
+          `- Backup-Version: ${backupSummary.backupVersion}
 ` +
-        `- Datenstruktur-Version: ${backupSummary.dataSchemaVersion}
+          `- Datenstruktur-Version: ${backupSummary.dataSchemaVersion}
 ` +
-        `- Stand: ${updatedAt ? formatDateTime(updatedAt) : formatDateTime(backupSummary.exportedAt)}
+          `- Stand: ${updatedAt ? formatDateTime(updatedAt) : formatDateTime(backupSummary.exportedAt)}
 
 ` +
-        `Ablauf:
+          `Ablauf:
 ` +
-        `1. Die App erstellt zuerst automatisch ein Datei-Sicherheitsbackup der aktuellen lokalen Daten.
+          `1. Die App erstellt zuerst automatisch ein Datei-Sicherheitsbackup der aktuellen lokalen Daten.
 ` +
-        `2. Danach werden die lokalen Daten vollständig durch diesen Online-Stand ersetzt.
+          `2. Danach werden die lokalen Daten vollständig durch diesen Online-Stand ersetzt.
 ` +
-        `3. Die App wird anschliessend neu geladen.`,
-    );
-    if (!detailsOk) return false;
+          `3. Die App wird anschliessend neu geladen.`,
+      );
+      if (!detailsOk) return false;
+    }
 
     await exportBackup(`Sicherheitsbackup vor Laden von ${sourceLabel}`);
     await restoreFullAppBackupEnvelope(backup);
@@ -6815,8 +6822,8 @@ Bitte wählen:
     return true;
   };
 
-  const loadOnlineFullAppState = async () => {
-    const authSession = await ensureOnlineAuthSession("Letzten Online-Stand laden");
+  const loadOnlineFullAppState = async (options: { startup?: boolean } = {}) => {
+    const authSession = await ensureOnlineAuthSession("Letzten Online-Stand laden", !options.startup);
     if (!authSession) return;
 
     try {
@@ -6827,25 +6834,69 @@ Bitte wählen:
       if (!statusResult.ok) throw new Error(statusResult.message || "Online-Status konnte nicht geprüft werden.");
       if (!statusResult.exists) {
         setOnlineStorageMessage("Keine Online-Daten vorhanden.");
-        window.alert("Es sind noch keine Online-Daten vorhanden. Bitte zuerst Online speichern.");
+        if (!options.startup) window.alert("Es sind noch keine Online-Daten vorhanden. Bitte zuerst Online speichern.");
         return;
       }
 
-      const canLoad = await askBeforeReplacingLocalData("letzten Online-Speicherstand", statusResult.updatedAt);
-      if (!canLoad) {
-        setOnlineStorageMessage("");
-        return;
+      if (options.startup) {
+        const loadNow = window.confirm(
+          `Letzten Online-Stand laden?
+
+Stand: ${statusResult.updatedAt ? formatDateTime(statusResult.updatedAt) : "unbekannt"}
+Version: ${statusResult.appVersion || "-"}
+
+Ja = letzten Online-Stand laden
+Abbrechen = lokale Daten auf diesem Gerät behalten
+
+Vor dem Laden wird automatisch ein Sicherheitsbackup der lokalen Daten erstellt.`,
+        );
+        if (!loadNow) {
+          setOnlineStorageMessage("Lokaler Stand beibehalten. Online-Stand wurde beim Start nicht geladen.");
+          return;
+        }
+      } else {
+        const canLoad = await askBeforeReplacingLocalData("letzten Online-Speicherstand", statusResult.updatedAt);
+        if (!canLoad) {
+          setOnlineStorageMessage("");
+          return;
+        }
       }
 
       setOnlineStorageMessage("Letzter Online-Speicherstand wird geladen ...");
       const result = await loadOnlineAppState();
       if (!result.ok) throw new Error(result.message || "Online-Laden fehlgeschlagen.");
-      await restoreOnlineBackupData(result.data, "Letzter Online-Speicherstand", result.updatedAt || statusResult.updatedAt);
+      await restoreOnlineBackupData(
+        result.data,
+        "Letzter Online-Speicherstand",
+        result.updatedAt || statusResult.updatedAt,
+        { skipDetailsConfirmation: Boolean(options.startup) },
+      );
     } catch (error: any) {
       setOnlineStorageMessage("");
-      window.alert(`Online-Laden fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+      if (!options.startup) {
+        window.alert(`Online-Laden fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+      } else {
+        setFirebaseAuthMessage(`Online-Stand konnte beim Start nicht geladen werden: ${error?.message || "Unbekannter Fehler"}`);
+      }
     }
   };
+
+  useEffect(() => {
+    if (!firebaseAuthReady || !firebaseAuthSession?.idToken || isPublicLiveView) return;
+
+    const promptKey = IS_TEST_ENVIRONMENT
+      ? "bmx_test_online_startup_prompt_done_v1"
+      : "bmx_online_startup_prompt_done_v1";
+
+    try {
+      if (window.sessionStorage.getItem(promptKey) === "1") return;
+      window.sessionStorage.setItem(promptKey, "1");
+    } catch {
+      // Ohne SessionStorage darf die Startabfrage trotzdem einmal in dieser Render-Sitzung laufen.
+    }
+
+    void loadOnlineFullAppState({ startup: true });
+  }, [firebaseAuthReady, firebaseAuthSession?.idToken, isPublicLiveView]);
 
   const createNamedOnlineBackup = async () => {
     const authSession = await ensureOnlineAuthSession("Online-Backup erstellen");
@@ -7132,6 +7183,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         .map((rider: any) => getPublicRiderRow(rider)),
     }));
 
+    const publicMotoFlowOrder = new Map(
+      getRaceFlowEntries()
+        .filter((entry) => entry.type === "moto")
+        .map((entry, index) => [entry.key, index + 1]),
+    );
+
     const publicMotos = sortCategories(Object.keys(heats || {})).map((category) => ({
       category,
       runs: [0, 1, 2].map((runIndex) => ({
@@ -7139,8 +7196,11 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         races: ((heats?.[category]?.[runIndex] || []) as any[]).map((group: any[], heatIndex: number) => {
           const key = `${category}_${runIndex}_${heatIndex}`;
           const result = Array.isArray(results?.[key]) ? results[key] : [];
+          const flowKey = getMotoEntryKey(category, runIndex, heatIndex);
           return {
-            flowKey: getMotoEntryKey(category, runIndex, heatIndex),
+            flowKey,
+            flowOrder: publicMotoFlowOrder.get(flowKey) || 9999,
+            motoNumber: runIndex + 1,
             raceNumber: getSequentialHeatRaceNumber(heats, category, runIndex, heatIndex),
             resultComplete: isCompleteRaceEntry(group || [], result),
             startList: [...(group || [])]
@@ -7765,18 +7825,41 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     );
   };
 
-  const getPublicLiveFlowState = (liveRace: any) => {
+  const getOrderedPublicLiveMotoEntries = (liveRace: any) => {
     const entries: any[] = [];
+
     (liveRace?.motos || []).forEach((categoryBlock: any) => {
-      (categoryBlock.runs || []).forEach((run: any) => {
+      (categoryBlock.runs || []).forEach((run: any, runIndex: number) => {
+        const parsedMotoNumber = Number(String(run?.name || "").match(/\d+/)?.[0] || runIndex + 1);
         (run.races || []).forEach((race: any) => {
           entries.push({
-            key: race.flowKey || `moto|${categoryBlock.category}|${run.name}|${race.raceNumber}`,
-            complete: Boolean(race.resultComplete || ((race.results || []).length > 0 && (race.results || []).length >= (race.startList || []).length)),
+            category: String(categoryBlock.category || "Ohne Kategorie"),
+            runName: String(run.name || `Moto ${parsedMotoNumber}`),
+            motoNumber: Number(race.motoNumber || parsedMotoNumber || runIndex + 1),
+            raceNumber: Number(race.raceNumber || 0),
+            flowOrder: Number(race.flowOrder || 0),
+            race,
           });
         });
       });
     });
+
+    return entries.sort((a, b) => {
+      const aExplicit = a.flowOrder > 0 ? a.flowOrder : Number.MAX_SAFE_INTEGER;
+      const bExplicit = b.flowOrder > 0 ? b.flowOrder : Number.MAX_SAFE_INTEGER;
+      if (aExplicit !== bExplicit && (a.flowOrder > 0 || b.flowOrder > 0)) return aExplicit - bExplicit;
+      if (a.motoNumber !== b.motoNumber) return a.motoNumber - b.motoNumber;
+      if (a.raceNumber !== b.raceNumber) return a.raceNumber - b.raceNumber;
+      return getCategorySortValue(a.category) - getCategorySortValue(b.category);
+    });
+  };
+
+  const getPublicLiveFlowState = (liveRace: any) => {
+    const entries: any[] = getOrderedPublicLiveMotoEntries(liveRace).map((entry: any) => ({
+      key: entry.race.flowKey || `moto|${entry.category}|${entry.runName}|${entry.raceNumber}`,
+      complete: Boolean(entry.race.resultComplete || ((entry.race.results || []).length > 0 && (entry.race.results || []).length >= (entry.race.startList || []).length)),
+    }));
+
     (liveRace?.finals || []).forEach((categoryBlock: any) => {
       (categoryBlock.rounds || []).forEach((round: any) => {
         entries.push({
@@ -7785,6 +7868,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         });
       });
     });
+
     const openEntries = entries.filter((entry) => !entry.complete);
     return {
       activeKey: openEntries[0]?.key || "",
