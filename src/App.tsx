@@ -5373,34 +5373,28 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       const saved = finalResults[`${finalCategory}_${roundName}`] || [];
       saved.forEach((r: any) => {
         if (hasDnsStatus(r)) return;
-        const riderData = riders.find(
-          (x: any) => String(x.id) === String(r.riderId),
-        );
-        if (!riderData || riderData.category !== cat) return;
+        const preliminary = getRanking(cat).find(
+          (x: any) => String(x.riderId) === String(r.riderId),
+        ) as any;
+        const riderData =
+          riders.find((x: any) => String(x.id) === String(r.riderId)) ||
+          preliminary ||
+          r;
+        const riderCategory = String(riderData?.category || r?.category || preliminary?.category || "").trim();
+        if (riderCategory && riderCategory !== cat) return;
+
         ranking.push({
           rank: globalRank,
-          name: r.name,
-          plate: r.plate,
+          name: r.name || riderData?.name || "",
+          plate: r.plate || riderData?.plate || "",
           riderId: String(r.riderId),
           club: r.club || riderData?.club || "",
           birthYear: getRiderBirthYear(riderData || r) || "",
           gender: getRiderGenderCode(riderData || r) || "",
           roundName,
-          run1: (
-            getRanking(cat).find(
-              (x: any) => String(x.riderId) === String(r.riderId),
-            ) as any
-          )?.runs?.[0],
-          run2: (
-            getRanking(cat).find(
-              (x: any) => String(x.riderId) === String(r.riderId),
-            ) as any
-          )?.runs?.[1],
-          run3: (
-            getRanking(cat).find(
-              (x: any) => String(x.riderId) === String(r.riderId),
-            ) as any
-          )?.runs?.[2],
+          run1: preliminary?.runs?.[0],
+          run2: preliminary?.runs?.[1],
+          run3: preliminary?.runs?.[2],
           finalRun: r.status || r.rank,
           status: r.status || "",
           overallNoPoints: false,
@@ -7256,7 +7250,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     const publicLiveHasRaceProgram = publicMotos.length > 0 || publicFinals.length > 0;
 
     return {
-      publicVersion: 3,
+      publicVersion: 4,
       active: true,
       refreshSeconds: publicLiveHasRaceProgram ? PUBLIC_LIVE_RACE_REFRESH_SECONDS : PUBLIC_LIVE_STARTLIST_REFRESH_SECONDS,
       hasRaceProgram: publicLiveHasRaceProgram,
@@ -8212,49 +8206,69 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
             {publicLiveRace.motos?.length > 0 && (
               <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18 }}>
-                <h2 style={{ ...sectionTitleStyle, fontSize: publicLiveMobile ? 20 : sectionTitleStyle.fontSize }}>Motos / Laufeinteilung</h2>
-                <div style={{ display: "grid", gap: publicLiveMobile ? 10 : 16 }}>
-                  {publicLiveRace.motos.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
-                    <div key={`live-moto-${categoryBlock.category}`} style={publicLivePanelStyle}>
-                      <h3 style={{ margin: "0 0 10px", color: colors.title, fontSize: publicLiveMobile ? 18 : undefined }}>{categoryBlock.category}</h3>
-                      <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 14 }}>
-                        {categoryBlock.runs.map((run: any) => (
-                          <div key={`${categoryBlock.category}-${run.name}`}>
-                            <h4 style={{ margin: "4px 0 8px", color: colors.title, fontSize: publicLiveMobile ? 15 : undefined }}>{run.name}</h4>
-                            <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
-                              {run.races.map((race: any) => (
-                                <div
-                                  id={getPublicLiveDomId("live-flow", race.flowKey)}
-                                  key={`${categoryBlock.category}-${run.name}-${race.raceNumber}`}
-                                  style={getPublicLiveRaceCardStyle(race.flowKey, liveFlowState, Boolean(race.resultComplete))}
-                                >
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                                    <strong style={{ color: colors.title }}>Race {race.raceNumber}</strong>
-                                    <span style={getPublicLiveFlowLabelStyle(race.flowKey, liveFlowState, Boolean(race.resultComplete))}>
-                                      {getPublicLiveFlowLabel(race.flowKey, liveFlowState, Boolean(race.resultComplete))}
-                                    </span>
-                                  </div>
-                                  <div style={{ marginTop: 10 }}>
-                                    {(race.results || []).length > 0 ? (
-                                      <>
-                                        <strong>Resultat</strong>
-                                        {renderPublicLiveRows(race.results || [], "result")}
-                                      </>
-                                    ) : (
-                                      <>
-                                        <strong>Startliste / Gate</strong>
-                                        {renderPublicLiveRows(race.startList || [], "start")}
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
+                <h2 style={{ ...sectionTitleStyle, fontSize: publicLiveMobile ? 20 : sectionTitleStyle.fontSize }}>Motos / Rennreihenfolge</h2>
+                <div style={{ color: colors.muted, fontWeight: 850, marginBottom: 12, fontSize: publicLiveMobile ? 12 : 14 }}>
+                  Die Läufe werden exakt in der Reihenfolge des Rennprogramms angezeigt. Abgeschlossene Motos sind kompakt; „läuft jetzt“ und „ans Gate“ bleiben hervorgehoben.
+                </div>
+                <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
+                  {getOrderedPublicLiveMotoEntries(publicLiveRace)
+                    .filter((entry: any) => publicLiveCategoryVisible(entry.category))
+                    .map((entry: any) => {
+                      const race = entry.race;
+                      const complete = Boolean(
+                        race.resultComplete ||
+                        ((race.results || []).length > 0 && (race.results || []).length >= (race.startList || []).length),
+                      );
+                      const activeOrGate =
+                        race.flowKey === liveFlowState.activeKey ||
+                        race.flowKey === liveFlowState.gateKey;
+                      return (
+                        <details
+                          id={getPublicLiveDomId("live-flow", race.flowKey)}
+                          key={`${race.flowKey || `${entry.category}-${entry.runName}-${entry.raceNumber}`}-${complete ? "done" : "open"}-${activeOrGate ? "focus" : "normal"}`}
+                          defaultOpen={!complete || activeOrGate}
+                          style={getPublicLiveRaceCardStyle(race.flowKey, liveFlowState, complete)}
+                        >
+                          <summary
+                            style={{
+                              cursor: "pointer",
+                              listStyle: "none",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 8,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <div>
+                              <strong style={{ color: colors.title, fontSize: publicLiveMobile ? 16 : 18 }}>
+                                {entry.runName} · Race {entry.raceNumber}
+                              </strong>
+                              <div style={{ marginTop: 2, color: colors.muted, fontWeight: 900, fontSize: publicLiveMobile ? 12 : 13 }}>
+                                {entry.category}
+                              </div>
                             </div>
+                            <span style={getPublicLiveFlowLabelStyle(race.flowKey, liveFlowState, complete)}>
+                              {getPublicLiveFlowLabel(race.flowKey, liveFlowState, complete)}
+                            </span>
+                          </summary>
+
+                          <div style={{ marginTop: 10 }}>
+                            {(race.results || []).length > 0 ? (
+                              <>
+                                <strong>Resultat</strong>
+                                {renderPublicLiveRows(race.results || [], "result")}
+                              </>
+                            ) : (
+                              <>
+                                <strong>Startliste / Gate</strong>
+                                {renderPublicLiveRows(race.startList || [], "start")}
+                              </>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                        </details>
+                      );
+                    })}
                 </div>
               </div>
             )}
@@ -8736,7 +8750,6 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   if (appShellView === "masterParticipants") {
     const activeGroups = getMasterParticipantGroups();
-    const trashGroups = getDeletedMasterParticipantGroups();
     const masterDuplicateInfo = getDuplicateMasterParticipantInfo(activeGroups);
     const masterDuplicateKeys = masterDuplicateInfo.keys;
     const masterSearchQuery = masterParticipantSearch.trim().toLowerCase();
@@ -8746,17 +8759,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         .toLowerCase()
         .includes(masterSearchQuery);
     };
-    const visibleActiveGroups = activeGroups.filter((participant: any) => {
-      if (!participantMatches(participant)) return false;
-      if (masterParticipantFilter === "trash") return false;
-      return true;
-    });
-    const visibleTrashGroups = trashGroups.filter((participant: any) => {
-      if (!participantMatches(participant)) return false;
-      if (masterParticipantFilter === "active") return false;
-      return true;
-    });
-    const groups = visibleActiveGroups;
+    const groups = activeGroups.filter((participant: any) => participantMatches(participant));
     const participantEntrySuggestions = getParticipantEntrySuggestions();
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
@@ -8813,20 +8816,6 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {[
-                ["active", "Aktiv"],
-                ["trash", "Papierkorb"],
-                ["all", "Alle"],
-              ].map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setMasterParticipantFilter(value as any)}
-                  style={masterParticipantFilter === value ? compactPrimaryButtonStyle : compactHomeButtonStyle}
-                >
-                  {label}
-                </button>
-              ))}
               <button
                 type="button"
                 onClick={deleteAllMasterParticipants}
@@ -8836,7 +8825,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </button>
             </div>
           </div>
-          {masterDuplicateKeys.size > 0 && masterParticipantFilter !== "trash" && (
+          {masterDuplicateKeys.size > 0 && (
             <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: 12, border: `1px solid ${colors.warningBorder}`, borderLeft: `5px solid ${colors.warningBorder}`, background: colors.warningBg, color: "#92400e", fontWeight: 900 }}>
               ⚠ Mögliche Dubletten erkannt: {masterDuplicateKeys.size} Einträge in {masterDuplicateInfo.groupCount} Gruppe(n). Ähnliche Teilnehmer sind jeweils gleichfarbig markiert. Mit „Teilnehmer OK“ bestätigte Einträge werden nicht mehr als Dublette angezeigt.
             </div>
@@ -8892,9 +8881,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             )}
           </div>
-          {groups.length === 0 && masterParticipantFilter !== "trash" ? (
+          {groups.length === 0 ? (
             <div style={{ color: colors.muted }}>Keine passenden aktiven Teilnehmer gefunden.</div>
-          ) : masterParticipantFilter === "trash" ? null : (
+          ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                 <thead>
@@ -8985,34 +8974,6 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 </tbody>
               </table>
             </div>
-          )}
-
-          {visibleTrashGroups.length > 0 && (
-            <details open={masterParticipantFilter === "trash" || masterParticipantFilter === "all"} style={{ ...basePanelStyle, marginTop: 18, background: "#fff8f1" }}>
-              <summary style={{ cursor: "pointer", fontWeight: 900, color: colors.title }}>
-                Papierkorb gelöschte Teilnehmer ({visibleTrashGroups.length})
-              </summary>
-              <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ color: colors.muted, fontSize: 13 }}>
-                  Papierkorb-Einträge können einzeln wiederhergestellt oder gesammelt endgültig gelöscht werden.
-                </div>
-                <button type="button" onClick={permanentlyDeleteAllTrashParticipants} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>
-                  Papierkorb leeren
-                </button>
-              </div>
-              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                {visibleTrashGroups.map((participant: any) => (
-                  <div key={participant.key} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center", padding: 10, border: `1px solid ${colors.cardBorder}`, borderRadius: 10, background: "#fff" }}>
-                    <div>
-                      <strong>{participant.name}</strong> · #{participant.plate || "-"} · {participant.birthYear || "-"} | {participant.gender || "-"}
-                      <div style={{ color: colors.muted, fontSize: 12 }}>Einträge im Papierkorb: {participant.count}</div>
-                    </div>
-                    <button type="button" onClick={() => restoreMasterParticipantGroup(participant)} style={smallGhostButtonStyle}>Wiederherstellen</button>
-                    <button type="button" onClick={() => permanentlyDeleteMasterParticipantGroup(participant)} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>Endgültig löschen</button>
-                  </div>
-                ))}
-              </div>
-            </details>
           )}
 
           {selectedMasterParticipant && (
