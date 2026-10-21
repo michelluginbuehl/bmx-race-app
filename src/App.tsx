@@ -10,10 +10,11 @@ import { APP_CHANGE_NOTE, APP_NAME, APP_VERSION, DATA_SCHEMA_VERSION, STORAGE_KE
 import { appStorage, encodeStorageValue } from "./utils/storage";
 import { createBackupEnvelope, getBackupSummary, normalizeManagedEventsForSchema, validateBackupStructure } from "./utils/backup";
 import { createOnlineBackup, deactivatePublicLiveRace, getOnlineAppStateStatus, isOnlineStorageConfigured, listOnlineBackups, loadOnlineAppState, loadOnlineBackup, loadPublicLiveRace, loadPublicLiveRaceMeta, publishPublicLiveRace, saveOnlineAppState, setOnlineStorageAuthToken, type OnlineBackupListItem, type OnlineStorageStatus, type PublicLiveRaceMeta, type PublicLiveRacePayload } from "./utils/onlineStorage";
-import { refreshFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
+import { getValidFirebaseAuthSession, refreshFirebaseAuthSession, signInWithFirebaseEmailPassword, signOutFirebaseAuth, type FirebaseAuthSession } from "./utils/onlineAuth";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import { shouldIncludePreliminaryRankingRow } from "./utils/raceRanking";
 
 const ROW_HEIGHT = 30;
 const BOX_MIN_HEIGHT = 8 * ROW_HEIGHT + 34;
@@ -200,7 +201,6 @@ export default function App() {
   const [showEventParticipantCreateForm, setShowEventParticipantCreateForm] = useState(false);
   const eventParticipantCreateKnownIdsRef = useRef<Set<string>>(new Set());
   const [masterParticipantSearch, setMasterParticipantSearch] = useState("");
-  const [masterParticipantFilter, setMasterParticipantFilter] = useState<"active" | "trash" | "all">("active");
   const [masterParticipantDraftLookup, setMasterParticipantDraftLookup] = useState({ name: "", plate: "", birthYear: "", gender: "", club: "" });
   const [participantSpecialCategoryDraft, setParticipantSpecialCategoryDraft] = useState<string>("");
   const [participantSpecialCategoryDraftDirty, setParticipantSpecialCategoryDraftDirty] = useState(false);
@@ -1325,117 +1325,41 @@ export default function App() {
     const name = participant?.name || "diesen Teilnehmer";
     const eventCount = Array.isArray(participant?.events) ? participant.events.length : 0;
     const message = eventCount > 0
-      ? `${name} in den Papierkorb verschieben? Der Teilnehmer wird aus der Hauptdatenbank und aus ${eventCount} Rennen/Rennserien ausgeblendet und kann wiederhergestellt werden.`
-      : `${name} in den Papierkorb verschieben? Der Teilnehmer kann wiederhergestellt werden.`;
+      ? `${name} endgültig löschen? Der Teilnehmer wird aus der Hauptdatenbank und aus ${eventCount} Rennen/Rennserien entfernt. Bereits gespeicherte Motos und Resultate bleiben als historische Renndaten erhalten.`
+      : `${name} endgültig löschen? Der Teilnehmer wird sofort aus der Hauptdatenbank entfernt.`;
     if (!window.confirm(message)) return;
 
-    await exportBackup("Sicherheitsbackup vor Teilnehmer-Papierkorb");
+    await exportBackup("Sicherheitsbackup vor Teilnehmer-Löschen");
+
     const all = (await db.table("riders").toArray()).map(normalizeRider);
     const key = getMasterParticipantKey(participant.raw || participant);
-    const masterId = String(participant.masterId || participant.raw?.masterId || participant.raw?.id || "");
-    const idsToTrash = all
-      .filter((rider: any) => {
-        if (rider.deletedAt) return false;
-        const riderId = String(rider.id || "");
-        const riderMasterId = String(rider.masterId || "");
-        return getMasterParticipantKey(rider) === key || (!!masterId && (riderId === masterId || riderMasterId === masterId));
-      })
-      .map((rider: any) => rider.id)
-      .filter(Boolean);
-
-    if (idsToTrash.length === 0) return;
-    const deletedAt = new Date().toISOString();
-    for (const id of idsToTrash) {
-      await db.table("riders").update(id, { deletedAt });
-    }
-    setSelectedMasterParticipant(null);
-    setEditingRider(null);
-    setLastEditedMasterParticipantId("");
-    await loadMasterParticipants();
-    await loadAllRiders();
-    await loadRaceRiders();
-    setBackupMessage(`Teilnehmer in Papierkorb verschoben: ${name}`);
-  };
-
-  const getDeletedMasterParticipantGroups = () => {
-    const groups = new Map<string, any>();
-    masterParticipants.filter((rider: any) => !!rider.deletedAt).forEach((rider: any) => {
-      const key = getMasterParticipantKey(rider);
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
-          raw: rider,
-          masterId: rider.eventId === "master" ? rider.id : rider.masterId || rider.id,
-          name: rider.name || "",
-          plate: rider.plate || "",
-          birthYear: rider.birthYear || rider.jahrgang || "",
-          gender: rider.gender || rider.geschlecht || "",
-          club: rider.club || "",
-          deletedAt: rider.deletedAt,
-          count: 0,
-        });
-      }
-      groups.get(key).count += 1;
+    const stableId = String(participant.participantId || participant.masterId || participant.raw?.participantId || participant.raw?.masterId || participant.raw?.id || "");
+    const linkedRows = all.filter((rider: any) => {
+      const riderId = String(rider.id || "");
+      const riderStableId = String(rider.participantId || rider.masterId || "");
+      return getMasterParticipantKey(rider) === key || (!!stableId && (riderId === stableId || riderStableId === stableId));
     });
-    return Array.from(groups.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  };
 
-  const restoreMasterParticipantGroup = async (participant: any) => {
-    const all = (await db.table("riders").toArray()).map(normalizeRider);
-    const key = getMasterParticipantKey(participant.raw || participant);
-    const masterId = String(participant.masterId || participant.raw?.masterId || participant.raw?.id || "");
-    const idsToRestore = all
-      .filter((rider: any) => {
-        const riderId = String(rider.id || "");
-        const riderMasterId = String(rider.masterId || "");
-        return rider.deletedAt && (getMasterParticipantKey(rider) === key || (!!masterId && (riderId === masterId || riderMasterId === masterId)));
-      })
-      .map((rider: any) => rider.id)
-      .filter(Boolean);
-    for (const id of idsToRestore) {
-      await db.table("riders").update(id, { deletedAt: "" });
+    if (linkedRows.length === 0) return;
+
+    // Vor dem Löschen die gespeicherten Renn-Snapshots mit Kategorie/Stammdaten
+    // anreichern, damit historische Resultate auch ohne Teilnehmer-Datensatz lesbar bleiben.
+    const representative = participant.raw || linkedRows.find((rider: any) => rider.eventId === "master") || linkedRows[0];
+    if (representative) {
+      await syncRiderSharedDataToAllReferences(representative, representative);
     }
-    await loadMasterParticipants();
-    await loadAllRiders();
-    await loadRaceRiders();
-    setBackupMessage(`Teilnehmer wiederhergestellt: ${participant.name}`);
-  };
 
-  const permanentlyDeleteMasterParticipantGroup = async (participant: any) => {
-    if (!window.confirm(`${participant.name} endgültig aus dem Papierkorb löschen?`)) return;
-    await exportBackup("Sicherheitsbackup vor endgültigem Teilnehmer-Löschen");
-    const all = (await db.table("riders").toArray()).map(normalizeRider);
-    const key = getMasterParticipantKey(participant.raw || participant);
-    const idsToDelete = all.filter((rider: any) => rider.deletedAt && getMasterParticipantKey(rider) === key).map((rider: any) => rider.id).filter(Boolean);
-    if (idsToDelete.length) await db.table("riders").bulkDelete(idsToDelete);
-    await loadMasterParticipants();
-    await loadAllRiders();
-    await loadRaceRiders();
-    setBackupMessage(`Teilnehmer endgültig gelöscht: ${participant.name}`);
-  };
+    const idsToDelete = linkedRows.map((rider: any) => rider.id).filter(Boolean);
+    if (idsToDelete.length > 0) await db.table("riders").bulkDelete(idsToDelete);
 
-  const permanentlyDeleteAllTrashParticipants = async () => {
-    const all = (await db.table("riders").toArray()).map(normalizeRider);
-    const idsToDelete = all
-      .filter((rider: any) => !!rider.deletedAt)
-      .map((rider: any) => rider.id)
-      .filter(Boolean);
-    if (idsToDelete.length === 0) {
-      window.alert("Der Papierkorb ist leer.");
-      return;
-    }
-    if (!window.confirm(`Alle Teilnehmer im Papierkorb endgültig löschen?
-
-Es werden ${idsToDelete.length} Papierkorb-Einträge dauerhaft entfernt. Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`)) return;
-    await exportBackup("Sicherheitsbackup vor Papierkorb-Leerung");
-    await db.table("riders").bulkDelete(idsToDelete);
     setSelectedMasterParticipant(null);
     setEditingRider(null);
     setLastEditedMasterParticipantId("");
     await loadMasterParticipants();
     await loadAllRiders();
     await loadRaceRiders();
-    setBackupMessage(`Papierkorb geleert: ${idsToDelete.length} Teilnehmer-Einträge endgültig gelöscht.`);
+    setBackupMessage(`Teilnehmer endgültig gelöscht: ${name}. Historische Resultate bleiben erhalten.`);
+    addChangeLog(`Teilnehmer endgültig gelöscht: ${name}`);
   };
 
   const clearAllParticipantRowsAndRaceData = async () => {
@@ -1498,7 +1422,7 @@ Es werden ${idsToDelete.length} Papierkorb-Einträge dauerhaft entfernt. Vorher 
       !window.confirm(
         `Alle Teilnehmer endgültig löschen?
 
-Es werden ${all.length} Teilnehmerdatensätze aus Hauptdatenbank, Rennen/Rennserien und Papierkorb gelöscht. Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten werden ebenfalls entfernt, damit beim späteren Import/Hinzufügen keine alten Teilnehmer mehr als vorhanden erkannt werden.
+Es werden ${all.length} Teilnehmerdatensätze aus Hauptdatenbank und Rennen/Rennserien gelöscht. Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten werden ebenfalls entfernt, damit beim späteren Import/Hinzufügen keine alten Teilnehmer mehr als vorhanden erkannt werden.
 
 Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
       )
@@ -1509,7 +1433,6 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
     setSelectedMasterParticipant(null);
     setEditingRider(null);
     setLastEditedMasterParticipantId("");
-    setMasterParticipantFilter("active");
     setAllRiders([]);
     setRiders([]);
     setHeats({});
@@ -2675,14 +2598,44 @@ Vorher wird automatisch ein komplettes Sicherheitsbackup erstellt.`,
   }, []);
 
   useEffect(() => {
-    signOutFirebaseAuth();
-    setFirebaseAuthSession(null);
-    setPublicLiveRace(null);
-    setPublicLiveMeta(null);
-    setOnlineStorageAuthToken("");
-    setFirebaseAuthPassword("");
-    setFirebaseAuthMessage("");
-    setFirebaseAuthReady(true);
+    let cancelled = false;
+
+    const restoreAuthSession = async () => {
+      try {
+        const session = await getValidFirebaseAuthSession();
+        if (cancelled) return;
+
+        if (session?.idToken && canEnterEnvironment(session.localId)) {
+          setFirebaseAuthSession(session);
+          setOnlineStorageAuthToken(session.idToken);
+          setFirebaseAuthEmail(session.email || "");
+          setFirebaseAuthMessage(`Anmeldung wiederhergestellt: ${session.email || "Firebase Benutzer"}`);
+        } else {
+          if (session?.idToken) signOutFirebaseAuth();
+          setFirebaseAuthSession(null);
+          setOnlineStorageAuthToken("");
+          setFirebaseAuthMessage("");
+        }
+      } catch {
+        if (!cancelled) {
+          setFirebaseAuthSession(null);
+          setOnlineStorageAuthToken("");
+          setFirebaseAuthMessage("");
+        }
+      } finally {
+        if (!cancelled) {
+          setPublicLiveRace(null);
+          setPublicLiveMeta(null);
+          setFirebaseAuthPassword("");
+          setFirebaseAuthReady(true);
+        }
+      }
+    };
+
+    void restoreAuthSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -3251,10 +3204,10 @@ Zugehörige Motos, Resultate, Finals und Gesamtwertungsdaten dieses Eintrags wer
 
     return combined.sort((a: any, b: any) => {
       if (a.total !== b.total) return a.total - b.total;
-      if ((a.runs?.[2] || 99) !== (b.runs?.[2] || 99))
-        return (a.runs?.[2] || 99) - (b.runs?.[2] || 99);
-      if ((a.runs?.[1] || 99) !== (b.runs?.[1] || 99))
-        return (a.runs?.[1] || 99) - (b.runs?.[1] || 99);
+      const run2Diff = getRunSortValue(a.runs?.[2]) - getRunSortValue(b.runs?.[2]);
+      if (run2Diff !== 0) return run2Diff;
+      const run1Diff = getRunSortValue(a.runs?.[1]) - getRunSortValue(b.runs?.[1]);
+      if (run1Diff !== 0) return run1Diff;
       return String(a.name).localeCompare(String(b.name), "de-CH", {
         numeric: true,
       });
@@ -4143,6 +4096,7 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     run: number,
     heatIndex: number,
     data: any[],
+    meta?: { confirmed?: boolean },
   ) => {
     if (raceClosed) {
       alert(
@@ -4159,15 +4113,16 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     setResults(nextResults);
 
     const startList = heats?.[cat]?.[run]?.[heatIndex] || [];
-    if (isCompleteRaceEntry(startList, data)) {
+    if (isCompleteRaceEntry(startList, data) && meta?.confirmed) {
+      addChangeLog(`${selectedRace}: ${getRoundDisplayName(`Moto ${run + 1}`)} Race ${getSequentialHeatRaceNumber(heats, cat, run, heatIndex)} bestätigt`);
       activateNextRaceFlowEntryAfter(entryKey, nextResults, finalResults);
-      triggerAutomaticLivePublish(650);
+      triggerAutomaticLivePublish(350);
     } else {
       setActiveRaceEntryKey(entryKey);
     }
   };
 
-  const saveFinalResult = (cat: string, roundName: string, data: any[]) => {
+  const saveFinalResult = (cat: string, roundName: string, data: any[], meta?: { confirmed?: boolean }) => {
     if (raceClosed) {
       alert(
         "Dieses Race ist abgeschlossen. Resultate können erst nach dem Wiederöffnen geändert werden.",
@@ -4183,9 +4138,10 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
     setFinalResults(nextFinalResults);
 
     const startList = finals?.[cat]?.[roundName] || [];
-    if (isCompleteRaceEntry(startList, data)) {
+    if (isCompleteRaceEntry(startList, data) && meta?.confirmed) {
+      addChangeLog(`${selectedRace}: ${getRoundDisplayName(roundName)} bestätigt`);
       activateNextRaceFlowEntryAfter(entryKey, results, nextFinalResults);
-      triggerAutomaticLivePublish(650);
+      triggerAutomaticLivePublish(350);
     } else {
       setActiveRaceEntryKey(entryKey);
     }
@@ -4212,23 +4168,36 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
 
     Object.keys(results).forEach((key) => {
       const parts = key.split("_");
+      const heatIndex = Number(parts[parts.length - 1]);
       const run = Number(parts[parts.length - 2]);
+      const resultCategory = parts.slice(0, -2).join("_");
       const heatResult = results[key] || [];
 
       heatResult.forEach((r: any) => {
-        const riderData = riders.find(
+        const liveRider = riders.find(
           (x: any) => String(x.id) === String(r.riderId),
         );
-        if (!riderData || riderData.category !== cat) return;
+        const storedHeatRider = ((heats?.[resultCategory]?.[run]?.[heatIndex] || []) as any[]).find(
+          (x: any) => String(x.id ?? x.riderId) === String(r.riderId),
+        );
+        const riderData = liveRider || storedHeatRider || r;
+        const originalCategory = String(riderData?.category || r?.category || "").trim();
+
+        if (originalCategory) {
+          if (originalCategory !== cat) return;
+        } else if (resultCategory !== getEffectiveHeatCategory(cat)) {
+          return;
+        }
 
         if (!scores[r.riderId]) {
           scores[r.riderId] = {
             riderId: r.riderId,
-            name: r.name,
-            plate: r.plate,
+            name: r.name || riderData?.name || "",
+            plate: r.plate || riderData?.plate || "",
             club: r.club || riderData?.club || "",
             birthYear: getRiderBirthYear(riderData || r) || "",
             gender: getRiderGenderCode(riderData || r) || "",
+            category: originalCategory || cat,
             total: 0,
             runs: {},
           };
@@ -4246,14 +4215,16 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       });
     });
 
-    return Object.values(scores).sort((a: any, b: any) => {
-      const penaltyDiff = getRacePenaltyOrder(a) - getRacePenaltyOrder(b);
-      if (penaltyDiff !== 0) return penaltyDiff;
-      if (a.total !== b.total) return a.total - b.total;
-      const run2Diff = getRunSortValue(a.runs[2]) - getRunSortValue(b.runs[2]);
-      if (run2Diff !== 0) return run2Diff;
-      return getRunSortValue(a.runs[1]) - getRunSortValue(b.runs[1]);
-    });
+    return Object.values(scores)
+      .filter((row: any) => shouldIncludePreliminaryRankingRow(row.runs))
+      .sort((a: any, b: any) => {
+        const penaltyDiff = getRacePenaltyOrder(a) - getRacePenaltyOrder(b);
+        if (penaltyDiff !== 0) return penaltyDiff;
+        if (a.total !== b.total) return a.total - b.total;
+        const run2Diff = getRunSortValue(a.runs[2]) - getRunSortValue(b.runs[2]);
+        if (run2Diff !== 0) return run2Diff;
+        return getRunSortValue(a.runs[1]) - getRunSortValue(b.runs[1]);
+      });
   };
 
   const createMainFinalsFromSemifinals = async () => {
@@ -5368,8 +5339,8 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
             heat={heat}
             value={result}
             allowUnlimitedSelectedRows={roundName === "Manuelle Rangliste"}
-            onSave={(data: any[]) =>
-              saveFinalResult(cat, roundName, data)
+            onSave={(data: any[], meta) =>
+              saveFinalResult(cat, roundName, data, meta)
             }
           />
         </div>
@@ -5401,34 +5372,28 @@ Teilnehmer trotzdem nachträglich hinzufügen? Die gespeicherten Resultate/Final
       const saved = finalResults[`${finalCategory}_${roundName}`] || [];
       saved.forEach((r: any) => {
         if (hasDnsStatus(r)) return;
-        const riderData = riders.find(
-          (x: any) => String(x.id) === String(r.riderId),
-        );
-        if (!riderData || riderData.category !== cat) return;
+        const preliminary = getRanking(cat).find(
+          (x: any) => String(x.riderId) === String(r.riderId),
+        ) as any;
+        const riderData =
+          riders.find((x: any) => String(x.id) === String(r.riderId)) ||
+          preliminary ||
+          r;
+        const riderCategory = String(riderData?.category || r?.category || preliminary?.category || "").trim();
+        if (riderCategory && riderCategory !== cat) return;
+
         ranking.push({
           rank: globalRank,
-          name: r.name,
-          plate: r.plate,
+          name: r.name || riderData?.name || "",
+          plate: r.plate || riderData?.plate || "",
           riderId: String(r.riderId),
           club: r.club || riderData?.club || "",
           birthYear: getRiderBirthYear(riderData || r) || "",
           gender: getRiderGenderCode(riderData || r) || "",
           roundName,
-          run1: (
-            getRanking(cat).find(
-              (x: any) => String(x.riderId) === String(r.riderId),
-            ) as any
-          )?.runs?.[0],
-          run2: (
-            getRanking(cat).find(
-              (x: any) => String(x.riderId) === String(r.riderId),
-            ) as any
-          )?.runs?.[1],
-          run3: (
-            getRanking(cat).find(
-              (x: any) => String(x.riderId) === String(r.riderId),
-            ) as any
-          )?.runs?.[2],
+          run1: preliminary?.runs?.[0],
+          run2: preliminary?.runs?.[1],
+          run3: preliminary?.runs?.[2],
           finalRun: r.status || r.rank,
           status: r.status || "",
           overallNoPoints: false,
@@ -6800,41 +6765,48 @@ Bitte wählen:
     );
   };
 
-  const restoreOnlineBackupData = async (backup: any, sourceLabel: string, updatedAt?: string) => {
+  const restoreOnlineBackupData = async (
+    backup: any,
+    sourceLabel: string,
+    updatedAt?: string,
+    options: { skipDetailsConfirmation?: boolean } = {},
+  ) => {
     const validation = validateBackupStructure(backup);
     if (!validation.ok) {
       throw new Error(validation.message || "Die Online-Daten sind unvollständig oder beschädigt.");
     }
 
     const backupSummary = getBackupSummary(backup);
-    const detailsOk = window.confirm(
-      `${sourceLabel} wirklich wiederherstellen?
+    if (!options.skipDetailsConfirmation) {
+      const detailsOk = window.confirm(
+        `${sourceLabel} wirklich wiederherstellen?
 
 ` +
-        `Inhalt des gewählten Online-Stands:
+          `Inhalt des gewählten Online-Stands:
 ` +
-        `- Rennen/Rennserien: ${backupSummary.eventCount}
+          `- Rennen/Rennserien: ${backupSummary.eventCount}
 ` +
-        `- Teilnehmer: ${backupSummary.riderCount}
+          `- Teilnehmer: ${backupSummary.riderCount}
 ` +
-        `- Gespeicherte App-Daten: ${backupSummary.appDataCount}
+          `- Gespeicherte App-Daten: ${backupSummary.appDataCount}
 ` +
-        `- Backup-Version: ${backupSummary.backupVersion}
+          `- Backup-Version: ${backupSummary.backupVersion}
 ` +
-        `- Datenstruktur-Version: ${backupSummary.dataSchemaVersion}
+          `- Datenstruktur-Version: ${backupSummary.dataSchemaVersion}
 ` +
-        `- Stand: ${updatedAt ? formatDateTime(updatedAt) : formatDateTime(backupSummary.exportedAt)}
+          `- Stand: ${updatedAt ? formatDateTime(updatedAt) : formatDateTime(backupSummary.exportedAt)}
 
 ` +
-        `Ablauf:
+          `Ablauf:
 ` +
-        `1. Die App erstellt zuerst automatisch ein Datei-Sicherheitsbackup der aktuellen lokalen Daten.
+          `1. Die App erstellt zuerst automatisch ein Datei-Sicherheitsbackup der aktuellen lokalen Daten.
 ` +
-        `2. Danach werden die lokalen Daten vollständig durch diesen Online-Stand ersetzt.
+          `2. Danach werden die lokalen Daten vollständig durch diesen Online-Stand ersetzt.
 ` +
-        `3. Die App wird anschliessend neu geladen.`,
-    );
-    if (!detailsOk) return false;
+          `3. Die App wird anschliessend neu geladen.`,
+      );
+      if (!detailsOk) return false;
+    }
 
     await exportBackup(`Sicherheitsbackup vor Laden von ${sourceLabel}`);
     await restoreFullAppBackupEnvelope(backup);
@@ -6843,8 +6815,8 @@ Bitte wählen:
     return true;
   };
 
-  const loadOnlineFullAppState = async () => {
-    const authSession = await ensureOnlineAuthSession("Letzten Online-Stand laden");
+  const loadOnlineFullAppState = async (options: { startup?: boolean } = {}) => {
+    const authSession = await ensureOnlineAuthSession("Letzten Online-Stand laden", !options.startup);
     if (!authSession) return;
 
     try {
@@ -6855,25 +6827,69 @@ Bitte wählen:
       if (!statusResult.ok) throw new Error(statusResult.message || "Online-Status konnte nicht geprüft werden.");
       if (!statusResult.exists) {
         setOnlineStorageMessage("Keine Online-Daten vorhanden.");
-        window.alert("Es sind noch keine Online-Daten vorhanden. Bitte zuerst Online speichern.");
+        if (!options.startup) window.alert("Es sind noch keine Online-Daten vorhanden. Bitte zuerst Online speichern.");
         return;
       }
 
-      const canLoad = await askBeforeReplacingLocalData("letzten Online-Speicherstand", statusResult.updatedAt);
-      if (!canLoad) {
-        setOnlineStorageMessage("");
-        return;
+      if (options.startup) {
+        const loadNow = window.confirm(
+          `Letzten Online-Stand laden?
+
+Stand: ${statusResult.updatedAt ? formatDateTime(statusResult.updatedAt) : "unbekannt"}
+Version: ${statusResult.appVersion || "-"}
+
+Ja = letzten Online-Stand laden
+Abbrechen = lokale Daten auf diesem Gerät behalten
+
+Vor dem Laden wird automatisch ein Sicherheitsbackup der lokalen Daten erstellt.`,
+        );
+        if (!loadNow) {
+          setOnlineStorageMessage("Lokaler Stand beibehalten. Online-Stand wurde beim Start nicht geladen.");
+          return;
+        }
+      } else {
+        const canLoad = await askBeforeReplacingLocalData("letzten Online-Speicherstand", statusResult.updatedAt);
+        if (!canLoad) {
+          setOnlineStorageMessage("");
+          return;
+        }
       }
 
       setOnlineStorageMessage("Letzter Online-Speicherstand wird geladen ...");
       const result = await loadOnlineAppState();
       if (!result.ok) throw new Error(result.message || "Online-Laden fehlgeschlagen.");
-      await restoreOnlineBackupData(result.data, "Letzter Online-Speicherstand", result.updatedAt || statusResult.updatedAt);
+      await restoreOnlineBackupData(
+        result.data,
+        "Letzter Online-Speicherstand",
+        result.updatedAt || statusResult.updatedAt,
+        { skipDetailsConfirmation: Boolean(options.startup) },
+      );
     } catch (error: any) {
       setOnlineStorageMessage("");
-      window.alert(`Online-Laden fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+      if (!options.startup) {
+        window.alert(`Online-Laden fehlgeschlagen: ${error?.message || "Unbekannter Fehler"}`);
+      } else {
+        setFirebaseAuthMessage(`Online-Stand konnte beim Start nicht geladen werden: ${error?.message || "Unbekannter Fehler"}`);
+      }
     }
   };
+
+  useEffect(() => {
+    if (!firebaseAuthReady || !firebaseAuthSession?.idToken || isPublicLiveView) return;
+
+    const promptKey = IS_TEST_ENVIRONMENT
+      ? "bmx_test_online_startup_prompt_done_v1"
+      : "bmx_online_startup_prompt_done_v1";
+
+    try {
+      if (window.sessionStorage.getItem(promptKey) === "1") return;
+      window.sessionStorage.setItem(promptKey, "1");
+    } catch {
+      // Ohne SessionStorage darf die Startabfrage trotzdem einmal in dieser Render-Sitzung laufen.
+    }
+
+    void loadOnlineFullAppState({ startup: true });
+  }, [firebaseAuthReady, firebaseAuthSession?.idToken, isPublicLiveView]);
 
   const createNamedOnlineBackup = async () => {
     const authSession = await ensureOnlineAuthSession("Online-Backup erstellen");
@@ -7160,6 +7176,12 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         .map((rider: any) => getPublicRiderRow(rider)),
     }));
 
+    const publicMotoFlowOrder = new Map(
+      getRaceFlowEntries()
+        .filter((entry) => entry.type === "moto")
+        .map((entry, index) => [entry.key, index + 1]),
+    );
+
     const publicMotos = sortCategories(Object.keys(heats || {})).map((category) => ({
       category,
       runs: [0, 1, 2].map((runIndex) => ({
@@ -7167,8 +7189,11 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         races: ((heats?.[category]?.[runIndex] || []) as any[]).map((group: any[], heatIndex: number) => {
           const key = `${category}_${runIndex}_${heatIndex}`;
           const result = Array.isArray(results?.[key]) ? results[key] : [];
+          const flowKey = getMotoEntryKey(category, runIndex, heatIndex);
           return {
-            flowKey: getMotoEntryKey(category, runIndex, heatIndex),
+            flowKey,
+            flowOrder: publicMotoFlowOrder.get(flowKey) || 9999,
+            motoNumber: runIndex + 1,
             raceNumber: getSequentialHeatRaceNumber(heats, category, runIndex, heatIndex),
             resultComplete: isCompleteRaceEntry(group || [], result),
             startList: [...(group || [])]
@@ -7224,7 +7249,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     const publicLiveHasRaceProgram = publicMotos.length > 0 || publicFinals.length > 0;
 
     return {
-      publicVersion: 3,
+      publicVersion: 4,
       active: true,
       refreshSeconds: publicLiveHasRaceProgram ? PUBLIC_LIVE_RACE_REFRESH_SECONDS : PUBLIC_LIVE_STARTLIST_REFRESH_SECONDS,
       hasRaceProgram: publicLiveHasRaceProgram,
@@ -7793,18 +7818,41 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
     );
   };
 
-  const getPublicLiveFlowState = (liveRace: any) => {
+  const getOrderedPublicLiveMotoEntries = (liveRace: any) => {
     const entries: any[] = [];
+
     (liveRace?.motos || []).forEach((categoryBlock: any) => {
-      (categoryBlock.runs || []).forEach((run: any) => {
+      (categoryBlock.runs || []).forEach((run: any, runIndex: number) => {
+        const parsedMotoNumber = Number(String(run?.name || "").match(/\d+/)?.[0] || runIndex + 1);
         (run.races || []).forEach((race: any) => {
           entries.push({
-            key: race.flowKey || `moto|${categoryBlock.category}|${run.name}|${race.raceNumber}`,
-            complete: Boolean(race.resultComplete || ((race.results || []).length > 0 && (race.results || []).length >= (race.startList || []).length)),
+            category: String(categoryBlock.category || "Ohne Kategorie"),
+            runName: String(run.name || `Moto ${parsedMotoNumber}`),
+            motoNumber: Number(race.motoNumber || parsedMotoNumber || runIndex + 1),
+            raceNumber: Number(race.raceNumber || 0),
+            flowOrder: Number(race.flowOrder || 0),
+            race,
           });
         });
       });
     });
+
+    return entries.sort((a, b) => {
+      const aExplicit = a.flowOrder > 0 ? a.flowOrder : Number.MAX_SAFE_INTEGER;
+      const bExplicit = b.flowOrder > 0 ? b.flowOrder : Number.MAX_SAFE_INTEGER;
+      if (aExplicit !== bExplicit && (a.flowOrder > 0 || b.flowOrder > 0)) return aExplicit - bExplicit;
+      if (a.motoNumber !== b.motoNumber) return a.motoNumber - b.motoNumber;
+      if (a.raceNumber !== b.raceNumber) return a.raceNumber - b.raceNumber;
+      return getCategorySortValue(a.category) - getCategorySortValue(b.category);
+    });
+  };
+
+  const getPublicLiveFlowState = (liveRace: any) => {
+    const entries: any[] = getOrderedPublicLiveMotoEntries(liveRace).map((entry: any) => ({
+      key: entry.race.flowKey || `moto|${entry.category}|${entry.runName}|${entry.raceNumber}`,
+      complete: Boolean(entry.race.resultComplete || ((entry.race.results || []).length > 0 && (entry.race.results || []).length >= (entry.race.startList || []).length)),
+    }));
+
     (liveRace?.finals || []).forEach((categoryBlock: any) => {
       (categoryBlock.rounds || []).forEach((round: any) => {
         entries.push({
@@ -7813,6 +7861,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         });
       });
     });
+
     const openEntries = entries.filter((entry) => !entry.complete);
     return {
       activeKey: openEntries[0]?.key || "",
@@ -8156,49 +8205,69 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
             {publicLiveRace.motos?.length > 0 && (
               <div style={{ ...publicLiveBasePanelStyle, marginBottom: publicLiveMobile ? 10 : 18 }}>
-                <h2 style={{ ...sectionTitleStyle, fontSize: publicLiveMobile ? 20 : sectionTitleStyle.fontSize }}>Motos / Laufeinteilung</h2>
-                <div style={{ display: "grid", gap: publicLiveMobile ? 10 : 16 }}>
-                  {publicLiveRace.motos.filter((categoryBlock: any) => publicLiveCategoryVisible(categoryBlock.category)).map((categoryBlock: any) => (
-                    <div key={`live-moto-${categoryBlock.category}`} style={publicLivePanelStyle}>
-                      <h3 style={{ margin: "0 0 10px", color: colors.title, fontSize: publicLiveMobile ? 18 : undefined }}>{categoryBlock.category}</h3>
-                      <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 14 }}>
-                        {categoryBlock.runs.map((run: any) => (
-                          <div key={`${categoryBlock.category}-${run.name}`}>
-                            <h4 style={{ margin: "4px 0 8px", color: colors.title, fontSize: publicLiveMobile ? 15 : undefined }}>{run.name}</h4>
-                            <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
-                              {run.races.map((race: any) => (
-                                <div
-                                  id={getPublicLiveDomId("live-flow", race.flowKey)}
-                                  key={`${categoryBlock.category}-${run.name}-${race.raceNumber}`}
-                                  style={getPublicLiveRaceCardStyle(race.flowKey, liveFlowState, Boolean(race.resultComplete))}
-                                >
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                                    <strong style={{ color: colors.title }}>Race {race.raceNumber}</strong>
-                                    <span style={getPublicLiveFlowLabelStyle(race.flowKey, liveFlowState, Boolean(race.resultComplete))}>
-                                      {getPublicLiveFlowLabel(race.flowKey, liveFlowState, Boolean(race.resultComplete))}
-                                    </span>
-                                  </div>
-                                  <div style={{ marginTop: 10 }}>
-                                    {(race.results || []).length > 0 ? (
-                                      <>
-                                        <strong>Resultat</strong>
-                                        {renderPublicLiveRows(race.results || [], "result")}
-                                      </>
-                                    ) : (
-                                      <>
-                                        <strong>Startliste / Gate</strong>
-                                        {renderPublicLiveRows(race.startList || [], "start")}
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
+                <h2 style={{ ...sectionTitleStyle, fontSize: publicLiveMobile ? 20 : sectionTitleStyle.fontSize }}>Motos / Rennreihenfolge</h2>
+                <div style={{ color: colors.muted, fontWeight: 850, marginBottom: 12, fontSize: publicLiveMobile ? 12 : 14 }}>
+                  Die Läufe werden exakt in der Reihenfolge des Rennprogramms angezeigt. Abgeschlossene Motos sind kompakt; „läuft jetzt“ und „ans Gate“ bleiben hervorgehoben.
+                </div>
+                <div style={{ display: "grid", gap: publicLiveMobile ? 8 : 12 }}>
+                  {getOrderedPublicLiveMotoEntries(publicLiveRace)
+                    .filter((entry: any) => publicLiveCategoryVisible(entry.category))
+                    .map((entry: any) => {
+                      const race = entry.race;
+                      const complete = Boolean(
+                        race.resultComplete ||
+                        ((race.results || []).length > 0 && (race.results || []).length >= (race.startList || []).length),
+                      );
+                      const activeOrGate =
+                        race.flowKey === liveFlowState.activeKey ||
+                        race.flowKey === liveFlowState.gateKey;
+                      return (
+                        <details
+                          id={getPublicLiveDomId("live-flow", race.flowKey)}
+                          key={`${race.flowKey || `${entry.category}-${entry.runName}-${entry.raceNumber}`}-${complete ? "done" : "open"}-${activeOrGate ? "focus" : "normal"}`}
+                          open={!complete || activeOrGate}
+                          style={getPublicLiveRaceCardStyle(race.flowKey, liveFlowState, complete)}
+                        >
+                          <summary
+                            style={{
+                              cursor: "pointer",
+                              listStyle: "none",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 8,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <div>
+                              <strong style={{ color: colors.title, fontSize: publicLiveMobile ? 16 : 18 }}>
+                                {entry.runName} · Race {entry.raceNumber}
+                              </strong>
+                              <div style={{ marginTop: 2, color: colors.muted, fontWeight: 900, fontSize: publicLiveMobile ? 12 : 13 }}>
+                                {entry.category}
+                              </div>
                             </div>
+                            <span style={getPublicLiveFlowLabelStyle(race.flowKey, liveFlowState, complete)}>
+                              {getPublicLiveFlowLabel(race.flowKey, liveFlowState, complete)}
+                            </span>
+                          </summary>
+
+                          <div style={{ marginTop: 10 }}>
+                            {(race.results || []).length > 0 ? (
+                              <>
+                                <strong>Resultat</strong>
+                                {renderPublicLiveRows(race.results || [], "result")}
+                              </>
+                            ) : (
+                              <>
+                                <strong>Startliste / Gate</strong>
+                                {renderPublicLiveRows(race.startList || [], "start")}
+                              </>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                        </details>
+                      );
+                    })}
                 </div>
               </div>
             )}
@@ -8418,7 +8487,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               <span style={{ fontSize: 12, fontWeight: 800, opacity: 0.9 }}>Aktuellen Stand online sichern</span>
             </button>
             <button
-              onClick={loadOnlineFullAppState}
+              onClick={() => void loadOnlineFullAppState()}
               disabled={!isFirebaseSignedIn}
               style={!isFirebaseSignedIn ? { ...compactDisabledButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" } : { ...compactHomeButtonStyle, minHeight: 70, display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", textAlign: "left", padding: "12px 14px" }}
             >
@@ -8680,7 +8749,6 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
 
   if (appShellView === "masterParticipants") {
     const activeGroups = getMasterParticipantGroups();
-    const trashGroups = getDeletedMasterParticipantGroups();
     const masterDuplicateInfo = getDuplicateMasterParticipantInfo(activeGroups);
     const masterDuplicateKeys = masterDuplicateInfo.keys;
     const masterSearchQuery = masterParticipantSearch.trim().toLowerCase();
@@ -8690,17 +8758,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
         .toLowerCase()
         .includes(masterSearchQuery);
     };
-    const visibleActiveGroups = activeGroups.filter((participant: any) => {
-      if (!participantMatches(participant)) return false;
-      if (masterParticipantFilter === "trash") return false;
-      return true;
-    });
-    const visibleTrashGroups = trashGroups.filter((participant: any) => {
-      if (!participantMatches(participant)) return false;
-      if (masterParticipantFilter === "active") return false;
-      return true;
-    });
-    const groups = visibleActiveGroups;
+    const groups = activeGroups.filter((participant: any) => participantMatches(participant));
     const participantEntrySuggestions = getParticipantEntrySuggestions();
     return (
       <div style={{ padding: 20, fontFamily: "Arial, sans-serif", background: colors.pageGradient, minHeight: "100vh", color: colors.text, maxWidth: 1320, margin: "0 auto" }}>
@@ -8757,20 +8815,6 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {[
-                ["active", "Aktiv"],
-                ["trash", "Papierkorb"],
-                ["all", "Alle"],
-              ].map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setMasterParticipantFilter(value as any)}
-                  style={masterParticipantFilter === value ? compactPrimaryButtonStyle : compactHomeButtonStyle}
-                >
-                  {label}
-                </button>
-              ))}
               <button
                 type="button"
                 onClick={deleteAllMasterParticipants}
@@ -8780,7 +8824,7 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </button>
             </div>
           </div>
-          {masterDuplicateKeys.size > 0 && masterParticipantFilter !== "trash" && (
+          {masterDuplicateKeys.size > 0 && (
             <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: 12, border: `1px solid ${colors.warningBorder}`, borderLeft: `5px solid ${colors.warningBorder}`, background: colors.warningBg, color: "#92400e", fontWeight: 900 }}>
               ⚠ Mögliche Dubletten erkannt: {masterDuplicateKeys.size} Einträge in {masterDuplicateInfo.groupCount} Gruppe(n). Ähnliche Teilnehmer sind jeweils gleichfarbig markiert. Mit „Teilnehmer OK“ bestätigte Einträge werden nicht mehr als Dublette angezeigt.
             </div>
@@ -8836,9 +8880,9 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
               </div>
             )}
           </div>
-          {groups.length === 0 && masterParticipantFilter !== "trash" ? (
+          {groups.length === 0 ? (
             <div style={{ color: colors.muted }}>Keine passenden aktiven Teilnehmer gefunden.</div>
-          ) : masterParticipantFilter === "trash" ? null : (
+          ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
                 <thead>
@@ -8929,34 +8973,6 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                 </tbody>
               </table>
             </div>
-          )}
-
-          {visibleTrashGroups.length > 0 && (
-            <details open={masterParticipantFilter === "trash" || masterParticipantFilter === "all"} style={{ ...basePanelStyle, marginTop: 18, background: "#fff8f1" }}>
-              <summary style={{ cursor: "pointer", fontWeight: 900, color: colors.title }}>
-                Papierkorb gelöschte Teilnehmer ({visibleTrashGroups.length})
-              </summary>
-              <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ color: colors.muted, fontSize: 13 }}>
-                  Papierkorb-Einträge können einzeln wiederhergestellt oder gesammelt endgültig gelöscht werden.
-                </div>
-                <button type="button" onClick={permanentlyDeleteAllTrashParticipants} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>
-                  Papierkorb leeren
-                </button>
-              </div>
-              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                {visibleTrashGroups.map((participant: any) => (
-                  <div key={participant.key} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "center", padding: 10, border: `1px solid ${colors.cardBorder}`, borderRadius: 10, background: "#fff" }}>
-                    <div>
-                      <strong>{participant.name}</strong> · #{participant.plate || "-"} · {participant.birthYear || "-"} | {participant.gender || "-"}
-                      <div style={{ color: colors.muted, fontSize: 12 }}>Einträge im Papierkorb: {participant.count}</div>
-                    </div>
-                    <button type="button" onClick={() => restoreMasterParticipantGroup(participant)} style={smallGhostButtonStyle}>Wiederherstellen</button>
-                    <button type="button" onClick={() => permanentlyDeleteMasterParticipantGroup(participant)} style={{ ...smallGhostButtonStyle, color: colors.redBtn, borderColor: "#f2b8b5", background: "#fff5f5" }}>Endgültig löschen</button>
-                  </div>
-                ))}
-              </div>
-            </details>
           )}
 
           {selectedMasterParticipant && (
@@ -10945,8 +10961,8 @@ Achtung: Die aktuellen lokalen Daten auf diesem Gerät werden vollständig über
                               <HeatInput
                                 heat={group}
                                 value={result}
-                                onSave={(data: any[]) =>
-                                  saveHeatResult(cat, runIndex, heatIndex, data)
+                                onSave={(data: any[], meta) =>
+                                  saveHeatResult(cat, runIndex, heatIndex, data, meta)
                                 }
                               />
                             </div>

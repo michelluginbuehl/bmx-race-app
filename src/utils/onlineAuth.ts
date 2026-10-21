@@ -1,3 +1,4 @@
+import { IS_TEST_ENVIRONMENT } from "../config/environment";
 import { firebaseOnlineStorageConfig } from "../config/firebaseConfig";
 
 export type FirebaseAuthSession = {
@@ -9,16 +10,34 @@ export type FirebaseAuthSession = {
   signedInAt: string;
 };
 
-const AUTH_STORAGE_KEY = "bmx_firebase_auth_session_v1";
+const AUTH_STORAGE_KEY = IS_TEST_ENVIRONMENT ? "bmx_firebase_auth_session_test_v1" : "bmx_firebase_auth_session_v1";
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
-const persistSession = (_session: FirebaseAuthSession) => {
-  // Absichtlich keine dauerhafte Speicherung:
-  // Nach Neuladen, Schliessen der App oder neuem Öffnen ist wieder ein Login nötig.
+const persistSession = (session: FirebaseAuthSession) => {
+  try {
+    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Falls LocalStorage nicht verfügbar ist, bleibt die Anmeldung nur für die aktuelle Sitzung aktiv.
+  }
 };
 
 const readRawStoredSession = (): FirebaseAuthSession | null => {
-  return null;
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.idToken || !parsed?.refreshToken || !parsed?.expiresAt) return null;
+    return {
+      email: String(parsed.email || ""),
+      localId: String(parsed.localId || ""),
+      idToken: String(parsed.idToken || ""),
+      refreshToken: String(parsed.refreshToken || ""),
+      expiresAt: String(parsed.expiresAt || ""),
+      signedInAt: String(parsed.signedInAt || new Date().toISOString()),
+    };
+  } catch {
+    return null;
+  }
 };
 
 export const getStoredFirebaseAuthSession = () => readRawStoredSession();
